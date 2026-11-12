@@ -106,6 +106,7 @@ async def _run_once() -> dict[str, Any]:
     connection.row_factory = sqlite3.Row
     try:
         _initialize_database(connection, settings.INITIAL_CAPITAL_USD)
+        connection.commit()
         existing = connection.execute(
             "SELECT * FROM paper_orders WHERE run_key = ?", (SMOKE_RUN_KEY,)
         ).fetchone()
@@ -231,8 +232,7 @@ async def main() -> int:
     parser = argparse.ArgumentParser(
         description="Connect to Binance Spot Testnet and record one persistent PAPER smoke order."
     )
-    parser.add_argument("--json", action="store_true", help="Print the result as JSON.")
-    args = parser.parse_args()
+    parser.parse_args()
     try:
         result = await _run_once()
     except Exception as exc:
