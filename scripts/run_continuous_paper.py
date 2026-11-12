@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import math
+import os
 import signal
 import sqlite3
 from dataclasses import dataclass
@@ -10,11 +11,19 @@ from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 
+from mumin_trader.exchanges.binance.public_market_data import (
+    ALLOWED_SYMBOLS,
+    PublicMarketData,
+    simulated_fill_price,
+)
+
 QUOTE = "USDT"
-SYMBOL = "BTCUSDT"
+SYMBOLS = ("BTCUSDT", "ETHUSDT", "BNBUSDT")
 INITIAL_CASH = Decimal("50.00")
 MAX_TRADE = Decimal("5.00")
 RESERVE_PERCENT = Decimal("20")
+MAX_TOTAL_EXPOSURE = Decimal("40.00")
+MAX_OPEN_POSITIONS = 2
 FEE_RATE = Decimal("0.001")
 SLIPPAGE_BPS = Decimal("2")
 STOP_LOSS_PERCENT = Decimal("0.50")
@@ -22,6 +31,13 @@ TAKE_PROFIT_PERCENT = Decimal("1.00")
 MAX_DAILY_LOSS_PERCENT = Decimal("2.00")
 MAX_DRAWDOWN_PERCENT = Decimal("5.00")
 REPORT_SECONDS = 3600
+SYNTHETIC_SOURCE = "MOCK_SYNTHETIC"
+PUBLIC_SOURCE = "BINANCE_PUBLIC_MARKET_DATA"
+BASE_PRICES = {
+    "BTCUSDT": Decimal("60000"),
+    "ETHUSDT": Decimal("3000"),
+    "BNBUSDT": Decimal("600"),
+}
 
 
 @dataclass(frozen=True)
@@ -39,11 +55,11 @@ class TickResult:
 
 
 class ContinuousPaperBot:
-    """Offline, SQLite-persistent synthetic-market paper bot. No network or API keys."""
+    """Multi-symbol SQLite Paper engine. It never submits exchange orders."""
 
     def __init__(self, database: str, initial_cash: Decimal = INITIAL_CASH):
         self.database = database
-        self.initial_cash = initial_cash
+        self.initial_cash = Decimal(initial_cash)
         if database != ":memory:":
             Path(database).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -121,6 +137,30 @@ class ContinuousPaperBot:
                     loss_count INTEGER NOT NULL,
                     halt_reason TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS bot_market_ticks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tick INTEGER NOT NULL,
+                    symbol TEXT NOT NULL,
+                    price TEXT NOT NULL,
+                    bid TEXT NOT NULL,
+                    ask TEXT NOT NULL,
+                    data_source TEXT NOT NULL,
+                    candle_close_time_ms INTEGER,
+                    received_at_ms INTEGER NOT NULL,
+                    UNIQUE(tick, symbol)
+                );
+                CREATE INDEX IF NOT EXISTS idx_market_ticks_symbol_source
+                    ON bot_market_ticks(symbol, data_source, tick);
+                CREATE TABLE IF NOT EXISTS bot_portfolio_snapshots (
+                    tick INTEGER PRIMARY KEY,
+                    cash TEXT NOT NULL,
+                    equity TEXT NOT NULL,
+                    realized_pnl TEXT NOT NULL,
+                    unrealized_pnl TEXT NOT NULL,
+                    fees_paid TEXT NOT NULL,
+                    data_source TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
             """)
             row = db.execute("SELECT initial_cash FROM bot_account WHERE id=1").fetchone()
             if row is None:
@@ -132,38 +172,82 @@ class ContinuousPaperBot:
                      str(self.initial_cash), today, datetime.now(timezone.utc).isoformat()),
                 )
             elif Decimal(row["initial_cash"]) != self.initial_cash:
-                raise RuntimeError("Configured initial capital differs from stored ledger; refusing reset.")
+                raise RuntimeError(
+                    "Configured initial capital differs from stored ledger; refusing reset."
+                )
 
     @staticmethod
     def synthetic_price(tick: int) -> Decimal:
-        # Repeatable, explicitly artificial market path. It is not exchange data.
-        wave = 0.0022 * math.sin(tick / 5.0)
-        slow_wave = 0.0010 * math.sin(tick / 17.0)
-        micro = 0.00035 * math.sin(tick / 1.7)
-        return (Decimal("60000") * Decimal(str(1.0 + wave + slow_wave + micro))).quantize(
-            Decimal("0.01")
+        return ContinuousPaperBot.synthetic_price_for("BTCUSDT", tick)
+
+    @staticmethod
+    def synthetic_price_for(symbol: str, tick: int) -> Decimal:
+        if symbol not in BASE_PRICES:
+            raise ValueError(f"Unsupported synthetic symbol: {symbol}")
+        phase = {"BTCUSDT": 0.0, "ETHUSDT": 1.3, "BNBUSDT": 2.1}[symbol]
+        wave = 0.0022 * math.sin(tick / 5.0 + phase)
+        slow_wave = 0.0010 * math.sin(tick / 17.0 + phase)
+        micro = 0.00035 * math.sin(tick / 1.7 + phase)
+        return (BASE_PRICES[symbol] * Decimal(str(1.0 + wave + slow_wave + micro))).quantize(
+            Decimal("0.00000001")
         )
 
     @staticmethod
     def _momentum(prices: list[Decimal]) -> Decimal:
-        if len(prices) < 4:
+        if len(prices) < 4 or prices[-4] <= 0:
             return Decimal("0")
         return (prices[-1] / prices[-4] - Decimal(1)) * Decimal("10000")
 
-    def _mark_equity(self, cash: Decimal, position, price: Decimal) -> Decimal:
+    @staticmethod
+    def _position_value(position, prices: dict[str, Decimal]) -> Decimal:
         if position is None:
-            return cash
-        return cash + Decimal(position["quantity"]) * price
+            return Decimal("0")
+        price = prices.get(position["symbol"])
+        return Decimal(position["quantity"]) * price if price is not None else Decimal("0")
 
-    def step(self) -> TickResult:
+    def _latest_prices(self, db, source: str) -> dict[str, Decimal]:
+        prices: dict[str, Decimal] = {}
+        for row in db.execute(
+            """SELECT m.symbol, m.price FROM bot_market_ticks m
+               JOIN (SELECT symbol, MAX(id) AS max_id FROM bot_market_ticks
+                     GROUP BY symbol) latest ON latest.max_id=m.id"""
+        ).fetchall():
+            prices[row["symbol"]] = Decimal(row["price"])
+        return prices
+
+    def step(
+        self,
+        prices: dict[str, Decimal] | None = None,
+        *,
+        source: str = SYNTHETIC_SOURCE,
+        quotes: dict[str, tuple[Decimal, Decimal]] | None = None,
+        candle_close_times: dict[str, int] | None = None,
+        received_at_ms: int | None = None,
+    ) -> TickResult:
+        if source not in {SYNTHETIC_SOURCE, PUBLIC_SOURCE}:
+            raise ValueError("Unknown market data source.")
         now = datetime.now(timezone.utc)
-        today = now.date().isoformat()
         timestamp = now.isoformat()
+        received = int(received_at_ms or now.timestamp() * 1000)
+        if prices is None:
+            with self._connect() as db:
+                next_tick = int(db.execute(
+                    "SELECT tick_count FROM bot_account WHERE id=1"
+                ).fetchone()["tick_count"]) + 1
+            prices = {symbol: self.synthetic_price_for(symbol, next_tick) for symbol in SYMBOLS}
+        normalized = {symbol: Decimal(value) for symbol, value in prices.items()}
+        if not normalized or any(
+            symbol not in ALLOWED_SYMBOLS or not value.is_finite() or value <= 0
+            for symbol, value in normalized.items()
+        ):
+            raise ValueError("Prices must contain positive finite values for allowlisted symbols.")
+        quotes = quotes or {symbol: (price, price) for symbol, price in normalized.items()}
+        candle_close_times = candle_close_times or {}
+
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             account = db.execute("SELECT * FROM bot_account WHERE id=1").fetchone()
             tick = int(account["tick_count"]) + 1
-            price = self.synthetic_price(tick)
             cash = Decimal(account["cash"])
             realized = Decimal(account["realized_pnl"])
             fees_paid = Decimal(account["fees_paid"])
@@ -173,114 +257,168 @@ class ContinuousPaperBot:
             halted = bool(account["halted"])
             halt_reason = str(account["halt_reason"])
 
-            position = db.execute(
-                "SELECT * FROM bot_positions WHERE symbol=?", (SYMBOL,)
-            ).fetchone()
-            if account["trading_day"] != today:
-                current_equity = self._mark_equity(cash, position, price)
-                day_start = current_equity
+            for symbol, price in normalized.items():
+                bid, ask = quotes.get(symbol, (price, price))
+                bid, ask = Decimal(bid), Decimal(ask)
+                if bid <= 0 or ask < bid:
+                    raise ValueError(f"Invalid bid/ask for {symbol}")
+                db.execute(
+                    """INSERT INTO bot_market_ticks
+                    (tick,symbol,price,bid,ask,data_source,candle_close_time_ms,received_at_ms)
+                    VALUES (?,?,?,?,?,?,?,?)""",
+                    (tick, symbol, str(price), str(bid), str(ask), source,
+                     candle_close_times.get(symbol), received),
+                )
+
+            latest_prices = self._latest_prices(db, source)
+            latest_prices.update(normalized)
+            if account["trading_day"] != now.date().isoformat():
+                equity_before = cash + sum(
+                    (Decimal(pos["quantity"]) * latest_prices.get(pos["symbol"], Decimal("0"))
+                     for pos in db.execute("SELECT * FROM bot_positions").fetchall()),
+                    Decimal("0"),
+                )
+                day_start = equity_before
                 daily_realized = Decimal("0")
                 if halt_reason == "MAX_DAILY_LOSS":
                     halted, halt_reason = False, ""
                 db.execute(
-                    "UPDATE bot_account SET daily_start_equity=?, daily_realized_pnl='0', trading_day=? WHERE id=1",
-                    (str(day_start), today),
+                    """UPDATE bot_account SET daily_start_equity=?, daily_realized_pnl='0',
+                       trading_day=? WHERE id=1""",
+                    (str(day_start), now.date().isoformat()),
                 )
 
-            previous = db.execute(
-                "SELECT price FROM bot_equity ORDER BY tick DESC LIMIT 3"
-            ).fetchall()
-            prices = [Decimal(row["price"]) for row in reversed(previous)] + [price]
-            momentum = self._momentum(prices)
-            signal = "BUY" if momentum >= Decimal("8") else (
-                "SELL" if momentum <= Decimal("-8") else "HOLD"
+            signals: list[str] = []
+            actions: list[str] = []
+            open_positions = {
+                row["symbol"]: row for row in db.execute("SELECT * FROM bot_positions").fetchall()
+            }
+
+            # First manage existing positions for every symbol with a fresh quote.
+            for symbol, price in normalized.items():
+                history = db.execute(
+                    """SELECT price FROM bot_market_ticks
+                       WHERE symbol=? AND data_source=? ORDER BY tick DESC LIMIT 4""",
+                    (symbol, source),
+                ).fetchall()
+                momentum = self._momentum(
+                    [Decimal(row["price"]) for row in reversed(history)]
+                )
+                signal_name = "BUY" if momentum >= Decimal("8") else (
+                    "SELL" if momentum <= Decimal("-8") else "HOLD"
+                )
+                signals.append(f"{symbol}:{signal_name}")
+                position = open_positions.get(symbol)
+                action = "NONE"
+                bid, ask = quotes.get(symbol, (price, price))
+                if position is not None:
+                    entry = Decimal(position["entry_price"])
+                    change_pct = (price / entry - Decimal(1)) * Decimal("100")
+                    if (
+                        change_pct <= -STOP_LOSS_PERCENT
+                        or change_pct >= TAKE_PROFIT_PERCENT
+                        or signal_name == "SELL"
+                    ):
+                        fill = simulated_fill_price("SELL", bid, ask, SLIPPAGE_BPS)
+                        quantity = Decimal(position["quantity"])
+                        gross = quantity * fill
+                        fee = (gross * FEE_RATE).quantize(Decimal("0.00000001"))
+                        net_trade = (
+                            gross - Decimal(position["entry_gross"])
+                            - Decimal(position["entry_fee"]) - fee
+                        )
+                        cash += gross - fee
+                        realized += net_trade
+                        daily_realized += net_trade
+                        fees_paid += fee
+                        db.execute("DELETE FROM bot_positions WHERE symbol=?", (symbol,))
+                        db.execute(
+                            """INSERT INTO bot_fills
+                            (tick,symbol,side,quantity,reference_price,fill_price,gross_quote,
+                             fee_quote,net_pnl,data_source,created_at)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                            (tick, symbol, "SELL", str(quantity), str(price), str(fill),
+                             str(gross), str(fee), str(net_trade), source, timestamp),
+                        )
+                        action = f"{symbol}:CLOSE net={net_trade:.8f}"
+                        open_positions.pop(symbol, None)
+
+                # Entries are considered only after exits, and share one cash/risk budget.
+                if (
+                    action == "NONE" and position is None and signal_name == "BUY"
+                    and not halted and len(open_positions) < MAX_OPEN_POSITIONS
+                ):
+                    reserve_cash = self.initial_cash * RESERVE_PERCENT / Decimal("100")
+                    exposure = sum(
+                        (Decimal(pos["quantity"]) * latest_prices.get(pos_symbol, Decimal("0"))
+                         for pos_symbol, pos in open_positions.items()),
+                        Decimal("0"),
+                    )
+                    allocation = min(MAX_TRADE, max(Decimal("0"), cash - reserve_cash))
+                    if exposure + allocation <= MAX_TOTAL_EXPOSURE and allocation > 0:
+                        fill = simulated_fill_price("BUY", bid, ask, SLIPPAGE_BPS)
+                        quantity = (allocation / (fill * (Decimal(1) + FEE_RATE))).quantize(
+                            Decimal("0.00000001"), rounding=ROUND_DOWN
+                        )
+                        gross = quantity * fill
+                        fee = (gross * FEE_RATE).quantize(Decimal("0.00000001"))
+                        total = gross + fee
+                        if quantity > 0 and gross >= Decimal("1.00") and total <= cash - reserve_cash:
+                            cash -= total
+                            fees_paid += fee
+                            db.execute(
+                                """INSERT INTO bot_positions
+                                (symbol,quantity,entry_price,entry_gross,entry_fee,opened_at)
+                                VALUES (?,?,?,?,?,?)""",
+                                (symbol, str(quantity), str(fill), str(gross), str(fee), timestamp),
+                            )
+                            db.execute(
+                                """INSERT INTO bot_fills
+                                (tick,symbol,side,quantity,reference_price,fill_price,gross_quote,
+                                 fee_quote,net_pnl,data_source,created_at)
+                                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                                (tick, symbol, "BUY", str(quantity), str(price), str(fill),
+                                 str(gross), str(fee), "0", source, timestamp),
+                            )
+                            action = f"{symbol}:OPEN qty={quantity}"
+                            open_positions[symbol] = {
+                                "symbol": symbol, "quantity": str(quantity)
+                            }
+                if action != "NONE":
+                    actions.append(action)
+
+            open_rows = db.execute("SELECT * FROM bot_positions").fetchall()
+            equity = cash + sum(
+                (Decimal(pos["quantity"]) * latest_prices.get(pos["symbol"], Decimal("0"))
+                 for pos in open_rows),
+                Decimal("0"),
             )
-            action = "NONE"
-
-            # The open position is managed before considering a new entry.
-            if position is not None:
-                quantity = Decimal(position["quantity"])
-                entry = Decimal(position["entry_price"])
-                change_pct = (price / entry - Decimal(1)) * Decimal("100")
-                should_exit = (
-                    change_pct <= -STOP_LOSS_PERCENT
-                    or change_pct >= TAKE_PROFIT_PERCENT
-                    or signal == "SELL"
-                )
-                if should_exit:
-                    fill = price * (Decimal(1) - SLIPPAGE_BPS / Decimal("10000"))
-                    gross = quantity * fill
-                    fee = (gross * FEE_RATE).quantize(Decimal("0.00000001"))
-                    entry_gross = Decimal(position["entry_gross"])
-                    entry_fee = Decimal(position["entry_fee"])
-                    net_trade = gross - entry_gross - entry_fee - fee
-                    cash += gross - fee
-                    realized += net_trade
-                    daily_realized += net_trade
-                    fees_paid += fee
-                    db.execute("DELETE FROM bot_positions WHERE symbol=?", (SYMBOL,))
-                    db.execute(
-                        """INSERT INTO bot_fills
-                        (tick,symbol,side,quantity,reference_price,fill_price,gross_quote,
-                         fee_quote,net_pnl,data_source,created_at)
-                        VALUES (?,?,?,?,?,?,?,?,?,'MOCK_SYNTHETIC',?)""",
-                        (tick, SYMBOL, "SELL", str(quantity), str(price), str(fill),
-                         str(gross), str(fee), str(net_trade), timestamp),
-                    )
-                    action = f"CLOSE net={net_trade:.8f} {QUOTE}"
-
-            # Entry is allowed only if all account-level safety gates remain open.
-            if action == "NONE" and position is None and signal == "BUY" and not halted:
-                reserve_cash = self.initial_cash * RESERVE_PERCENT / Decimal("100")
-                deployable = max(Decimal("0"), cash - reserve_cash)
-                risk_budget = self.initial_cash * Decimal("0.005")
-                risk_sized_notional = risk_budget / (STOP_LOSS_PERCENT / Decimal("100"))
-                allocation = min(MAX_TRADE, deployable, risk_sized_notional)
-                quantity = (allocation / (price * Decimal("1.0002") * (Decimal(1) + FEE_RATE))).quantize(
-                    Decimal("0.00000001"), rounding=ROUND_DOWN
-                )
-                fill = price * (Decimal(1) + SLIPPAGE_BPS / Decimal("10000"))
-                gross = quantity * fill
-                fee = (gross * FEE_RATE).quantize(Decimal("0.00000001"))
-                total = gross + fee
-                if quantity > 0 and gross >= Decimal("4.95") and total <= cash - reserve_cash:
-                    cash -= total
-                    fees_paid += fee
-                    db.execute(
-                        """INSERT INTO bot_positions
-                        (symbol,quantity,entry_price,entry_gross,entry_fee,opened_at)
-                        VALUES (?,?,?,?,?,?)""",
-                        (SYMBOL, str(quantity), str(fill), str(gross), str(fee), timestamp),
-                    )
-                    db.execute(
-                        """INSERT INTO bot_fills
-                        (tick,symbol,side,quantity,reference_price,fill_price,gross_quote,
-                         fee_quote,net_pnl,data_source,created_at)
-                        VALUES (?,?,?,?,?,?,?,?,?,'MOCK_SYNTHETIC',?)""",
-                        (tick, SYMBOL, "BUY", str(quantity), str(price), str(fill),
-                         str(gross), str(fee), "0", timestamp),
-                    )
-                    action = f"OPEN qty={quantity}"
-
-            position = db.execute(
-                "SELECT * FROM bot_positions WHERE symbol=?", (SYMBOL,)
-            ).fetchone()
-            equity = self._mark_equity(cash, position, price)
+            unrealized = equity - cash - sum(
+                (Decimal(pos["entry_gross"]) - Decimal(pos["entry_fee"])
+                 for pos in open_rows),
+                Decimal("0"),
+            )
             high_water = max(high_water, equity)
             daily_pnl = equity - day_start
-            daily_loss_limit = day_start * MAX_DAILY_LOSS_PERCENT / Decimal("100")
-            drawdown_limit = high_water * MAX_DRAWDOWN_PERCENT / Decimal("100")
-            if not halted and daily_pnl <= -daily_loss_limit:
+            if not halted and daily_pnl <= -(day_start * MAX_DAILY_LOSS_PERCENT / Decimal("100")):
                 halted, halt_reason = True, "MAX_DAILY_LOSS"
-            if not halted and high_water - equity >= drawdown_limit:
+            if not halted and high_water - equity >= high_water * MAX_DRAWDOWN_PERCENT / Decimal("100"):
                 halted, halt_reason = True, "MAX_DRAWDOWN"
 
+            btc_price = normalized.get("BTCUSDT", latest_prices.get("BTCUSDT", Decimal("0")))
             db.execute(
                 """INSERT INTO bot_equity
                 (tick,price,cash,equity,realized_pnl,daily_pnl,signal,action,created_at)
                 VALUES (?,?,?,?,?,?,?,?,?)""",
-                (tick, str(price), str(cash), str(equity), str(realized),
-                 str(daily_pnl), signal, action, timestamp),
+                (tick, str(btc_price), str(cash), str(equity), str(realized),
+                 str(daily_pnl), ",".join(signals), ",".join(actions) or "NONE", timestamp),
+            )
+            db.execute(
+                """INSERT INTO bot_portfolio_snapshots
+                (tick,cash,equity,realized_pnl,unrealized_pnl,fees_paid,data_source,created_at)
+                VALUES (?,?,?,?,?,?,?,?)""",
+                (tick, str(cash), str(equity), str(realized), str(unrealized),
+                 str(fees_paid), source, timestamp),
             )
             db.execute(
                 """UPDATE bot_account SET cash=?, realized_pnl=?, fees_paid=?,
@@ -290,17 +428,31 @@ class ContinuousPaperBot:
                  str(day_start), str(daily_realized), tick, int(halted), halt_reason, timestamp),
             )
             db.commit()
-            return TickResult(tick, price, signal, action, cash, equity, realized,
-                              daily_pnl, fees_paid, halted)
+            primary_price = normalized.get("BTCUSDT", next(iter(normalized.values())))
+            return TickResult(
+                tick, primary_price, ",".join(signals), ",".join(actions) or "NONE",
+                cash, equity, realized, daily_pnl, fees_paid, halted,
+            )
 
     def report(self) -> dict:
         with self._connect() as db:
             account = db.execute("SELECT * FROM bot_account WHERE id=1").fetchone()
-            position = db.execute("SELECT * FROM bot_positions LIMIT 1").fetchone()
-            latest = db.execute("SELECT price FROM bot_equity ORDER BY tick DESC LIMIT 1").fetchone()
-            price = Decimal(latest["price"]) if latest else Decimal("60000")
+            latest_prices = self._latest_prices(db, "")
+            # The most recent quote per symbol may have different sources; use the latest row.
+            latest_prices = {}
+            for row in db.execute(
+                """SELECT m.symbol,m.price FROM bot_market_ticks m
+                   JOIN (SELECT symbol,MAX(id) AS max_id FROM bot_market_ticks GROUP BY symbol) x
+                   ON x.max_id=m.id"""
+            ).fetchall():
+                latest_prices[row["symbol"]] = Decimal(row["price"])
+            positions = db.execute("SELECT * FROM bot_positions").fetchall()
             cash = Decimal(account["cash"])
-            equity = self._mark_equity(cash, position, price)
+            equity = cash + sum(
+                (Decimal(pos["quantity"]) * latest_prices.get(pos["symbol"], Decimal("0"))
+                 for pos in positions),
+                Decimal("0"),
+            )
             daily_pnl = equity - Decimal(account["daily_start_equity"])
             counts = db.execute(
                 """SELECT COUNT(*) AS total,
@@ -308,12 +460,20 @@ class ContinuousPaperBot:
                 SUM(CASE WHEN CAST(net_pnl AS REAL)<0 THEN 1 ELSE 0 END) AS losses
                 FROM bot_fills WHERE side='SELL'"""
             ).fetchone()
+            symbols = {
+                row["symbol"]: {
+                    "quantity": Decimal(row["quantity"]),
+                    "entry_price": Decimal(row["entry_price"]),
+                    "mark_price": latest_prices.get(row["symbol"]),
+                }
+                for row in positions
+            }
             return {
                 "tick": account["tick_count"], "cash": cash, "equity": equity,
                 "realized_pnl": Decimal(account["realized_pnl"]),
                 "daily_pnl": daily_pnl, "fees": Decimal(account["fees_paid"]),
                 "trades": counts["total"] or 0, "wins": counts["wins"] or 0,
-                "losses": counts["losses"] or 0,
+                "losses": counts["losses"] or 0, "positions": symbols,
                 "halted": bool(account["halted"]), "halt_reason": account["halt_reason"],
             }
 
@@ -333,64 +493,106 @@ class ContinuousPaperBot:
         return report
 
 
-async def run_bot(database: str, interval_seconds: float, cycles: int | None) -> None:
+async def run_bot(
+    database: str,
+    interval_seconds: float,
+    cycles: int | None,
+    data_source: str = SYNTHETIC_SOURCE,
+) -> None:
     bot = ContinuousPaperBot(database)
+    feed = PublicMarketData() if data_source == PUBLIC_SOURCE else None
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
             loop.add_signal_handler(sig, stop.set)
-        except NotImplementedError:
+        except (NotImplementedError, RuntimeError):
             pass
 
-    print("MUMIN AI TRADER | CONTINUOUS OFFLINE MOCK PAPER", flush=True)
-    print("Market data: SYNTHETIC ONLY | API keys: none | Network: disabled | Live orders: disabled", flush=True)
+    print("MUMIN AI TRADER | MULTI-SYMBOL PAPER ONLY", flush=True)
+    print(
+        f"Symbols: {','.join(SYMBOLS)} | Market data: {data_source} | "
+        "API keys: none | Live orders: disabled",
+        flush=True,
+    )
     print(f"SQLite ledger: {database} | cycle interval: {interval_seconds}s", flush=True)
     last_report = loop.time()
     completed = 0
-    while not stop.is_set() and (cycles is None or completed < cycles):
-        result = bot.step()
-        print(
-            f"[tick {result.tick}] price={result.price} {QUOTE} signal={result.signal} "
-            f"action={result.action} cash={result.cash:.8f} equity={result.equity:.8f} "
-            f"realized={result.realized_pnl:.8f} daily={result.daily_pnl:.8f}",
-            flush=True,
-        )
-        completed += 1
-        if result.halted:
-            print(f"RISK HALT: {result.halted}. No new positions will be opened.", flush=True)
-        if loop.time() - last_report >= REPORT_SECONDS or (cycles is not None and completed == cycles):
-            report = bot.save_hourly_report()
+    try:
+        while not stop.is_set() and (cycles is None or completed < cycles):
+            if feed is None:
+                result = bot.step()
+            else:
+                snapshots, errors = await feed.snapshots(SYMBOLS)
+                for symbol, error in errors.items():
+                    print(f"MARKET DATA UNAVAILABLE {symbol}: {error}", flush=True)
+                if not snapshots:
+                    print("No fresh public quotes; skipping this cycle without synthetic fallback.", flush=True)
+                    try:
+                        await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
+                    except asyncio.TimeoutError:
+                        pass
+                    continue
+                prices = {symbol: item.last_closed_price for symbol, item in snapshots.items()}
+                quotes = {symbol: (item.bid, item.ask) for symbol, item in snapshots.items()}
+                candle_times = {symbol: item.candle_close_time_ms for symbol, item in snapshots.items()}
+                received = min(item.received_at_ms for item in snapshots.values())
+                result = bot.step(
+                    prices, source=PUBLIC_SOURCE, quotes=quotes,
+                    candle_close_times=candle_times, received_at_ms=received,
+                )
+
             print(
-                "HOURLY PERFORMANCE | "
-                f"equity={report['equity']:.8f} {QUOTE} | cash={report['cash']:.8f} | "
-                f"realized_net={report['realized_pnl']:.8f} | daily_net={report['daily_pnl']:.8f} | "
-                f"fees={report['fees']:.8f} | closed_trades={report['trades']} "
-                f"(wins={report['wins']}, losses={report['losses']}) | "
-                f"halted={report['halted']} {report['halt_reason']}",
+                f"[tick {result.tick}] pricesource={data_source} price={result.price} {QUOTE} "
+                f"signals={result.signal} actions={result.action} cash={result.cash:.8f} "
+                f"equity={result.equity:.8f} realized_net={result.realized_pnl:.8f} "
+                f"daily_net={result.daily_pnl:.8f}",
                 flush=True,
             )
-            last_report = loop.time()
-        if result.halted:
-            # Keep reporting and monitoring, but do not restart trading automatically.
-            await asyncio.sleep(interval_seconds)
-        else:
+            completed += 1
+            if result.halted:
+                print(f"RISK HALT: {bot.report()['halt_reason']}; new entries blocked.", flush=True)
+            if loop.time() - last_report >= REPORT_SECONDS or (cycles is not None and completed == cycles):
+                report = bot.save_hourly_report()
+                print(
+                    "HOURLY PERFORMANCE | "
+                    f"equity={report['equity']:.8f} {QUOTE} | cash={report['cash']:.8f} | "
+                    f"realized_net={report['realized_pnl']:.8f} | daily_net={report['daily_pnl']:.8f} | "
+                    f"fees={report['fees']:.8f} | closed_trades={report['trades']} "
+                    f"(wins={report['wins']}, losses={report['losses']}) | "
+                    f"positions={list(report['positions'])} | halted={report['halted']} "
+                    f"{report['halt_reason']}",
+                    flush=True,
+                )
+                last_report = loop.time()
             try:
                 await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
             except asyncio.TimeoutError:
                 pass
+    finally:
+        if feed is not None:
+            await feed.close()
     print("Continuous Paper loop stopped cleanly.", flush=True)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="24/7 offline synthetic-market Paper Trading loop.")
-    parser.add_argument("--db", default="data/mumin_continuous_paper.db")
+    parser = argparse.ArgumentParser(description="Continuous multi-symbol Paper Trading; no live orders.")
+    parser.add_argument("--db", default=None)
     parser.add_argument("--interval-seconds", type=float, default=30.0)
     parser.add_argument("--cycles", type=int, default=None, help="Finite smoke run; omit for continuous operation.")
+    parser.add_argument(
+        "--data-source", choices=(SYNTHETIC_SOURCE, PUBLIC_SOURCE),
+        default=os.getenv("MUMIN_MARKET_DATA_SOURCE", SYNTHETIC_SOURCE),
+    )
     args = parser.parse_args()
     if args.interval_seconds <= 0 or (args.cycles is not None and args.cycles <= 0):
         parser.error("interval-seconds and cycles must be positive.")
-    asyncio.run(run_bot(args.db, args.interval_seconds, args.cycles))
+    database = args.db or (
+        "data/mumin_binance_public_paper.db"
+        if args.data_source == PUBLIC_SOURCE
+        else "data/mumin_continuous_paper.db"
+    )
+    asyncio.run(run_bot(database, args.interval_seconds, args.cycles, args.data_source))
 
 
 if __name__ == "__main__":
