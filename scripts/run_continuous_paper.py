@@ -16,6 +16,10 @@ from mumin_trader.exchanges.binance.public_market_data import (
     PublicMarketData,
     simulated_fill_price,
 )
+from mumin_trader.exchanges.binance.testnet_stream import (
+    SOURCE as TESTNET_SOURCE,
+    BinanceSpotTestnetStream,
+)
 from mumin_trader.strategy.smart_sniper import evaluate_entry, evaluate_exit
 
 QUOTE = "USDT"
@@ -561,6 +565,9 @@ async def run_bot(
 ) -> None:
     bot = ContinuousPaperBot(database)
     feed = PublicMarketData() if data_source == PUBLIC_SOURCE else None
+    testnet_feed = (
+        BinanceSpotTestnetStream(SYMBOLS) if data_source == TESTNET_SOURCE else None
+    )
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -578,12 +585,40 @@ async def run_bot(
     print(f"SQLite ledger: {database} | cycle interval: {interval_seconds}s", flush=True)
     last_report = loop.time()
     completed = 0
+    live_queue: asyncio.Queue = asyncio.Queue(maxsize=2000)
+    stream_task = None
+    if testnet_feed is not None:
+        async def stream_pump() -> None:
+            async for market_tick in testnet_feed.stream():
+                if stop.is_set():
+                    break
+                await live_queue.put(market_tick)
+        stream_task = asyncio.create_task(stream_pump())
+
     try:
         while not stop.is_set() and (cycles is None or completed < cycles):
-            completed += 1
-            if feed is None:
+            if testnet_feed is not None:
+                try:
+                    market_tick = await asyncio.wait_for(live_queue.get(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    continue
+                completed += 1
+                result = bot.step(
+                    {market_tick.symbol: market_tick.price},
+                    source=TESTNET_SOURCE,
+                    quotes={market_tick.symbol: (market_tick.bid, market_tick.ask)},
+                    received_at_ms=market_tick.event_time_ms,
+                    liquidity_metrics={
+                        market_tick.symbol: (
+                            market_tick.volume_ratio, market_tick.book_imbalance
+                        )
+                    },
+                )
+            elif feed is None:
+                completed += 1
                 result = bot.step()
             else:
+                completed += 1
                 snapshots, errors = await feed.snapshots(SYMBOLS)
                 for symbol, error in errors.items():
                     print(f"MARKET DATA UNAVAILABLE {symbol}: {error}", flush=True)
@@ -620,7 +655,8 @@ async def run_bot(
                 f"[tick {result.tick}] pricesource={data_source} price={result.price} {QUOTE} "
                 f"signals={result.signal} actions={result.action} cash={result.cash:.8f} "
                 f"equity={result.equity:.8f} realized_net={result.realized_pnl:.8f} "
-                f"daily_net={result.daily_pnl:.8f}",
+                f"daily_net={result.daily_pnl:.8f} fees_total={result.fees_paid:.8f} "
+                f"mode={'PAPER_ONLY' if data_source == TESTNET_SOURCE else 'PAPER'}",
                 flush=True,
             )
             if result.halted:
@@ -643,8 +679,13 @@ async def run_bot(
             except asyncio.TimeoutError:
                 pass
     finally:
+        if stream_task is not None:
+            stream_task.cancel()
+            await asyncio.gather(stream_task, return_exceptions=True)
         if feed is not None:
             await feed.close()
+        if testnet_feed is not None:
+            await testnet_feed.close()
     print("Continuous Paper loop stopped cleanly.", flush=True)
 
 
@@ -654,7 +695,7 @@ def main() -> None:
     parser.add_argument("--interval-seconds", type=float, default=30.0)
     parser.add_argument("--cycles", type=int, default=None, help="Finite smoke run; omit for continuous operation.")
     parser.add_argument(
-        "--data-source", choices=(SYNTHETIC_SOURCE, PUBLIC_SOURCE),
+        "--data-source", choices=(SYNTHETIC_SOURCE, PUBLIC_SOURCE, TESTNET_SOURCE),
         default=os.getenv("MUMIN_MARKET_DATA_SOURCE", SYNTHETIC_SOURCE),
     )
     args = parser.parse_args()
@@ -663,6 +704,8 @@ def main() -> None:
     database = args.db or (
         "data/mumin_binance_public_paper.db"
         if args.data_source == PUBLIC_SOURCE
+        else "data/mumin_binance_testnet_paper.db"
+        if args.data_source == TESTNET_SOURCE
         else "data/mumin_continuous_paper.db"
     )
     asyncio.run(run_bot(database, args.interval_seconds, args.cycles, args.data_source))
