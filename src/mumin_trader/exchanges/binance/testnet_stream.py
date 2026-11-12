@@ -15,7 +15,7 @@ import websockets
 from mumin_trader.exchanges.binance.public_market_data import ALLOWED_SYMBOLS
 from mumin_trader.strategy.smart_sniper import order_book_imbalance, volume_surge_ratio
 
-REST_BASE_URL = "https://testnet.binance.vision/api"
+REST_BASE_URL = "https://testnet.binance.vision"
 STREAM_BASE_URL = "wss://stream.testnet.binance.vision/stream"
 SOURCE = "BINANCE_TESTNET_WEBSOCKET"
 
@@ -113,10 +113,10 @@ class BinanceSpotTestnetStream:
         """Seed price, quote, depth and closed-volume baseline before WS events."""
         async def seed(symbol: str) -> None:
             book, depth, candles, ticker = await asyncio.gather(
-                self._get("/v3/ticker/bookTicker", {"symbol": symbol}),
-                self._get("/v3/depth", {"symbol": symbol, "limit": 20}),
-                self._get("/v3/klines", {"symbol": symbol, "interval": "1m", "limit": 21}),
-                self._get("/v3/ticker/price", {"symbol": symbol}),
+                self._get("/api/v3/ticker/bookTicker", {"symbol": symbol}),
+                self._get("/api/v3/depth", {"symbol": symbol, "limit": 20}),
+                self._get("/api/v3/klines", {"symbol": symbol, "interval": "1m", "limit": 21}),
+                self._get("/api/v3/ticker/price", {"symbol": symbol}),
             )
             state = self._states[symbol]
             state.bid = Decimal(str(book["bidPrice"]))
@@ -132,7 +132,7 @@ class BinanceSpotTestnetStream:
                 for price, quantity in depth.get("asks", [])
                 if Decimal(str(quantity)) > 0
             }
-            server = await self._get("/v3/time", {})
+            server = await self._get("/api/v3/time", {})
             server_time = int(server["serverTime"])
             state.closed_volumes.clear()
             for row in candles:
