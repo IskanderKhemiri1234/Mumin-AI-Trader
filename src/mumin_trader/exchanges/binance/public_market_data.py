@@ -1,0 +1,107 @@
+from __future__ import annotations
+
+import asyncio
+import time
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import Any
+
+import httpx
+
+
+BASE_URL = "https://data-api.binance.vision"
+ALLOWED_SYMBOLS = frozenset({"BTCUSDT", "ETHUSDT", "BNBUSDT"})
+
+
+@dataclass(frozen=True, slots=True)
+class PublicMarketSnapshot:
+    symbol: str
+    bid: Decimal
+    ask: Decimal
+    last_closed_price: Decimal
+    candle_close_time_ms: int
+    received_at_ms: int
+    source: str = "BINANCE_PUBLIC_MARKET_DATA"
+
+
+class PublicMarketData:
+    """Unauthenticated Binance Spot market-data reader; contains no order methods."""
+
+    def __init__(self, client: httpx.AsyncClient | None = None) -> None:
+        self._client = client or httpx.AsyncClient(
+            base_url=BASE_URL,
+            timeout=httpx.Timeout(8.0),
+            headers={"Accept": "application/json"},
+        )
+        self._owns_client = client is None
+
+    async def close(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
+
+    async def _get(self, path: str, params: dict[str, Any]) -> Any:
+        response = await self._client.get(path, params=params)
+        response.raise_for_status()
+        return response.json()
+
+    async def snapshot(self, symbol: str) -> PublicMarketSnapshot:
+        symbol = symbol.upper()
+        if symbol not in ALLOWED_SYMBOLS:
+            raise ValueError(f"Symbol is not in the paper-trading allowlist: {symbol}")
+
+        book, candles, server = await asyncio.gather(
+            self._get("/api/v3/ticker/bookTicker", {"symbol": symbol}),
+            self._get("/api/v3/klines", {"symbol": symbol, "interval": "1m", "limit": 30}),
+            self._get("/api/v3/time", {}),
+        )
+        received_at_ms = int(server["serverTime"])
+        bid = Decimal(str(book["bidPrice"]))
+        ask = Decimal(str(book["askPrice"]))
+        if not bid.is_finite() or not ask.is_finite() or bid <= 0 or ask < bid:
+            raise ValueError(f"Invalid public order-book quote for {symbol}")
+
+        closed = [row for row in candles if len(row) > 6 and int(row[6]) < received_at_ms]
+        if not closed:
+            raise ValueError(f"No fully closed one-minute candle for {symbol}")
+        candle = closed[-1]
+        close_price = Decimal(str(candle[4]))
+        if not close_price.is_finite() or close_price <= 0:
+            raise ValueError(f"Invalid closed-candle price for {symbol}")
+
+        return PublicMarketSnapshot(
+            symbol=symbol,
+            bid=bid,
+            ask=ask,
+            last_closed_price=close_price,
+            candle_close_time_ms=int(candle[6]),
+            received_at_ms=received_at_ms,
+        )
+
+    async def snapshots(self, symbols: tuple[str, ...] = tuple(sorted(ALLOWED_SYMBOLS))) -> tuple[dict[str, PublicMarketSnapshot], dict[str, str]]:
+        results = await asyncio.gather(
+            *(self.snapshot(symbol) for symbol in symbols),
+            return_exceptions=True,
+        )
+        good: dict[str, PublicMarketSnapshot] = {}
+        errors: dict[str, str] = {}
+        for symbol, result in zip(symbols, results):
+            if isinstance(result, BaseException):
+                errors[symbol] = f"{type(result).__name__}: {result}"
+            else:
+                good[symbol] = result
+        return good, errors
+
+
+def simulated_fill_price(
+    side: str,
+    bid: Decimal,
+    ask: Decimal,
+    slippage_bps: Decimal = Decimal("2"),
+) -> Decimal:
+    """Conservative paper fill: buy at ask plus slippage; sell at bid minus slippage."""
+    slippage = Decimal(slippage_bps) / Decimal("10000")
+    if side == "BUY":
+        return Decimal(ask) * (Decimal("1") + slippage)
+    if side == "SELL":
+        return Decimal(bid) * (Decimal("1") - slippage)
+    raise ValueError("side must be BUY or SELL")
