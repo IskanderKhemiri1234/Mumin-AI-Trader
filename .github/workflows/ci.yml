@@ -67,7 +67,7 @@ jobs:
       - name: Run one-time offline synthetic Paper trade
         run: |
           docker compose run --name mumin-paper-smoke --entrypoint python mumin-ai-trader scripts/run_mock_paper.py
-          docker cp mumin-paper-smoke:/app/data/mumin_trader.db data/mumin_trader.db
+          docker cp mumin-paper-smoke:/app/data/mumin_mock_paper.db data/mumin_mock_paper.db
           docker rm mumin-paper-smoke
       - name: Preserve paper ledger
         if: always()
