@@ -132,7 +132,8 @@ class BinanceSpotTestnetStream:
                 for price, quantity in depth.get("asks", [])
                 if Decimal(str(quantity)) > 0
             }
-            server_time = int(await self._get("/v3/time", {})["serverTime"]) if False else int(time.time() * 1000)
+            server = await self._get("/v3/time", {})
+            server_time = int(server["serverTime"])
             state.closed_volumes.clear()
             for row in candles:
                 if len(row) > 6 and int(row[6]) < server_time:
