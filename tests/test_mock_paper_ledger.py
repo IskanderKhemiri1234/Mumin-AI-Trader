@@ -12,9 +12,9 @@ async def test_offline_mock_round_trip_is_persisted(tmp_path):
     buy = await engine.submit_paper_order(
         symbol="BTCUSDT",
         side=OrderSide.BUY,
-        quantity=Decimal("0.00008"),
+        quantity=Decimal("0.000083"),
         reference_price=Decimal("60006"),
-        min_notional=Decimal("5"),
+        min_notional=Decimal("4.95"),
         fee_rate_override=Decimal("0.001"),
     )
     ledger.record_fill(buy)
