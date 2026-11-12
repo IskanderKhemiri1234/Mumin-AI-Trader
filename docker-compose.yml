@@ -8,7 +8,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/app/data
+      - mumin_data:/app/data
     read_only: true
     tmpfs:
       - /tmp
@@ -21,3 +21,6 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+volumes:
+  mumin_data:
