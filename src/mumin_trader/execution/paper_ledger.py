@@ -134,11 +134,14 @@ class PaperLedger:
                     str(entry_fee), str(exit_fee), str(gross), str(net), data_source,
                 ),
             )
+            current = db.execute(
+                "SELECT realized_pnl FROM paper_portfolio WHERE id = 1"
+            ).fetchone()
+            updated_realized = Decimal(current["realized_pnl"]) + net
             db.execute(
-                """UPDATE paper_portfolio SET realized_pnl =
-                   CAST(realized_pnl AS REAL) + ?, updated_at = CURRENT_TIMESTAMP
-                   WHERE id = 1""",
-                (float(net),),
+                """UPDATE paper_portfolio SET realized_pnl = ?,
+                   updated_at = CURRENT_TIMESTAMP WHERE id = 1""",
+                (str(updated_realized),),
             )
         return net
 
