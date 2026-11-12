@@ -60,7 +60,8 @@ async def test_testnet_rest_bootstrap_is_public_and_seeds_liquidity():
     await client.aclose()
 
 
-def test_testnet_stream_decodes_book_quote_depth_trade_and_closed_kline():
+@pytest.mark.asyncio
+async def test_testnet_stream_decodes_book_quote_depth_trade_and_closed_kline():
     feed = BinanceSpotTestnetStream(("ETHUSDT",))
     state = feed._states["ETHUSDT"]
     state.bid = Decimal("2999")
@@ -111,6 +112,7 @@ def test_testnet_stream_decodes_book_quote_depth_trade_and_closed_kline():
     assert tick.bid == Decimal("3000")
     assert tick.ask == Decimal("3002")
     assert tick.volume_ratio == Decimal("3")
+    await feed.close()
 
 
 def test_testnet_feed_rejects_non_allowlisted_symbols():
