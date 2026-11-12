@@ -237,7 +237,7 @@ class BinanceSpotTestnetStream:
                             yield tick
             except asyncio.CancelledError:
                 raise
-            except (OSError, httpx.HTTPError, ValueError, RuntimeError, websockets.WebSocketException) as exc:
+            except Exception as exc:
                 print(
                     f"TESTNET STREAM DISCONNECTED: {type(exc).__name__}: {exc}; "
                     f"reconnecting in {delay:.1f}s",
