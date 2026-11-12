@@ -49,8 +49,6 @@ def screen_tickers(
             symbol.endswith(quote_asset)
             and volume is not None
             and volume >= min_quote_volume
-            and _decimal(item.get("bidPrice")) not in (None, ZERO)
-            and _decimal(item.get("askPrice")) not in (None, ZERO)
         ):
             selected.append(item)
     return sorted(
