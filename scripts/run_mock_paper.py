@@ -64,7 +64,7 @@ async def main() -> None:
         quantity=quantity,
         reference_price=entry_quote.ask,
         quantity_step=Decimal("0.00000001"),
-        min_notional=Decimal("5"),
+        min_notional=Decimal("4.95"),
         fee_rate_override=Decimal("0.001"),
     )
     ledger.record_fill(buy)
