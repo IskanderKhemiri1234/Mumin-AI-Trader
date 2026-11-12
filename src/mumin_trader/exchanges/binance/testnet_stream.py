@@ -160,7 +160,9 @@ class BinanceSpotTestnetStream:
         if not isinstance(data, dict):
             return None
         event_type = data.get("e")
-        symbol = str(data.get("s", "")).upper()
+        stream_name = str(envelope.get("stream", ""))
+        stream_symbol = stream_name.split("@", 1)[0].upper() if stream_name else ""
+        symbol = str(data.get("s") or stream_symbol).upper()
         if symbol not in self._states:
             return None
         state = self._states[symbol]
