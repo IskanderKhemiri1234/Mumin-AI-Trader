@@ -16,6 +16,7 @@ from mumin_trader.exchanges.binance.public_market_data import (
     PublicMarketData,
     simulated_fill_price,
 )
+from mumin_trader.strategy.smart_sniper import evaluate_entry, evaluate_exit
 
 QUOTE = "USDT"
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "BNBUSDT")
@@ -27,7 +28,6 @@ MAX_OPEN_POSITIONS = 2
 FEE_RATE = Decimal("0.001")
 SLIPPAGE_BPS = Decimal("2")
 STOP_LOSS_PERCENT = Decimal("0.50")
-TAKE_PROFIT_PERCENT = Decimal("1.00")
 MAX_DAILY_LOSS_PERCENT = Decimal("2.00")
 MAX_DRAWDOWN_PERCENT = Decimal("5.00")
 REPORT_SECONDS = 3600
@@ -96,7 +96,9 @@ class ContinuousPaperBot:
                     entry_price TEXT NOT NULL,
                     entry_gross TEXT NOT NULL,
                     entry_fee TEXT NOT NULL,
-                    opened_at TEXT NOT NULL
+                    opened_at TEXT NOT NULL,
+                    high_water_price TEXT NOT NULL DEFAULT '0',
+                    trailing_stop_price TEXT NOT NULL DEFAULT '0'
                 );
                 CREATE TABLE IF NOT EXISTS bot_fills (
                     fill_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -162,6 +164,17 @@ class ContinuousPaperBot:
                     created_at TEXT NOT NULL
                 );
             """)
+            position_columns = {
+                column["name"] for column in db.execute("PRAGMA table_info(bot_positions)")
+            }
+            if "high_water_price" not in position_columns:
+                db.execute(
+                    "ALTER TABLE bot_positions ADD COLUMN high_water_price TEXT NOT NULL DEFAULT '0'"
+                )
+            if "trailing_stop_price" not in position_columns:
+                db.execute(
+                    "ALTER TABLE bot_positions ADD COLUMN trailing_stop_price TEXT NOT NULL DEFAULT '0'"
+                )
             row = db.execute("SELECT initial_cash FROM bot_account WHERE id=1").fetchone()
             if row is None:
                 db.execute(
@@ -223,6 +236,7 @@ class ContinuousPaperBot:
         quotes: dict[str, tuple[Decimal, Decimal]] | None = None,
         candle_close_times: dict[str, int] | None = None,
         received_at_ms: int | None = None,
+        liquidity_metrics: dict[str, tuple[Decimal, Decimal]] | None = None,
     ) -> TickResult:
         if source not in {SYNTHETIC_SOURCE, PUBLIC_SOURCE}:
             raise ValueError("Unknown market data source.")
@@ -243,6 +257,11 @@ class ContinuousPaperBot:
             raise ValueError("Prices must contain positive finite values for allowlisted symbols.")
         quotes = quotes or {symbol: (price, price) for symbol, price in normalized.items()}
         candle_close_times = candle_close_times or {}
+        if liquidity_metrics is None:
+            liquidity_metrics = (
+                {symbol: (Decimal("2.0"), Decimal("0.20")) for symbol in normalized}
+                if source == SYNTHETIC_SOURCE else {}
+            )
 
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -323,21 +342,29 @@ class ContinuousPaperBot:
                 momentum = self._momentum(
                     [Decimal(row["price"]) for row in reversed(history)]
                 )
-                signal_name = "BUY" if momentum >= Decimal("8") else (
+                volume_ratio, book_imbalance = liquidity_metrics.get(
+                    symbol, (Decimal("0"), Decimal("0"))
+                )
+                entry_signal = evaluate_entry(momentum, volume_ratio, book_imbalance)
+                signal_name = "BUY" if entry_signal.accepted else (
                     "SELL" if momentum <= Decimal("-8") else "HOLD"
                 )
-                signals.append(f"{symbol}:{signal_name}")
+                signals.append(
+                    f"{symbol}:{signal_name}[v={volume_ratio:.2f},obi={book_imbalance:.2f}]"
+                )
                 position = open_positions.get(symbol)
                 action = "NONE"
                 bid, ask = quotes.get(symbol, (price, price))
                 if position is not None:
                     entry = Decimal(position["entry_price"])
-                    change_pct = (price / entry - Decimal(1)) * Decimal("100")
-                    if (
-                        change_pct <= -STOP_LOSS_PERCENT
-                        or change_pct >= TAKE_PROFIT_PERCENT
-                        or signal_name == "SELL"
-                    ):
+                    exit_decision = evaluate_exit(
+                        entry,
+                        Decimal(position["high_water_price"] or position["entry_price"]),
+                        price,
+                        momentum,
+                        book_imbalance,
+                    )
+                    if exit_decision.should_exit:
                         fill = simulated_fill_price("SELL", bid, ask, SLIPPAGE_BPS)
                         quantity = Decimal(position["quantity"])
                         gross = quantity * fill
@@ -359,8 +386,21 @@ class ContinuousPaperBot:
                             (tick, symbol, "SELL", str(quantity), str(price), str(fill),
                              str(gross), str(fee), str(net_trade), source, timestamp),
                         )
-                        action = f"{symbol}:CLOSE net={net_trade:.8f}"
+                        action = (
+                            f"{symbol}:CLOSE[{exit_decision.reason}] net={net_trade:.8f}"
+                        )
                         open_positions.pop(symbol, None)
+                    else:
+                        db.execute(
+                            """UPDATE bot_positions
+                               SET high_water_price=?, trailing_stop_price=?
+                               WHERE symbol=?""",
+                            (
+                                str(exit_decision.high_water_price),
+                                str(exit_decision.trailing_stop_price),
+                                symbol,
+                            ),
+                        )
 
                 # Entries are considered only after exits, and share one cash/risk budget.
                 if (
@@ -387,9 +427,11 @@ class ContinuousPaperBot:
                             fees_paid += fee
                             db.execute(
                                 """INSERT INTO bot_positions
-                                (symbol,quantity,entry_price,entry_gross,entry_fee,opened_at)
-                                VALUES (?,?,?,?,?,?)""",
-                                (symbol, str(quantity), str(fill), str(gross), str(fee), timestamp),
+                                (symbol,quantity,entry_price,entry_gross,entry_fee,opened_at,
+                                 high_water_price,trailing_stop_price)
+                                VALUES (?,?,?,?,?,?,?,?)""",
+                                (symbol, str(quantity), str(fill), str(gross), str(fee), timestamp,
+                                 str(fill), str(fill * (Decimal("1") - STOP_LOSS_PERCENT / Decimal("100")))),
                             )
                             db.execute(
                                 """INSERT INTO bot_fills
@@ -564,9 +606,14 @@ async def run_bot(
                 quotes = {symbol: (item.bid, item.ask) for symbol, item in snapshots.items()}
                 candle_times = {symbol: item.candle_close_time_ms for symbol, item in snapshots.items()}
                 received = min(item.received_at_ms for item in snapshots.values())
+                liquidity = {
+                    symbol: (item.volume_ratio, item.book_imbalance)
+                    for symbol, item in snapshots.items()
+                }
                 result = bot.step(
                     prices, source=PUBLIC_SOURCE, quotes=quotes,
                     candle_close_times=candle_times, received_at_ms=received,
+                    liquidity_metrics=liquidity,
                 )
 
             print(
