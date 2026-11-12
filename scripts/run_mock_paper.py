@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 
 from config.config import get_settings
@@ -56,7 +56,7 @@ async def main() -> None:
         settings.MAX_TRADE_ALLOCATION_USD,
         settings.INITIAL_CAPITAL_USD * (Decimal(1) - settings.CAPITAL_RESERVE_PERCENT / Decimal(100)),
     )
-    quantity = (allocation / entry_quote.ask).quantize(Decimal("0.00000001"))
+    quantity = (allocation / entry_quote.ask).quantize(Decimal("0.00000001"), rounding=ROUND_DOWN)
 
     buy = await engine.submit_paper_order(
         symbol=entry_quote.symbol,
