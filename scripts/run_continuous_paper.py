@@ -180,6 +180,8 @@ class ContinuousPaperBot:
                 current_equity = self._mark_equity(cash, position, price)
                 day_start = current_equity
                 daily_realized = Decimal("0")
+                if halt_reason == "MAX_DAILY_LOSS":
+                    halted, halt_reason = False, ""
                 db.execute(
                     "UPDATE bot_account SET daily_start_equity=?, daily_realized_pnl='0', trading_day=? WHERE id=1",
                     (str(day_start), today),
@@ -241,7 +243,7 @@ class ContinuousPaperBot:
                 gross = quantity * fill
                 fee = (gross * FEE_RATE).quantize(Decimal("0.00000001"))
                 total = gross + fee
-                if quantity > 0 and gross >= Decimal("5") and total <= cash - reserve_cash:
+                if quantity > 0 and gross >= Decimal("4.95") and total <= cash - reserve_cash:
                     cash -= total
                     fees_paid += fee
                     db.execute(
