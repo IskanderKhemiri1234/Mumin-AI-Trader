@@ -21,6 +21,11 @@ async def test_public_market_data_uses_unauthenticated_endpoints_and_closed_cand
             return httpx.Response(200, json={
                 "symbol": "ETHUSDT", "bidPrice": "2999.9", "askPrice": "3000.1"
             })
+        if request.url.path.endswith("/depth"):
+            return httpx.Response(200, json={
+                "bids": [["2999.9", "10"], ["2999.8", "5"]],
+                "asks": [["3000.1", "2"], ["3000.2", "1"]],
+            })
         if request.url.path.endswith("/klines"):
             return httpx.Response(200, json=[
                 [1, "2990", "3010", "2980", "2995", "10", 1_699_999_999_000],
@@ -43,7 +48,9 @@ async def test_public_market_data_uses_unauthenticated_endpoints_and_closed_cand
     assert snapshot.last_closed_price == Decimal("2995")
     assert snapshot.candle_close_time_ms == 1_699_999_999_000
     assert snapshot.source == "BINANCE_PUBLIC_MARKET_DATA"
-    assert len(calls) == 3
+    assert len(calls) == 4
+    assert snapshot.volume_ratio == Decimal("0")
+    assert snapshot.book_imbalance > Decimal("0")
     assert all("X-MBX-APIKEY" not in request.headers for request in calls)
     await feed.close()
     await client.aclose()
