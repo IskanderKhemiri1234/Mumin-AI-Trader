@@ -306,11 +306,20 @@ class ContinuousPaperBot:
 
             # First manage existing positions for every symbol with a fresh quote.
             for symbol, price in normalized.items():
-                history = db.execute(
-                    """SELECT price FROM bot_market_ticks
-                       WHERE symbol=? AND data_source=? ORDER BY tick DESC LIMIT 4""",
-                    (symbol, source),
-                ).fetchall()
+                if candle_close_times.get(symbol) is not None:
+                    history = db.execute(
+                        """SELECT price FROM bot_market_ticks
+                           WHERE symbol=? AND data_source=? AND candle_close_time_ms IS NOT NULL
+                           GROUP BY candle_close_time_ms
+                           ORDER BY MAX(tick) DESC LIMIT 4""",
+                        (symbol, source),
+                    ).fetchall()
+                else:
+                    history = db.execute(
+                        """SELECT price FROM bot_market_ticks
+                           WHERE symbol=? AND data_source=? ORDER BY tick DESC LIMIT 4""",
+                        (symbol, source),
+                    ).fetchall()
                 momentum = self._momentum(
                     [Decimal(row["price"]) for row in reversed(history)]
                 )
