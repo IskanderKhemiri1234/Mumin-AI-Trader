@@ -172,6 +172,83 @@ class ExecutionEngine:
         )
         return ProfitabilityCheck(eligible, gross_edge, costs, net, reason)
 
+    async def submit_paper_order_with_account_fees(
+        self,
+        client: Any,
+        *,
+        symbol: str,
+        side: OrderSide | str,
+        quantity: Decimal,
+        reference_price: Decimal,
+        quantity_step: Decimal = Decimal("0.00000001"),
+        min_notional: Decimal = Decimal("5"),
+        liquidity: str = "taker",
+        bnb_discount_requested: bool = True,
+    ) -> PaperOrder:
+        """Fetch real account commission and balances, then create a PAPER fill.
+
+        Requires a Binance API key with read-only account permissions. It never
+        submits an exchange order. If commission data cannot be read, it fails
+        closed rather than silently assuming a fee tier.
+        """
+        settings = getattr(client, "settings", None)
+        if settings is None or getattr(settings.TRADING_ENV, "value", None) != "TESTNET":
+            raise RuntimeError("Account-fee paper execution requires Binance Spot TESTNET.")
+        if getattr(settings.TRADING_MODE, "value", None) != "PAPER":
+            raise RuntimeError("Account-fee paper execution requires TRADING_MODE=PAPER.")
+
+        commission_payload = await client.account_commission(symbol)
+        account_payload = await client.account()
+        balances = {
+            str(item.get("asset", "")).upper(): Decimal(str(item.get("free", "0")))
+            + Decimal(str(item.get("locked", "0")))
+            for item in account_payload.get("balances", [])
+        }
+        bnb_available = balances.get(self.bnb_asset, ZERO)
+        bnb_price: Decimal | None = None
+        if bnb_discount_requested:
+            try:
+                bnb_ticker = await client.ticker_24h(f"{self.bnb_asset}{self.quote_asset}")
+                bnb_price = Decimal(str(bnb_ticker["lastPrice"]))
+                if not bnb_price.is_finite() or bnb_price <= ZERO:
+                    bnb_price = None
+            except (KeyError, TypeError, ValueError, RuntimeError):
+                bnb_price = None
+
+        standard = commission_payload.get("standardCommission", {})
+        discount = commission_payload.get("discount", {})
+        base_rate = Decimal(str(standard.get("taker" if liquidity.lower() == "taker" else "maker", "0")))
+        discount_rate = Decimal(str(discount.get("discount", "0")))
+        exchange_eligible = (
+            bool(discount.get("enabledForAccount"))
+            and bool(discount.get("enabledForSymbol"))
+            and str(discount.get("discountAsset", "")).upper() == self.bnb_asset
+            and discount_rate > ZERO
+        )
+        notional = Decimal(quantity) * Decimal(reference_price)
+        required_bnb = ZERO
+        if exchange_eligible and bnb_price is not None:
+            discounted_fee_quote = notional * base_rate * (Decimal(1) - discount_rate)
+            required_bnb = discounted_fee_quote / bnb_price
+        bnb_sufficient = (
+            exchange_eligible
+            and bnb_price is not None
+            and required_bnb > ZERO
+            and bnb_available >= required_bnb
+        )
+        return await self.submit_paper_order(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            reference_price=reference_price,
+            quantity_step=quantity_step,
+            min_notional=min_notional,
+            commission_payload=commission_payload,
+            liquidity=liquidity,
+            bnb_balance_sufficient=bnb_sufficient,
+            bnb_discount_requested=bnb_discount_requested,
+        )
+
     async def submit_paper_order(
         self,
         *,
