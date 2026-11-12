@@ -1,5 +1,6 @@
 from collections import deque
 from decimal import Decimal
+import time
 
 import httpx
 import pytest
@@ -69,6 +70,8 @@ async def test_testnet_stream_decodes_book_quote_depth_trade_and_closed_kline():
     state.ask = Decimal("3001")
     state.bid_levels = {Decimal("2999"): Decimal("10")}
     state.ask_levels = {Decimal("3001"): Decimal("2")}
+    state.last_quote_update_ms = int(time.time() * 1000)
+    state.last_depth_update_ms = int(time.time() * 1000)
     state.closed_volumes = deque(
         [Decimal("10")] * 20,
         maxlen=21,
