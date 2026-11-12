@@ -42,7 +42,8 @@ class _SymbolState:
     ask_levels: dict[Decimal, Decimal] = field(default_factory=dict)
     closed_volumes: deque[Decimal] = field(default_factory=lambda: deque(maxlen=21))
     volume_ratio: Decimal = Decimal("0")
-    last_market_event_ms: int = 0
+    last_quote_update_ms: int = 0
+    last_depth_update_ms: int = 0
 
     @property
     def imbalance(self) -> Decimal:
@@ -63,7 +64,11 @@ class _SymbolState:
     def snapshot(self, event_time_ms: int) -> TestnetMarketTick | None:
         if self.price <= 0 or self.bid <= 0 or self.ask < self.bid:
             return None
-        if event_time_ms - self.last_market_event_ms > 10_000:
+        local_now_ms = int(time.time() * 1000)
+        if (
+            local_now_ms - self.last_quote_update_ms > 10_000
+            or local_now_ms - self.last_depth_update_ms > 10_000
+        ):
             return None
         return TestnetMarketTick(
             symbol=self.symbol,
@@ -139,7 +144,9 @@ class BinanceSpotTestnetStream:
                 if len(row) > 6 and int(row[6]) < server_time:
                     state.closed_volumes.append(Decimal(str(row[5])))
             state.volume_ratio = volume_surge_ratio(list(state.closed_volumes))
-            state.last_market_event_ms = server_time
+            local_received_ms = int(time.time() * 1000)
+            state.last_quote_update_ms = local_received_ms
+            state.last_depth_update_ms = local_received_ms
             if state.price <= 0 or state.bid <= 0 or state.ask < state.bid:
                 raise ValueError(f"Invalid Testnet REST bootstrap snapshot for {symbol}")
 
@@ -170,13 +177,12 @@ class BinanceSpotTestnetStream:
 
         if event_type == "trade":
             state.price = Decimal(str(data["p"]))
-            state.last_market_event_ms = now_ms
             return state.snapshot(now_ms)
 
         if "b" in data and "a" in data and "s" in data and event_type is None:
             state.bid = Decimal(str(data["b"]))
             state.ask = Decimal(str(data["a"]))
-            state.last_market_event_ms = now_ms
+            state.last_quote_update_ms = int(time.time() * 1000)
             return None
 
         if "lastUpdateId" in data and "bids" in data and "asks" in data:
@@ -190,7 +196,7 @@ class BinanceSpotTestnetStream:
                 for price, quantity in data["asks"]
                 if Decimal(str(quantity)) > 0
             }
-            state.last_market_event_ms = now_ms
+            state.last_depth_update_ms = int(time.time() * 1000)
             return None
 
         if event_type == "kline":
