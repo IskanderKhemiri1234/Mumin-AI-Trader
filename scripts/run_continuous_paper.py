@@ -248,6 +248,16 @@ class ContinuousPaperBot:
             db.execute("BEGIN IMMEDIATE")
             account = db.execute("SELECT * FROM bot_account WHERE id=1").fetchone()
             tick = int(account["tick_count"]) + 1
+            stored_sources = {
+                row["data_source"] for row in db.execute(
+                    """SELECT DISTINCT data_source FROM bot_fills
+                       UNION SELECT DISTINCT data_source FROM bot_market_ticks"""
+                ).fetchall()
+            }
+            if stored_sources and stored_sources != {source}:
+                raise RuntimeError(
+                    "SQLite ledger market source mismatch; use a separate database for each source."
+                )
             cash = Decimal(account["cash"])
             realized = Decimal(account["realized_pnl"])
             fees_paid = Decimal(account["fees_paid"])
@@ -394,7 +404,7 @@ class ContinuousPaperBot:
                 Decimal("0"),
             )
             unrealized = equity - cash - sum(
-                (Decimal(pos["entry_gross"]) - Decimal(pos["entry_fee"])
+                (Decimal(pos["entry_gross"]) + Decimal(pos["entry_fee"])
                  for pos in open_rows),
                 Decimal("0"),
             )
