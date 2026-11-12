@@ -674,10 +674,11 @@ async def run_bot(
                     flush=True,
                 )
                 last_report = loop.time()
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
-            except asyncio.TimeoutError:
-                pass
+            if testnet_feed is None:
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
+                except asyncio.TimeoutError:
+                    pass
     finally:
         if stream_task is not None:
             stream_task.cancel()
