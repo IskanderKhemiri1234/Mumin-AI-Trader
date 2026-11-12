@@ -63,6 +63,9 @@ class PublicMarketData:
         if not closed:
             raise ValueError(f"No fully closed one-minute candle for {symbol}")
         candle = closed[-1]
+        candle_close_time_ms = int(candle[6])
+        if received_at_ms - candle_close_time_ms > 180_000:
+            raise ValueError(f"Closed candle is stale for {symbol}")
         close_price = Decimal(str(candle[4]))
         if not close_price.is_finite() or close_price <= 0:
             raise ValueError(f"Invalid closed-candle price for {symbol}")
@@ -72,7 +75,7 @@ class PublicMarketData:
             bid=bid,
             ask=ask,
             last_closed_price=close_price,
-            candle_close_time_ms=int(candle[6]),
+            candle_close_time_ms=candle_close_time_ms,
             received_at_ms=received_at_ms,
         )
 
