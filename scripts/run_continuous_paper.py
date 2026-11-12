@@ -447,7 +447,6 @@ class ContinuousPaperBot:
     def report(self) -> dict:
         with self._connect() as db:
             account = db.execute("SELECT * FROM bot_account WHERE id=1").fetchone()
-            latest_prices = self._latest_prices(db, "")
             # The most recent quote per symbol may have different sources; use the latest row.
             latest_prices = {}
             for row in db.execute(
@@ -530,6 +529,7 @@ async def run_bot(
     completed = 0
     try:
         while not stop.is_set() and (cycles is None or completed < cycles):
+            completed += 1
             if feed is None:
                 result = bot.step()
             else:
@@ -538,6 +538,14 @@ async def run_bot(
                     print(f"MARKET DATA UNAVAILABLE {symbol}: {error}", flush=True)
                 if not snapshots:
                     print("No fresh public quotes; skipping this cycle without synthetic fallback.", flush=True)
+                    if loop.time() - last_report >= REPORT_SECONDS:
+                        report = bot.save_hourly_report()
+                        print(
+                            f"HOURLY STATUS | no fresh market data | equity={report['equity']:.8f} "
+                            f"{QUOTE} | halted={report['halted']} {report['halt_reason']}",
+                            flush=True,
+                        )
+                        last_report = loop.time()
                     try:
                         await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
                     except asyncio.TimeoutError:
@@ -559,7 +567,6 @@ async def run_bot(
                 f"daily_net={result.daily_pnl:.8f}",
                 flush=True,
             )
-            completed += 1
             if result.halted:
                 print(f"RISK HALT: {bot.report()['halt_reason']}; new entries blocked.", flush=True)
             if loop.time() - last_report >= REPORT_SECONDS or (cycles is not None and completed == cycles):
