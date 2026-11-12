@@ -56,7 +56,7 @@ async def main() -> None:
         settings.MAX_TRADE_ALLOCATION_USD,
         settings.INITIAL_CAPITAL_USD * (Decimal(1) - settings.CAPITAL_RESERVE_PERCENT / Decimal(100)),
     )
-    quantity = (allocation / entry_quote.ask).quantize(Decimal("0.00000001"), rounding=ROUND_DOWN)
+    quantity = (allocation / (entry_quote.ask * Decimal("1.0002") * Decimal("1.001"))).quantize(Decimal("0.00000001"), rounding=ROUND_DOWN)
 
     buy = await engine.submit_paper_order(
         symbol=entry_quote.symbol,
