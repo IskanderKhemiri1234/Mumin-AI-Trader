@@ -41,11 +41,13 @@ pytest -q
 
 - Binance Spot public WebSocket market streams with reconnect and heartbeat.
 - Liquidity and spread screening; candidates are observations, not trade signals.
-- Paper execution with quantity-step rounding, slippage and quote-denominated fee estimates.
+- Continuous SQLite-backed Paper portfolio for BTCUSDT, ETHUSDT and BNBUSDT, with shared cash, per-symbol positions and portfolio-level exposure limits.
+- Unauthenticated Binance Public Market Data snapshots (closed 1-minute candles plus bid/ask) with stale-data rejection; no API key is used for market data.
+- Conservative simulated fills using bid/ask plus configured slippage and estimated fees; source-tagged market ticks, fills and portfolio snapshots.
 - Deterministic risk and fee modules.
 - FastAPI health endpoint and Docker configuration.
 
-Paper fills are simulated and in-memory; they are not exchange fills. BNB fee deduction is not yet verified against actual asset balances and trade commissions.
+Paper fills are simulated and persisted in SQLite; they are not exchange fills. Docker Compose defaults the continuous Paper service to Binance public market data. Set `MUMIN_MARKET_DATA_SOURCE=MOCK_SYNTHETIC` in `.env` to use deterministic offline prices. Separate database files are used for synthetic and public-market sessions. BNB fee deduction is not enabled by this Paper engine; fees are estimated in USDT and are not account-verified.
 
 ## Not production-ready
 
