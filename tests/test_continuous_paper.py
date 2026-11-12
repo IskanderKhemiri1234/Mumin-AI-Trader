@@ -80,3 +80,18 @@ def test_public_source_is_recorded_separately_from_synthetic(tmp_path):
         count = db.execute("SELECT COUNT(*) FROM bot_market_ticks").fetchone()[0]
     assert {row[0] for row in recorded} == {"BINANCE_PUBLIC_MARKET_DATA"}
     assert count == 3
+
+
+def test_repeated_public_candle_does_not_create_false_momentum(tmp_path):
+    bot = ContinuousPaperBot(str(tmp_path / "dedupe.sqlite3"))
+    candle_close = 1_800_000_000_000
+    for value in ("100", "101", "102", "103"):
+        price = Decimal(value)
+        result = bot.step(
+            {"BTCUSDT": price},
+            source="BINANCE_PUBLIC_MARKET_DATA",
+            quotes={"BTCUSDT": (price - Decimal("0.01"), price + Decimal("0.01"))},
+            candle_close_times={"BTCUSDT": candle_close},
+            received_at_ms=candle_close + 1000,
+        )
+    assert result.signal == "BTCUSDT:HOLD"
