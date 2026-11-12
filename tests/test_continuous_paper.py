@@ -21,7 +21,7 @@ def test_continuous_paper_loop_persists_state_and_hourly_report(tmp_path):
     assert result.tick == 40
     assert tick_count == 40
     assert reports == 1
-    assert fills >= 0
+    assert fills >= 2  # At least one complete BUY/SELL round trip in the synthetic fixture
     assert report["equity"] > 0
     assert reopened.report()["tick"] == 40
     assert report["fees"] >= 0
