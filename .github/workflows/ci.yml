@@ -46,6 +46,7 @@ jobs:
           cp .env.example .env
           mkdir -p data
           chmod 777 data
+          echo 'MUMIN_MARKET_DATA_SOURCE=MOCK_SYNTHETIC' >> .env
           grep -q '^TRADING_ENV=TESTNET$' .env
           grep -q '^TRADING_MODE=PAPER$' .env
           grep -q '^ALLOW_MAINNET=false$' .env
@@ -64,6 +65,16 @@ jobs:
           done
           docker compose logs
           exit 1
+      - name: Verify continuous multi-symbol Paper loop
+        run: |
+          for attempt in $(seq 1 30); do
+            if docker exec mumin-paper-bot python -c "import sqlite3; db=sqlite3.connect('/app/data/mumin_public_paper.db'); assert db.execute('SELECT COUNT(*) FROM bot_market_ticks').fetchone()[0] >= 3"; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker compose logs mumin-paper-bot
+          exit 1
       - name: Run one-time offline synthetic Paper trade
         run: |
           docker compose run --name mumin-paper-smoke --entrypoint python mumin-ai-trader scripts/run_mock_paper.py
@@ -72,7 +83,13 @@ jobs:
       - name: Preserve continuous Paper ledger
         if: always()
         run: |
-          docker cp mumin-paper-bot:/app/data/mumin_continuous_paper.db data/mumin_continuous_paper.db || true
+          docker cp mumin-paper-bot:/app/data/mumin_public_paper.db data/mumin_public_paper.db || true
+      - name: Verify exported multi-symbol ledger
+        if: always()
+        run: |
+          if [ -f data/mumin_public_paper.db ]; then
+            python -c "import sqlite3; db=sqlite3.connect('data/mumin_public_paper.db'); symbols={r[0] for r in db.execute('SELECT DISTINCT symbol FROM bot_market_ticks')}; assert symbols == {'BTCUSDT','ETHUSDT','BNBUSDT'}, symbols"
+          fi
       - name: Preserve Paper ledgers
         if: always()
         uses: actions/upload-artifact@v4
