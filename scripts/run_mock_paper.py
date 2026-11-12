@@ -31,7 +31,7 @@ async def main() -> None:
     if settings.TRADING_ENV.value == "MAINNET":
         raise RuntimeError("Mock runner refuses MAINNET configuration.")
 
-    database = args.db or os.getenv("MOCK_PAPER_DATABASE") or _database_path(settings.DATABASE_URL)
+    database = args.db or os.getenv("MOCK_PAPER_DATABASE") or str(Path("data") / "mumin_mock_paper.db")
     ledger = PaperLedger(database, initial_cash=settings.INITIAL_CAPITAL_USD)
     exchange = MockExchange()
     initial = exchange.quote("BTCUSDT")
