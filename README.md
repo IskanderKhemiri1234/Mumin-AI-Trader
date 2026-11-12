@@ -42,17 +42,34 @@ pytest -q
 - Binance Spot public WebSocket market streams with reconnect and heartbeat.
 - Liquidity and spread screening; candidates are observations, not trade signals.
 - Continuous SQLite-backed Paper portfolio for BTCUSDT, ETHUSDT and BNBUSDT, with shared cash, per-symbol positions and portfolio-level exposure limits.
-- Unauthenticated Binance Public Market Data snapshots (closed 1-minute candles plus bid/ask) with stale-data rejection; no API key is used for market data.
+- Binance Spot Testnet combined WebSocket streams for trade ticks, best bid/ask, top-20 partial depth and 1-minute klines, with reconnect/backoff and REST bootstrap; no API key is used for public market data.
+- Optional unauthenticated Binance public-market REST snapshots remain available as a separate source; Testnet and public-market data use separate SQLite ledgers.
 - Conservative simulated fills using bid/ask plus configured slippage and estimated fees; source-tagged market ticks, fills and portfolio snapshots.
 - Deterministic risk and fee modules.
 - FastAPI health endpoint and Docker configuration.
 
-Paper fills are simulated and persisted in SQLite; they are not exchange fills. Docker Compose defaults the continuous Paper service to Binance public market data. Set `MUMIN_MARKET_DATA_SOURCE=MOCK_SYNTHETIC` in `.env` to use deterministic offline prices. Separate database files are used for synthetic and public-market sessions. BNB fee deduction is not enabled by this Paper engine; fees are estimated in USDT and are not account-verified.
+Paper fills are simulated and persisted in SQLite; they are not exchange fills. Docker Compose defaults the continuous Paper service to `BINANCE_TESTNET_WEBSOCKET`, using the Spot Testnet REST bootstrap at `https://testnet.binance.vision/api` and combined WebSocket streams at `wss://stream.testnet.binance.vision/stream`. This is a Testnet market environment and its quotes/order book can differ from production Spot markets. Set `MUMIN_MARKET_DATA_SOURCE=BINANCE_PUBLIC_MARKET_DATA` for the unauthenticated public REST snapshot mode, or `MUMIN_MARKET_DATA_SOURCE=MOCK_SYNTHETIC` for deterministic offline prices. Each source uses a separate database ledger. BNB fee deduction is not enabled by this Paper engine; fees are estimated in USDT and are not account-verified.
 
 ## Not production-ready
 
-No live orders, withdrawals, margin, or futures. Before any live deployment, add exchange filter validation, persistent order state, reconciliation, robust fee-asset conversion, high-water-mark drawdown controls, monitoring, secrets management, disaster recovery, integration tests, and jurisdiction/platform eligibility review. Backtests and paper results never guarantee future returns.
+No live orders are sent to Testnet or Mainnet; no private account endpoints, withdrawals, margin, or futures are used by the Paper stream. Before any live deployment, add exchange filter validation, persistent order state, reconciliation, robust fee-asset conversion, high-water-mark drawdown controls, monitoring, secrets management, disaster recovery, integration tests, and jurisdiction/platform eligibility review. Backtests and paper results never guarantee future returns.
 
 ## GitHub helper
 
 `scripts/init_and_push.py` uses an existing authenticated GitHub CLI session and is intended to create a **new** repository. Do not run it against an existing repository; this project is being managed directly in the dedicated repository.
+
+
+## Run the Binance Spot Testnet WebSocket Paper stream
+
+```bash
+docker compose up --build -d mumin-paper-bot
+docker compose logs -f mumin-paper-bot
+```
+
+Or run directly after installing the project:
+
+```bash
+python scripts/run_continuous_paper.py --data-source BINANCE_TESTNET_WEBSOCKET --db data/mumin_binance_testnet_paper.db
+```
+
+The process consumes public Testnet streams for `BTCUSDT`, `ETHUSDT`, and `BNBUSDT`: `@trade`, `@bookTicker`, `@depth20@100ms`, and `@kline_1m`. It reconnects with exponential backoff and re-seeds its market state from Testnet REST endpoints after reconnects. It prints Paper signals, simulated actions, equity, realized net PnL, daily net PnL, and cumulative estimated fees. No API key or secret is required. Stop it with `docker compose stop mumin-paper-bot`.

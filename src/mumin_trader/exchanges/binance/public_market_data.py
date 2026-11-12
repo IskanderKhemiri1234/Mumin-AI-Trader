@@ -7,6 +7,8 @@ from typing import Any
 
 import httpx
 
+from mumin_trader.strategy.smart_sniper import order_book_imbalance, volume_surge_ratio
+
 
 BASE_URL = "https://data-api.binance.vision"
 ALLOWED_SYMBOLS = frozenset({"BTCUSDT", "ETHUSDT", "BNBUSDT"})
@@ -20,6 +22,8 @@ class PublicMarketSnapshot:
     last_closed_price: Decimal
     candle_close_time_ms: int
     received_at_ms: int
+    volume_ratio: Decimal
+    book_imbalance: Decimal
     source: str = "BINANCE_PUBLIC_MARKET_DATA"
 
 
@@ -48,9 +52,10 @@ class PublicMarketData:
         if symbol not in ALLOWED_SYMBOLS:
             raise ValueError(f"Symbol is not in the paper-trading allowlist: {symbol}")
 
-        book, candles, server = await asyncio.gather(
+        book, depth, candles, server = await asyncio.gather(
             self._get("/api/v3/ticker/bookTicker", {"symbol": symbol}),
-            self._get("/api/v3/klines", {"symbol": symbol, "interval": "1m", "limit": 30}),
+            self._get("/api/v3/depth", {"symbol": symbol, "limit": 20}),
+            self._get("/api/v3/klines", {"symbol": symbol, "interval": "1m", "limit": 21}),
             self._get("/api/v3/time", {}),
         )
         received_at_ms = int(server["serverTime"])
@@ -70,6 +75,22 @@ class PublicMarketData:
         if not close_price.is_finite() or close_price <= 0:
             raise ValueError(f"Invalid closed-candle price for {symbol}")
 
+        closed_volumes = [
+            Decimal(str(row[5]))
+            for row in candles
+            if len(row) > 6 and int(row[6]) < received_at_ms
+        ][-21:]
+        volume_ratio = volume_surge_ratio(closed_volumes)
+        bid_notional = sum(
+            (Decimal(str(level[0])) * Decimal(str(level[1])) for level in depth.get("bids", [])),
+            Decimal("0"),
+        )
+        ask_notional = sum(
+            (Decimal(str(level[0])) * Decimal(str(level[1])) for level in depth.get("asks", [])),
+            Decimal("0"),
+        )
+        imbalance = order_book_imbalance(bid_notional, ask_notional)
+
         return PublicMarketSnapshot(
             symbol=symbol,
             bid=bid,
@@ -77,6 +98,8 @@ class PublicMarketData:
             last_closed_price=close_price,
             candle_close_time_ms=candle_close_time_ms,
             received_at_ms=received_at_ms,
+            volume_ratio=volume_ratio,
+            book_imbalance=imbalance,
         )
 
     async def snapshots(self, symbols: tuple[str, ...] = tuple(sorted(ALLOWED_SYMBOLS))) -> tuple[dict[str, PublicMarketSnapshot], dict[str, str]]:

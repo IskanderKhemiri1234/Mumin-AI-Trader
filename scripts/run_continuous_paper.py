@@ -16,6 +16,11 @@ from mumin_trader.exchanges.binance.public_market_data import (
     PublicMarketData,
     simulated_fill_price,
 )
+from mumin_trader.exchanges.binance.testnet_stream import (
+    SOURCE as TESTNET_SOURCE,
+    BinanceSpotTestnetStream,
+)
+from mumin_trader.strategy.smart_sniper import evaluate_entry, evaluate_exit
 
 QUOTE = "USDT"
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "BNBUSDT")
@@ -27,7 +32,6 @@ MAX_OPEN_POSITIONS = 2
 FEE_RATE = Decimal("0.001")
 SLIPPAGE_BPS = Decimal("2")
 STOP_LOSS_PERCENT = Decimal("0.50")
-TAKE_PROFIT_PERCENT = Decimal("1.00")
 MAX_DAILY_LOSS_PERCENT = Decimal("2.00")
 MAX_DRAWDOWN_PERCENT = Decimal("5.00")
 REPORT_SECONDS = 3600
@@ -96,7 +100,9 @@ class ContinuousPaperBot:
                     entry_price TEXT NOT NULL,
                     entry_gross TEXT NOT NULL,
                     entry_fee TEXT NOT NULL,
-                    opened_at TEXT NOT NULL
+                    opened_at TEXT NOT NULL,
+                    high_water_price TEXT NOT NULL DEFAULT '0',
+                    trailing_stop_price TEXT NOT NULL DEFAULT '0'
                 );
                 CREATE TABLE IF NOT EXISTS bot_fills (
                     fill_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -162,6 +168,17 @@ class ContinuousPaperBot:
                     created_at TEXT NOT NULL
                 );
             """)
+            position_columns = {
+                column["name"] for column in db.execute("PRAGMA table_info(bot_positions)")
+            }
+            if "high_water_price" not in position_columns:
+                db.execute(
+                    "ALTER TABLE bot_positions ADD COLUMN high_water_price TEXT NOT NULL DEFAULT '0'"
+                )
+            if "trailing_stop_price" not in position_columns:
+                db.execute(
+                    "ALTER TABLE bot_positions ADD COLUMN trailing_stop_price TEXT NOT NULL DEFAULT '0'"
+                )
             row = db.execute("SELECT initial_cash FROM bot_account WHERE id=1").fetchone()
             if row is None:
                 db.execute(
@@ -223,6 +240,7 @@ class ContinuousPaperBot:
         quotes: dict[str, tuple[Decimal, Decimal]] | None = None,
         candle_close_times: dict[str, int] | None = None,
         received_at_ms: int | None = None,
+        liquidity_metrics: dict[str, tuple[Decimal, Decimal]] | None = None,
     ) -> TickResult:
         if source not in {SYNTHETIC_SOURCE, PUBLIC_SOURCE}:
             raise ValueError("Unknown market data source.")
@@ -243,6 +261,11 @@ class ContinuousPaperBot:
             raise ValueError("Prices must contain positive finite values for allowlisted symbols.")
         quotes = quotes or {symbol: (price, price) for symbol, price in normalized.items()}
         candle_close_times = candle_close_times or {}
+        if liquidity_metrics is None:
+            liquidity_metrics = (
+                {symbol: (Decimal("2.0"), Decimal("0.20")) for symbol in normalized}
+                if source == SYNTHETIC_SOURCE else {}
+            )
 
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -323,21 +346,29 @@ class ContinuousPaperBot:
                 momentum = self._momentum(
                     [Decimal(row["price"]) for row in reversed(history)]
                 )
-                signal_name = "BUY" if momentum >= Decimal("8") else (
+                volume_ratio, book_imbalance = liquidity_metrics.get(
+                    symbol, (Decimal("0"), Decimal("0"))
+                )
+                entry_signal = evaluate_entry(momentum, volume_ratio, book_imbalance)
+                signal_name = "BUY" if entry_signal.accepted else (
                     "SELL" if momentum <= Decimal("-8") else "HOLD"
                 )
-                signals.append(f"{symbol}:{signal_name}")
+                signals.append(
+                    f"{symbol}:{signal_name}[v={volume_ratio:.2f},obi={book_imbalance:.2f}]"
+                )
                 position = open_positions.get(symbol)
                 action = "NONE"
                 bid, ask = quotes.get(symbol, (price, price))
                 if position is not None:
                     entry = Decimal(position["entry_price"])
-                    change_pct = (price / entry - Decimal(1)) * Decimal("100")
-                    if (
-                        change_pct <= -STOP_LOSS_PERCENT
-                        or change_pct >= TAKE_PROFIT_PERCENT
-                        or signal_name == "SELL"
-                    ):
+                    exit_decision = evaluate_exit(
+                        entry,
+                        Decimal(position["high_water_price"] or position["entry_price"]),
+                        price,
+                        momentum,
+                        book_imbalance,
+                    )
+                    if exit_decision.should_exit:
                         fill = simulated_fill_price("SELL", bid, ask, SLIPPAGE_BPS)
                         quantity = Decimal(position["quantity"])
                         gross = quantity * fill
@@ -359,8 +390,21 @@ class ContinuousPaperBot:
                             (tick, symbol, "SELL", str(quantity), str(price), str(fill),
                              str(gross), str(fee), str(net_trade), source, timestamp),
                         )
-                        action = f"{symbol}:CLOSE net={net_trade:.8f}"
+                        action = (
+                            f"{symbol}:CLOSE[{exit_decision.reason}] net={net_trade:.8f}"
+                        )
                         open_positions.pop(symbol, None)
+                    else:
+                        db.execute(
+                            """UPDATE bot_positions
+                               SET high_water_price=?, trailing_stop_price=?
+                               WHERE symbol=?""",
+                            (
+                                str(exit_decision.high_water_price),
+                                str(exit_decision.trailing_stop_price),
+                                symbol,
+                            ),
+                        )
 
                 # Entries are considered only after exits, and share one cash/risk budget.
                 if (
@@ -387,9 +431,11 @@ class ContinuousPaperBot:
                             fees_paid += fee
                             db.execute(
                                 """INSERT INTO bot_positions
-                                (symbol,quantity,entry_price,entry_gross,entry_fee,opened_at)
-                                VALUES (?,?,?,?,?,?)""",
-                                (symbol, str(quantity), str(fill), str(gross), str(fee), timestamp),
+                                (symbol,quantity,entry_price,entry_gross,entry_fee,opened_at,
+                                 high_water_price,trailing_stop_price)
+                                VALUES (?,?,?,?,?,?,?,?)""",
+                                (symbol, str(quantity), str(fill), str(gross), str(fee), timestamp,
+                                 str(fill), str(fill * (Decimal("1") - STOP_LOSS_PERCENT / Decimal("100")))),
                             )
                             db.execute(
                                 """INSERT INTO bot_fills
@@ -519,6 +565,9 @@ async def run_bot(
 ) -> None:
     bot = ContinuousPaperBot(database)
     feed = PublicMarketData() if data_source == PUBLIC_SOURCE else None
+    testnet_feed = (
+        BinanceSpotTestnetStream(SYMBOLS) if data_source == TESTNET_SOURCE else None
+    )
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -536,12 +585,40 @@ async def run_bot(
     print(f"SQLite ledger: {database} | cycle interval: {interval_seconds}s", flush=True)
     last_report = loop.time()
     completed = 0
+    live_queue: asyncio.Queue = asyncio.Queue(maxsize=2000)
+    stream_task = None
+    if testnet_feed is not None:
+        async def stream_pump() -> None:
+            async for market_tick in testnet_feed.stream():
+                if stop.is_set():
+                    break
+                await live_queue.put(market_tick)
+        stream_task = asyncio.create_task(stream_pump())
+
     try:
         while not stop.is_set() and (cycles is None or completed < cycles):
-            completed += 1
-            if feed is None:
+            if testnet_feed is not None:
+                try:
+                    market_tick = await asyncio.wait_for(live_queue.get(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    continue
+                completed += 1
+                result = bot.step(
+                    {market_tick.symbol: market_tick.price},
+                    source=TESTNET_SOURCE,
+                    quotes={market_tick.symbol: (market_tick.bid, market_tick.ask)},
+                    received_at_ms=market_tick.event_time_ms,
+                    liquidity_metrics={
+                        market_tick.symbol: (
+                            market_tick.volume_ratio, market_tick.book_imbalance
+                        )
+                    },
+                )
+            elif feed is None:
+                completed += 1
                 result = bot.step()
             else:
+                completed += 1
                 snapshots, errors = await feed.snapshots(SYMBOLS)
                 for symbol, error in errors.items():
                     print(f"MARKET DATA UNAVAILABLE {symbol}: {error}", flush=True)
@@ -564,16 +641,22 @@ async def run_bot(
                 quotes = {symbol: (item.bid, item.ask) for symbol, item in snapshots.items()}
                 candle_times = {symbol: item.candle_close_time_ms for symbol, item in snapshots.items()}
                 received = min(item.received_at_ms for item in snapshots.values())
+                liquidity = {
+                    symbol: (item.volume_ratio, item.book_imbalance)
+                    for symbol, item in snapshots.items()
+                }
                 result = bot.step(
                     prices, source=PUBLIC_SOURCE, quotes=quotes,
                     candle_close_times=candle_times, received_at_ms=received,
+                    liquidity_metrics=liquidity,
                 )
 
             print(
                 f"[tick {result.tick}] pricesource={data_source} price={result.price} {QUOTE} "
                 f"signals={result.signal} actions={result.action} cash={result.cash:.8f} "
                 f"equity={result.equity:.8f} realized_net={result.realized_pnl:.8f} "
-                f"daily_net={result.daily_pnl:.8f}",
+                f"daily_net={result.daily_pnl:.8f} fees_total={result.fees_paid:.8f} "
+                f"mode={'PAPER_ONLY' if data_source == TESTNET_SOURCE else 'PAPER'}",
                 flush=True,
             )
             if result.halted:
@@ -591,13 +674,19 @@ async def run_bot(
                     flush=True,
                 )
                 last_report = loop.time()
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
-            except asyncio.TimeoutError:
-                pass
+            if testnet_feed is None:
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
+                except asyncio.TimeoutError:
+                    pass
     finally:
+        if stream_task is not None:
+            stream_task.cancel()
+            await asyncio.gather(stream_task, return_exceptions=True)
         if feed is not None:
             await feed.close()
+        if testnet_feed is not None:
+            await testnet_feed.close()
     print("Continuous Paper loop stopped cleanly.", flush=True)
 
 
@@ -607,7 +696,7 @@ def main() -> None:
     parser.add_argument("--interval-seconds", type=float, default=30.0)
     parser.add_argument("--cycles", type=int, default=None, help="Finite smoke run; omit for continuous operation.")
     parser.add_argument(
-        "--data-source", choices=(SYNTHETIC_SOURCE, PUBLIC_SOURCE),
+        "--data-source", choices=(SYNTHETIC_SOURCE, PUBLIC_SOURCE, TESTNET_SOURCE),
         default=os.getenv("MUMIN_MARKET_DATA_SOURCE", SYNTHETIC_SOURCE),
     )
     args = parser.parse_args()
@@ -616,6 +705,8 @@ def main() -> None:
     database = args.db or (
         "data/mumin_binance_public_paper.db"
         if args.data_source == PUBLIC_SOURCE
+        else "data/mumin_binance_testnet_paper.db"
+        if args.data_source == TESTNET_SOURCE
         else "data/mumin_continuous_paper.db"
     )
     asyncio.run(run_bot(database, args.interval_seconds, args.cycles, args.data_source))
