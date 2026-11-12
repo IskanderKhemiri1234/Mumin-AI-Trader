@@ -55,6 +55,7 @@ async def test_testnet_rest_bootstrap_is_public_and_seeds_liquidity():
     assert state.ask == Decimal("100.1")
     assert state.volume_ratio == Decimal("4")
     assert state.imbalance > Decimal("0")
+    assert all(request.url.path.startswith("/api/v3/") for request in calls)
     assert all("X-MBX-APIKEY" not in request.headers for request in calls)
     await feed.close()
     await client.aclose()
