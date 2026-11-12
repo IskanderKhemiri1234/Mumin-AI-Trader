@@ -69,6 +69,22 @@ jobs:
           docker compose run --name mumin-paper-smoke --entrypoint python mumin-ai-trader scripts/run_mock_paper.py
           docker cp mumin-paper-smoke:/app/data/mumin_mock_paper.db data/mumin_mock_paper.db
           docker rm mumin-paper-smoke
+      - name: Preserve continuous Paper ledger
+        if: always()
+        run: |
+          if docker ps --format '{{.Names}}' | grep -q '^mumin-paper-bot        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mumin-paper-ledger
+          path: data/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Stop containers
+        if: always()
+        run: docker compose down
+; then
+            docker cp mumin-paper-bot:/app/data/mumin_continuous_paper.db data/mumin_continuous_paper.db || true
+          fi
       - name: Preserve paper ledger
         if: always()
         uses: actions/upload-artifact@v4
