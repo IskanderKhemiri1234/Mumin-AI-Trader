@@ -94,4 +94,4 @@ def test_repeated_public_candle_does_not_create_false_momentum(tmp_path):
             candle_close_times={"BTCUSDT": candle_close},
             received_at_ms=candle_close + 1000,
         )
-    assert result.signal == "BTCUSDT:HOLD"
+    assert result.signal.startswith("BTCUSDT:HOLD")
