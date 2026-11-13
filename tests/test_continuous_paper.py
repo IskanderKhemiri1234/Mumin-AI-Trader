@@ -368,13 +368,15 @@ def test_compounding_schema_migrates_existing_paper_positions_without_reset(tmp_
     with sqlite3.connect(database) as db:
         columns = {row[1] for row in db.execute("PRAGMA table_info(bot_positions)")}
         position = db.execute(
-            "SELECT quantity, profit_funded_quote FROM bot_positions WHERE symbol='BTCUSDT'"
+            "SELECT quantity, profit_funded_quote, take_profit_percent "
+            "FROM bot_positions WHERE symbol='BTCUSDT'"
         ).fetchone()
         event_table = db.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='bot_compounding_events'"
         ).fetchone()
 
     assert "profit_funded_quote" in columns
-    assert position == ("0.001", "0")
+    assert "take_profit_percent" in columns
+    assert position == ("0.001", "0", "1.25")
     assert event_table == ("bot_compounding_events",)
 
