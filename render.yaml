@@ -5,7 +5,6 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    startCommand: python scripts/run_render_demo.py
     healthCheckPath: /health
     autoDeploy: true
     envVars:
