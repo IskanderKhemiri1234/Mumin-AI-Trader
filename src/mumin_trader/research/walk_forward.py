@@ -62,6 +62,9 @@ class BacktestMetrics:
     profit_factor: Decimal | None
     fees_paid: Decimal
     shield_blocks: int
+    buy_candidates: int
+    blocked_buy_candidates: int
+    entry_orders: int
     compounding_reinvested: Decimal
 
 
@@ -99,6 +102,7 @@ def _evaluate_fold(
     high_water = cash
     max_drawdown = ZERO
     closed_trades = wins = losses = shield_blocks = 0
+    buy_candidates = blocked_buy_candidates = entry_orders = 0
     gross_wins = gross_losses = ZERO
     compounding_reinvested = ZERO
     position: dict[str, Decimal] | None = None
@@ -157,6 +161,10 @@ def _evaluate_fold(
 
         if shield_decision.block_entries:
             shield_blocks += 1
+        if assessment.signal == "BUY":
+            buy_candidates += 1
+            if shield_decision.block_entries:
+                blocked_buy_candidates += 1
 
         if position is not None:
             half_spread = bar.spread_bps / (BPS * Decimal("2"))
@@ -224,6 +232,7 @@ def _evaluate_fold(
             allocation = min(allocation, max(ZERO, cash - RESERVE_CASH))
             if allocation >= Decimal("1"):
                 pending_entry = {"allocation": allocation}
+                entry_orders += 1
                 compounding_reinvested += max(ZERO, allocation - BASE_TICKET)
 
         marked_equity = cash
@@ -270,7 +279,8 @@ def _evaluate_fold(
         start, end, cash,
         (cash / Decimal(initial_cash) - Decimal("1")) * Decimal("100"),
         max_drawdown, closed_trades, wins, losses, win_rate,
-        profit_factor, fees_paid, shield_blocks, compounding_reinvested,
+        profit_factor, fees_paid, shield_blocks, buy_candidates,
+        blocked_buy_candidates, entry_orders, compounding_reinvested,
     )
 
 
