@@ -11,6 +11,10 @@ from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 
+from mumin_trader.strategy.smart_sniper import SmartSniperStrategy
+from mumin_trader.risk.anti_loss_quantum_shield import AntiLossQuantumShield, ShieldAssessment
+from mumin_trader.strategy.compounding import DynamicCompoundingMatrix
+
 from mumin_trader.exchanges.binance.public_market_data import (
     ALLOWED_SYMBOLS,
     PublicMarketData,
@@ -21,6 +25,8 @@ QUOTE = "USDT"
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "BNBUSDT")
 INITIAL_CASH = Decimal(os.getenv("INITIAL_CAPITAL_USD", "70.00"))
 MAX_TRADE = Decimal(os.getenv("MAX_TRADE_ALLOCATION_USD", "5.00"))
+# Conservative seed ticket; any amount above this must be backed by realized net profit.
+BASE_TRADE_ALLOCATION = Decimal("1.02")
 RESERVE_PERCENT = Decimal(os.getenv("CAPITAL_RESERVE_PERCENT", "20"))
 MAX_CAPITAL = Decimal(os.getenv("MAX_CAPITAL_ALLOCATION_USD", str(INITIAL_CASH)))
 MAX_TOTAL_EXPOSURE = MAX_CAPITAL * (Decimal("100") - RESERVE_PERCENT) / Decimal("100")
@@ -28,7 +34,7 @@ MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "2"))
 FEE_RATE = Decimal("0.001")
 SLIPPAGE_BPS = Decimal("2")
 STOP_LOSS_PERCENT = Decimal(os.getenv("SIMULATED_STOP_LOSS_PERCENT", "0.50"))
-TAKE_PROFIT_PERCENT = Decimal(os.getenv("SIMULATED_TAKE_PROFIT_PERCENT", "1.00"))
+TAKE_PROFIT_PERCENT = Decimal(os.getenv("SIMULATED_TAKE_PROFIT_PERCENT", "1.25"))
 MAX_DAILY_LOSS_PERCENT = Decimal(os.getenv("MAX_DAILY_LOSS_PERCENT", "2.00"))
 MAX_DRAWDOWN_PERCENT = Decimal(os.getenv("MAX_DRAWDOWN_PERCENT", "5.00"))
 
@@ -39,8 +45,8 @@ if INITIAL_CASH != Decimal("70.00"):
     raise RuntimeError("Paper engine requires the configured 70.00 USDT starting capital.")
 if STOP_LOSS_PERCENT != Decimal("0.50"):
     raise RuntimeError("Paper stop-loss is fixed at 0.50%.")
-if TAKE_PROFIT_PERCENT != Decimal("1.00"):
-    raise RuntimeError("Paper take-profit is fixed at 1.00%.")
+if TAKE_PROFIT_PERCENT != Decimal("1.25"):
+    raise RuntimeError("Paper take-profit is fixed at 1.25% (2.5R against the 0.50% stop).")
 if MAX_DAILY_LOSS_PERCENT != Decimal("2.00"):
     raise RuntimeError("Paper daily loss limit is fixed at 2.00%.")
 
@@ -74,6 +80,9 @@ class ContinuousPaperBot:
     def __init__(self, database: str, initial_cash: Decimal = INITIAL_CASH):
         self.database = database
         self.initial_cash = Decimal(initial_cash)
+        self.strategy = SmartSniperStrategy()
+        self.anti_loss_shield = AntiLossQuantumShield()
+        self.compounding_matrix = DynamicCompoundingMatrix()
         if database != ":memory:":
             Path(database).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -110,6 +119,7 @@ class ContinuousPaperBot:
                     entry_price TEXT NOT NULL,
                     entry_gross TEXT NOT NULL,
                     entry_fee TEXT NOT NULL,
+                    profit_funded_quote TEXT NOT NULL DEFAULT '0',
                     opened_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS bot_fills (
@@ -175,7 +185,50 @@ class ContinuousPaperBot:
                     data_source TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS bot_risk_events (
+                    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tick INTEGER NOT NULL,
+                    symbol TEXT NOT NULL,
+                    shield_mode TEXT NOT NULL,
+                    block_entries INTEGER NOT NULL,
+                    exit_fraction TEXT NOT NULL,
+                    spread_bps TEXT NOT NULL,
+                    quote_volume_ratio TEXT,
+                    trade_count_ratio TEXT,
+                    price_change_bps TEXT NOT NULL,
+                    candle_age_ms INTEGER NOT NULL,
+                    reasons TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_risk_events_tick_symbol
+                    ON bot_risk_events(tick, symbol);
+                CREATE TABLE IF NOT EXISTS bot_compounding_events (
+                    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tick INTEGER NOT NULL,
+                    symbol TEXT NOT NULL,
+                    realized_profit_pool TEXT NOT NULL,
+                    momentum_score TEXT NOT NULL,
+                    drawdown_percent TEXT NOT NULL,
+                    reinvestment_fraction TEXT NOT NULL,
+                    budget_ceiling TEXT NOT NULL,
+                    committed_before TEXT NOT NULL,
+                    available_profit_budget TEXT NOT NULL,
+                    base_ticket TEXT NOT NULL,
+                    allocated_profit TEXT NOT NULL,
+                    order_notional TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_compounding_events_tick_symbol
+                    ON bot_compounding_events(tick, symbol);
             """)
+            position_columns = {
+                column["name"] for column in db.execute("PRAGMA table_info(bot_positions)")
+            }
+            if "profit_funded_quote" not in position_columns:
+                db.execute(
+                    "ALTER TABLE bot_positions ADD COLUMN profit_funded_quote TEXT NOT NULL DEFAULT '0'"
+                )
             row = db.execute("SELECT initial_cash FROM bot_account WHERE id=1").fetchone()
             if row is None:
                 db.execute(
@@ -237,6 +290,8 @@ class ContinuousPaperBot:
         quotes: dict[str, tuple[Decimal, Decimal]] | None = None,
         candle_close_times: dict[str, int] | None = None,
         received_at_ms: int | None = None,
+        liquidity_metrics: dict[str, tuple[Decimal | None, Decimal | None]] | None = None,
+        higher_timeframe_metrics: dict[str, tuple[dict[str, list[Decimal]], Decimal | None]] | None = None,
     ) -> TickResult:
         if source not in {SYNTHETIC_SOURCE, PUBLIC_SOURCE}:
             raise ValueError("Unknown market data source.")
@@ -257,6 +312,8 @@ class ContinuousPaperBot:
             raise ValueError("Prices must contain positive finite values for allowlisted symbols.")
         quotes = quotes or {symbol: (price, price) for symbol, price in normalized.items()}
         candle_close_times = candle_close_times or {}
+        liquidity_metrics = liquidity_metrics or {}
+        higher_timeframe_metrics = higher_timeframe_metrics or {}
 
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -338,21 +395,66 @@ class ContinuousPaperBot:
                         """SELECT price FROM bot_market_ticks
                            WHERE symbol=? AND data_source=? AND candle_close_time_ms IS NOT NULL
                            GROUP BY candle_close_time_ms
-                           ORDER BY MAX(tick) DESC LIMIT 4""",
+                           ORDER BY MAX(tick) DESC LIMIT 60""",
                         (symbol, source),
                     ).fetchall()
                 else:
                     history = db.execute(
                         """SELECT price FROM bot_market_ticks
-                           WHERE symbol=? AND data_source=? ORDER BY tick DESC LIMIT 4""",
+                           WHERE symbol=? AND data_source=? ORDER BY tick DESC LIMIT 60""",
                         (symbol, source),
                     ).fetchall()
-                momentum = self._momentum(
-                    [Decimal(row["price"]) for row in reversed(history)]
+                closes = [Decimal(row["price"]) for row in reversed(history)]
+                bid, ask = quotes.get(symbol, (price, price))
+                midpoint = (Decimal(bid) + Decimal(ask)) / Decimal("2")
+                spread_bps = (
+                    (Decimal(ask) - Decimal(bid)) / midpoint * Decimal("10000")
+                    if midpoint > 0 else Decimal("10000")
                 )
-                signal_name = "BUY" if momentum >= Decimal("8") else (
-                    "SELL" if momentum <= Decimal("-8") else "HOLD"
+                timeframe_closes, atr_percent = higher_timeframe_metrics.get(symbol, ({}, None))
+                assessment = self.strategy.assess(
+                    closes, spread_bps=spread_bps,
+                    higher_timeframe_closes=timeframe_closes,
+                    atr_percent=atr_percent,
                 )
+                signal_name = assessment.signal
+                volume_ratio, trade_ratio = liquidity_metrics.get(symbol, (None, None))
+                previous_close = closes[-2] if len(closes) >= 2 else price
+                price_change_bps = (
+                    (price / previous_close - Decimal("1")) * Decimal("10000")
+                    if previous_close > 0 else Decimal("0")
+                )
+                candle_age_ms = max(
+                    0, received - candle_close_times.get(symbol, received)
+                )
+                if source == PUBLIC_SOURCE:
+                    shield_decision = self.anti_loss_shield.assess(
+                        spread_bps=spread_bps,
+                        quote_volume_ratio=volume_ratio,
+                        trade_count_ratio=trade_ratio,
+                        price_change_bps=price_change_bps,
+                        candle_age_ms=candle_age_ms,
+                    )
+                else:
+                    shield_decision = ShieldAssessment(
+                        "BYPASSED_SYNTHETIC", False, Decimal("0"),
+                        ("Synthetic test feed has no real liquidity observations.",),
+                    )
+                db.execute(
+                    """INSERT INTO bot_risk_events
+                    (tick,symbol,shield_mode,block_entries,exit_fraction,spread_bps,
+                     quote_volume_ratio,trade_count_ratio,price_change_bps,candle_age_ms,
+                     reasons,created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (tick, symbol, shield_decision.mode, int(shield_decision.block_entries),
+                     str(shield_decision.exit_fraction), str(spread_bps),
+                     str(volume_ratio) if volume_ratio is not None else None,
+                     str(trade_ratio) if trade_ratio is not None else None,
+                     str(price_change_bps), candle_age_ms,
+                     " | ".join(shield_decision.reasons), timestamp),
+                )
+                if shield_decision.block_entries and signal_name == "BUY":
+                    signal_name = "HOLD"
                 signals.append(f"{symbol}:{signal_name}")
                 position = open_positions.get(symbol)
                 action = "NONE"
@@ -370,27 +472,59 @@ class ContinuousPaperBot:
                         projected_net / entry_cost * Decimal("100")
                         if entry_cost > 0 else Decimal("-100")
                     )
-                    if (
+                    hard_exit = (
                         net_return_pct <= -STOP_LOSS_PERCENT
                         or net_return_pct >= TAKE_PROFIT_PERCENT
                         or signal_name == "SELL"
-                    ):
-                        net_trade = projected_net
-                        cash += gross - fee
+                    )
+                    exit_fraction = Decimal("1") if hard_exit else shield_decision.exit_fraction
+                    quantity_to_sell = (
+                        quantity * exit_fraction
+                    ).quantize(Decimal("0.00000001"), rounding=ROUND_DOWN)
+                    if exit_fraction > 0 and quantity_to_sell > 0:
+                        actual_fraction = quantity_to_sell / quantity
+                        sold_gross = quantity_to_sell * fill
+                        sold_fee = (sold_gross * FEE_RATE).quantize(Decimal("0.00000001"))
+                        sold_entry_gross = Decimal(position["entry_gross"]) * actual_fraction
+                        sold_entry_fee = Decimal(position["entry_fee"]) * actual_fraction
+                        net_trade = sold_gross - sold_fee - sold_entry_gross - sold_entry_fee
+                        cash += sold_gross - sold_fee
                         realized += net_trade
                         daily_realized += net_trade
-                        fees_paid += fee
-                        db.execute("DELETE FROM bot_positions WHERE symbol=?", (symbol,))
+                        fees_paid += sold_fee
+                        remaining_quantity = quantity - quantity_to_sell
                         db.execute(
                             """INSERT INTO bot_fills
                             (tick,symbol,side,quantity,reference_price,fill_price,gross_quote,
                              fee_quote,net_pnl,data_source,created_at)
                             VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                            (tick, symbol, "SELL", str(quantity), str(price), str(fill),
-                             str(gross), str(fee), str(net_trade), source, timestamp),
+                            (tick, symbol, "SELL", str(quantity_to_sell), str(price), str(fill),
+                             str(sold_gross), str(sold_fee), str(net_trade), source, timestamp),
                         )
-                        action = f"{symbol}:CLOSE net={net_trade:.8f}"
-                        open_positions.pop(symbol, None)
+                        if remaining_quantity > 0:
+                            remaining_entry_gross = Decimal(position["entry_gross"]) - sold_entry_gross
+                            remaining_entry_fee = Decimal(position["entry_fee"]) - sold_entry_fee
+                            remaining_profit_funded = (
+                                Decimal(position["profit_funded_quote"]) * (Decimal("1") - actual_fraction)
+                            )
+                            db.execute(
+                                """UPDATE bot_positions SET quantity=?, entry_gross=?, entry_fee=?,
+                                   profit_funded_quote=? WHERE symbol=?""",
+                                (str(remaining_quantity), str(remaining_entry_gross),
+                                 str(remaining_entry_fee), str(remaining_profit_funded), symbol),
+                            )
+                            open_positions[symbol] = {
+                                **dict(position),
+                                "quantity": str(remaining_quantity),
+                                "entry_gross": str(remaining_entry_gross),
+                                "entry_fee": str(remaining_entry_fee),
+                                "profit_funded_quote": str(remaining_profit_funded),
+                            }
+                            action = f"{symbol}:DE_RISK qty={quantity_to_sell}"
+                        else:
+                            db.execute("DELETE FROM bot_positions WHERE symbol=?", (symbol,))
+                            action = f"{symbol}:CLOSE net={net_trade:.8f}"
+                            open_positions.pop(symbol, None)
                         # Re-evaluate account-wide daily loss immediately after a
                         # realized exit, before another symbol can open a position.
                         marked_equity = cash + sum(
@@ -415,8 +549,42 @@ class ContinuousPaperBot:
                          for pos_symbol, pos in open_positions.items()),
                         Decimal("0"),
                     )
-                    allocation = min(MAX_TRADE, max(Decimal("0"), cash - reserve_cash))
-                    if exposure + allocation <= MAX_TOTAL_EXPOSURE and allocation > 0:
+                    drawdown_percent = (
+                        max(Decimal("0"), (high_water - marked_equity) / high_water * Decimal("100"))
+                        if high_water > 0 else Decimal("0")
+                    )
+                    compounding = self.compounding_matrix.assess(
+                        realized_net_pnl=realized,
+                        momentum_score=assessment.score,
+                        drawdown_percent=drawdown_percent,
+                        atr_percent=assessment.atr_percent,
+                        trend_clear=assessment.mtf_confluence and assessment.regime == "BULL",
+                        liquidity_high=(
+                            spread_bps <= Decimal("8")
+                            and volume_ratio is not None and Decimal("0.80") <= volume_ratio <= Decimal("2.50")
+                            and trade_ratio is not None and Decimal("0.80") <= trade_ratio <= Decimal("2.50")
+                        ),
+                    )
+                    committed_profit = sum(
+                        (Decimal(pos["profit_funded_quote"]) for pos in open_positions.values()),
+                        Decimal("0"),
+                    )
+                    available_profit = max(
+                        Decimal("0"), compounding.reinvestment_budget - committed_profit
+                    )
+                    base_allocation = min(
+                        BASE_TRADE_ALLOCATION, max(Decimal("0"), cash - reserve_cash)
+                    )
+                    allocation = min(MAX_TRADE, base_allocation + available_profit)
+                    allocation = min(
+                        allocation,
+                        max(Decimal("0"), cash - reserve_cash),
+                        max(Decimal("0"), MAX_TOTAL_EXPOSURE - exposure),
+                    )
+                    profit_funded_quote = max(
+                        Decimal("0"), allocation - min(BASE_TRADE_ALLOCATION, allocation)
+                    )
+                    if allocation > 0:
                         fill = simulated_fill_price("BUY", bid, ask, SLIPPAGE_BPS)
                         quantity = (allocation / (fill * (Decimal(1) + FEE_RATE))).quantize(
                             Decimal("0.00000001"), rounding=ROUND_DOWN
@@ -425,13 +593,29 @@ class ContinuousPaperBot:
                         fee = (gross * FEE_RATE).quantize(Decimal("0.00000001"))
                         total = gross + fee
                         if quantity > 0 and gross >= Decimal("1.00") and total <= cash - reserve_cash:
+                            db.execute(
+                                """INSERT INTO bot_compounding_events
+                                (tick,symbol,realized_profit_pool,momentum_score,drawdown_percent,
+                                 reinvestment_fraction,budget_ceiling,committed_before,
+                                 available_profit_budget,base_ticket,allocated_profit,
+                                 order_notional,reason,created_at)
+                                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                (tick, symbol, str(max(Decimal("0"), realized)),
+                                 str(assessment.score), str(drawdown_percent),
+                                 str(compounding.reinvestment_fraction),
+                                 str(compounding.reinvestment_budget), str(committed_profit),
+                                 str(available_profit), str(base_allocation),
+                                 str(profit_funded_quote), str(total), compounding.reason, timestamp),
+                            )
                             cash -= total
                             fees_paid += fee
                             db.execute(
                                 """INSERT INTO bot_positions
-                                (symbol,quantity,entry_price,entry_gross,entry_fee,opened_at)
-                                VALUES (?,?,?,?,?,?)""",
-                                (symbol, str(quantity), str(fill), str(gross), str(fee), timestamp),
+                                (symbol,quantity,entry_price,entry_gross,entry_fee,
+                                 profit_funded_quote,opened_at)
+                                VALUES (?,?,?,?,?,?,?)""",
+                                (symbol, str(quantity), str(fill), str(gross), str(fee),
+                                 str(profit_funded_quote), timestamp),
                             )
                             db.execute(
                                 """INSERT INTO bot_fills
@@ -443,10 +627,13 @@ class ContinuousPaperBot:
                             )
                             action = f"{symbol}:OPEN qty={quantity}"
                             open_positions[symbol] = {
-                                "symbol": symbol, "quantity": str(quantity)
+                                "symbol": symbol, "quantity": str(quantity),
+                                "profit_funded_quote": str(profit_funded_quote),
                             }
                 if action != "NONE":
                     actions.append(action)
+                elif shield_decision.block_entries:
+                    actions.append(f"{symbol}:SHIELD_{shield_decision.mode}")
 
             open_rows = db.execute("SELECT * FROM bot_positions").fetchall()
             equity = cash + sum(
@@ -520,6 +707,12 @@ class ContinuousPaperBot:
                 SUM(CASE WHEN CAST(net_pnl AS REAL)<0 THEN 1 ELSE 0 END) AS losses
                 FROM bot_fills WHERE side='SELL'"""
             ).fetchone()
+            compounding_events = db.execute(
+                "SELECT allocated_profit FROM bot_compounding_events ORDER BY event_id"
+            ).fetchall()
+            compounding_total_allocated = sum(
+                (Decimal(row["allocated_profit"]) for row in compounding_events), Decimal("0")
+            )
             symbols = {
                 row["symbol"]: {
                     "quantity": Decimal(row["quantity"]),
@@ -535,6 +728,11 @@ class ContinuousPaperBot:
                 "trades": counts["total"] or 0, "wins": counts["wins"] or 0,
                 "losses": counts["losses"] or 0, "positions": symbols,
                 "halted": bool(account["halted"]), "halt_reason": account["halt_reason"],
+                "compounding_committed": sum(
+                    (Decimal(pos["profit_funded_quote"]) for pos in positions), Decimal("0")
+                ),
+                "compounding_total_allocated": compounding_total_allocated,
+                "compounding_events": len(compounding_events),
             }
 
     def save_hourly_report(self) -> dict:
@@ -605,10 +803,23 @@ async def run_bot(
                 prices = {symbol: item.last_closed_price for symbol, item in snapshots.items()}
                 quotes = {symbol: (item.bid, item.ask) for symbol, item in snapshots.items()}
                 candle_times = {symbol: item.candle_close_time_ms for symbol, item in snapshots.items()}
+                liquidity_metrics = {
+                    symbol: (item.quote_volume_ratio, item.trade_count_ratio)
+                    for symbol, item in snapshots.items()
+                }
+                higher_timeframe_metrics = {
+                    symbol: (
+                        {name: list(values) for name, values in (item.higher_timeframe_closes or {}).items()},
+                        item.atr_percent,
+                    )
+                    for symbol, item in snapshots.items()
+                }
                 received = min(item.received_at_ms for item in snapshots.values())
                 result = bot.step(
                     prices, source=PUBLIC_SOURCE, quotes=quotes,
                     candle_close_times=candle_times, received_at_ms=received,
+                    liquidity_metrics=liquidity_metrics,
+                    higher_timeframe_metrics=higher_timeframe_metrics,
                 )
 
             print(
