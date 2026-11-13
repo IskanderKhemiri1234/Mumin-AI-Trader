@@ -86,23 +86,34 @@ jobs:
           if extracted is not None:
               value = extracted
 
-          # Normalize common mobile-copy formatting and URL-safe Base64.
-          value = re.sub(r"(?m)^\s*`{3}[^\n]*$|^\s*`{3}\s*$", "", value)
+          # Normalize mobile clipboard artifacts without exposing the secret.
+          value = value.lstrip("\\ufeff")
+          value = re.sub(r"(?m)^\\s*`{3}[^\\n]*$|^\\s*`{3}\\s*$", "", value)
           normalized = value.strip().replace("\\n", "").replace("\\r", "")
           normalized = re.sub(r"^data:[^,]*;base64,", "", normalized, flags=re.I)
           if normalized.lower().startswith("base64:"):
               normalized = normalized.split(":", 1)[1]
           normalized = normalized.strip().strip("'").strip('"')
-          normalized = re.sub(r"\s+", "", normalized).replace("-", "+").replace("_", "/")
+          # Remove invisible Unicode characters commonly introduced by mobile copy/paste.
+          for invisible in ("\\ufeff", "\\u200b", "\\u200c", "\\u200d", "\\u2060"):
+              normalized = normalized.replace(invisible, "")
+          normalized = re.sub(r"\\s+", "", normalized).replace("-", "+").replace("_", "/")
           normalized += "=" * ((-len(normalized)) % 4)
 
           try:
               decoded = base64.b64decode(normalized, validate=True)
           except Exception as exc:
+              alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
+              invalid = [(i, ord(ch)) for i, ch in enumerate(normalized) if ch not in alphabet]
+              if invalid:
+                  position, codepoint = invalid[0]
+                  detail = f"first_invalid_character=U+{codepoint:04X}, position={position}"
+              else:
+                  detail = f"base64_length={len(normalized)}, remainder_mod_4={len(normalized) % 4}"
               raise SystemExit(
-                  "ANDROID_KEYSTORE_BASE64 is present but is not valid Base64 "
-                  "after safe whitespace/URL-safe normalization. Check that the "
-                  "GitHub secret contains the complete Base64 text."
+                  "ANDROID_KEYSTORE_BASE64 could not be decoded. Safe diagnostic: "
+                  + detail
+                  + ". The secret value itself is never printed."
               ) from exc
 
           if not decoded:
