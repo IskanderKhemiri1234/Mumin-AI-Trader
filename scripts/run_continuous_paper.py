@@ -180,6 +180,23 @@ class ContinuousPaperBot:
                     data_source TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS bot_risk_events (
+                    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tick INTEGER NOT NULL,
+                    symbol TEXT NOT NULL,
+                    shield_mode TEXT NOT NULL,
+                    block_entries INTEGER NOT NULL,
+                    exit_fraction TEXT NOT NULL,
+                    spread_bps TEXT NOT NULL,
+                    quote_volume_ratio TEXT,
+                    trade_count_ratio TEXT,
+                    price_change_bps TEXT NOT NULL,
+                    candle_age_ms INTEGER NOT NULL,
+                    reasons TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_risk_events_tick_symbol
+                    ON bot_risk_events(tick, symbol);
             """)
             row = db.execute("SELECT initial_cash FROM bot_account WHERE id=1").fetchone()
             if row is None:
@@ -363,16 +380,16 @@ class ContinuousPaperBot:
                 )
                 assessment = self.strategy.assess(closes, spread_bps=spread_bps)
                 signal_name = assessment.signal
+                volume_ratio, trade_ratio = liquidity_metrics.get(symbol, (None, None))
+                previous_close = closes[-2] if len(closes) >= 2 else price
+                price_change_bps = (
+                    (price / previous_close - Decimal("1")) * Decimal("10000")
+                    if previous_close > 0 else Decimal("0")
+                )
+                candle_age_ms = max(
+                    0, received - candle_close_times.get(symbol, received)
+                )
                 if source == PUBLIC_SOURCE:
-                    volume_ratio, trade_ratio = liquidity_metrics.get(symbol, (None, None))
-                    previous_close = closes[-2] if len(closes) >= 2 else price
-                    price_change_bps = (
-                        (price / previous_close - Decimal("1")) * Decimal("10000")
-                        if previous_close > 0 else Decimal("0")
-                    )
-                    candle_age_ms = max(
-                        0, received - candle_close_times.get(symbol, received)
-                    )
                     shield_decision = self.anti_loss_shield.assess(
                         spread_bps=spread_bps,
                         quote_volume_ratio=volume_ratio,
@@ -385,6 +402,19 @@ class ContinuousPaperBot:
                         "BYPASSED_SYNTHETIC", False, Decimal("0"),
                         ("Synthetic test feed has no real liquidity observations.",),
                     )
+                db.execute(
+                    """INSERT INTO bot_risk_events
+                    (tick,symbol,shield_mode,block_entries,exit_fraction,spread_bps,
+                     quote_volume_ratio,trade_count_ratio,price_change_bps,candle_age_ms,
+                     reasons,created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (tick, symbol, shield_decision.mode, int(shield_decision.block_entries),
+                     str(shield_decision.exit_fraction), str(spread_bps),
+                     str(volume_ratio) if volume_ratio is not None else None,
+                     str(trade_ratio) if trade_ratio is not None else None,
+                     str(price_change_bps), candle_age_ms,
+                     " | ".join(shield_decision.reasons), timestamp),
+                )
                 if shield_decision.block_entries and signal_name == "BUY":
                     signal_name = "HOLD"
                 signals.append(f"{symbol}:{signal_name}")
@@ -509,6 +539,8 @@ class ContinuousPaperBot:
                             }
                 if action != "NONE":
                     actions.append(action)
+                elif shield_decision.block_entries:
+                    actions.append(f"{symbol}:SHIELD_{shield_decision.mode}")
 
             open_rows = db.execute("SELECT * FROM bot_positions").fetchall()
             equity = cash + sum(
