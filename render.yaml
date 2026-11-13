@@ -3,7 +3,7 @@ services:
     name: mumin-ai-trader-mock-demo
     runtime: docker
     plan: free
-    dockerfilePath: ./Dockerfile
+    dockerfilePath: ./Dockerfile.render
     dockerContext: .
     healthCheckPath: /health
     autoDeploy: true
