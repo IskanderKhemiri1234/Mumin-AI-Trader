@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_DOWN
+from bisect import bisect_right
 from typing import Sequence
 
 from mumin_trader.risk.anti_loss_quantum_shield import AntiLossQuantumShield, ShieldAssessment
@@ -17,7 +18,7 @@ RESERVE_CASH = Decimal("14")
 BASE_TICKET = Decimal("1.02")
 MAX_TICKET = Decimal("5")
 STOP_LOSS_PERCENT = Decimal("0.50")
-TAKE_PROFIT_PERCENT = Decimal("1.00")
+TAKE_PROFIT_PERCENT = Decimal("1.25")
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +92,7 @@ def _evaluate_fold(
     start: int,
     end: int,
     *,
+    higher_timeframes: dict[str, Sequence[HistoricalCandle]] | None = None,
     initial_cash: Decimal = INITIAL_CASH,
     enable_shield: bool = True,
     enable_compounding: bool = True,
@@ -137,7 +139,31 @@ def _evaluate_fold(
             pending_entry = None
 
         closes = [item.close for item in candles[: index + 1]]
-        assessment = strategy.assess(closes, spread_bps=bar.spread_bps)
+        aligned_timeframes: dict[str, list[Decimal]] = {}
+        for timeframe, history in (higher_timeframes or {}).items():
+            timestamps = [item.timestamp_ms for item in history]
+            eligible_count = bisect_right(timestamps, bar.timestamp_ms)
+            aligned_timeframes[timeframe] = [item.close for item in history[:eligible_count]]
+        atr_window = candles[max(0, index - 14):index + 1]
+        true_ranges: list[Decimal] = []
+        for atr_index in range(1, len(atr_window)):
+            current = atr_window[atr_index]
+            previous_close = atr_window[atr_index - 1].close
+            true_ranges.append(max(
+                current.high - current.low,
+                abs(current.high - previous_close),
+                abs(current.low - previous_close),
+            ))
+        atr_percent = (
+            sum(true_ranges[-14:], ZERO) / Decimal(len(true_ranges[-14:]))
+            / bar.close * Decimal("100")
+            if true_ranges else ZERO
+        )
+        assessment = strategy.assess(
+            closes, spread_bps=bar.spread_bps,
+            higher_timeframe_closes=aligned_timeframes,
+            atr_percent=atr_percent,
+        )
         prior = candles[index - 1].close if index > 0 else bar.close
         price_change_bps = (bar.close / prior - Decimal("1")) * BPS
         prior_window = candles[max(0, index - 20):index]
@@ -232,6 +258,13 @@ def _evaluate_fold(
                     realized_net_pnl=realized,
                     momentum_score=assessment.score,
                     drawdown_percent=drawdown_percent,
+                    atr_percent=assessment.atr_percent,
+                    trend_clear=assessment.mtf_confluence and assessment.regime == "BULL",
+                    liquidity_high=(
+                        bar.spread_bps <= Decimal("8")
+                        and volume_ratio is not None and Decimal("0.80") <= volume_ratio <= Decimal("2.50")
+                        and trade_ratio is not None and Decimal("0.80") <= trade_ratio <= Decimal("2.50")
+                    ),
                 )
                 if enable_compounding else None
             )
@@ -301,14 +334,16 @@ def run_backtest(
     initial_cash: Decimal = INITIAL_CASH,
     enable_shield: bool = True,
     enable_compounding: bool = True,
+    higher_timeframes: dict[str, Sequence[HistoricalCandle]] | None = None,
 ) -> BacktestMetrics:
     """Run one strictly out-of-sample test segment after an indicator warm-up."""
     if warmup_bars < 30 or len(candles) <= warmup_bars:
         raise ValueError("At least 30 warm-up bars and one test bar are required.")
     _validate_series(candles)
     return _evaluate_fold(
-        candles, warmup_bars, len(candles), initial_cash=initial_cash,
-        enable_shield=enable_shield, enable_compounding=enable_compounding,
+        candles, warmup_bars, len(candles), higher_timeframes=higher_timeframes,
+        initial_cash=initial_cash, enable_shield=enable_shield,
+        enable_compounding=enable_compounding,
     )
 
 
@@ -321,6 +356,7 @@ def walk_forward(
     initial_cash: Decimal = INITIAL_CASH,
     enable_shield: bool = True,
     enable_compounding: bool = True,
+    higher_timeframes: dict[str, Sequence[HistoricalCandle]] | None = None,
 ) -> WalkForwardReport:
     """Evaluate consecutive unseen windows using only earlier bars as warm-up.
 
@@ -335,8 +371,9 @@ def walk_forward(
     while start + test_bars <= len(candles):
         folds.append(
             _evaluate_fold(
-                candles, start, start + test_bars, initial_cash=initial_cash,
-                enable_shield=enable_shield, enable_compounding=enable_compounding,
+                candles, start, start + test_bars, higher_timeframes=higher_timeframes,
+                initial_cash=initial_cash, enable_shield=enable_shield,
+                enable_compounding=enable_compounding,
             )
         )
         start += step_bars
