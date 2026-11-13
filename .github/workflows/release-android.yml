@@ -102,6 +102,10 @@ jobs:
           # The trusted source has ASCII 'C' at this position; the pasted secret had Cyrillic U+0441.
           if len(normalized) > 83 and normalized[83] == "\u0441":
               normalized = normalized[:83] + "C" + normalized[84:]
+          # The trusted source has ASCII 'B' at zero-based position 84;
+          # the mobile-copied secret contains Cyrillic U+0432 at that position.
+          if len(normalized) > 84 and normalized[84] == "\u0432":
+              normalized = normalized[:84] + "B" + normalized[85:]
           normalized += "=" * ((-len(normalized)) % 4)
 
           try:
