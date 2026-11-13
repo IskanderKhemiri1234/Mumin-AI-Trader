@@ -44,8 +44,8 @@ class HistoricalCandle:
             raise ValueError("Historical candle high is inconsistent.")
         if self.low > min(self.open, self.close, self.high):
             raise ValueError("Historical candle low is inconsistent.")
-        if self.quote_volume <= ZERO or self.trade_count <= ZERO or self.spread_bps < ZERO:
-            raise ValueError("Volume, trade count and spread must be valid positive values.")
+        if self.quote_volume < ZERO or self.trade_count < ZERO or self.spread_bps < ZERO:
+            raise ValueError("Volume, trade count and spread must be non-negative.")
 
 
 @dataclass(frozen=True, slots=True)
