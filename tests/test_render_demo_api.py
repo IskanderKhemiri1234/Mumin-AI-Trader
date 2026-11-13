@@ -10,7 +10,7 @@ def test_render_demo_api_exposes_mock_paper_ledger(tmp_path, monkeypatch):
     database = tmp_path / "render-demo.sqlite3"
     monkeypatch.setenv("MUMIN_DB_PATH", str(database))
     bot = ContinuousPaperBot(str(database))
-    for _ in range(12):
+    for _ in range(40):
         bot.step()
 
     client = TestClient(app)
@@ -23,7 +23,7 @@ def test_render_demo_api_exposes_mock_paper_ledger(tmp_path, monkeypatch):
     assert health["live_orders_enabled"] is False
     assert status["engine_status"] == "running"
     assert status["mode"] == "PAPER_ONLY"
-    assert status["tick"] == 12
+    assert status["tick"] == 40
     assert trades["market_data_source"] == "MOCK_SYNTHETIC"
     assert trades["live_orders_enabled"] is False
     assert trades["count"] >= 1
