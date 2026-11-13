@@ -233,6 +233,9 @@ class SmartSniperStrategy:
             reasons.append("Volatility is outside the accepted ATR band.")
         if not mtf_confluence:
             eligible = False
+        if spread > Decimal("12"):
+            eligible = False
+            reasons.append("Spread exceeds the hard execution-quality ceiling.")
         if expected_move < target_bps + estimated_cost + self.minimum_net_edge_bps:
             eligible = False
             reasons.append("Expected move does not cover the asymmetric target plus all estimated costs.")
