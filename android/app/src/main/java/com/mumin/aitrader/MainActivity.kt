@@ -216,6 +216,7 @@ class MainActivity : Activity() {
         setContentView(root)
         if (savedInstanceState == null) {
             loadLatestReport()
+            checkForUpdates()
         } else {
             webView.restoreState(savedInstanceState)
             if (webView.url.isNullOrBlank()) loadLatestReport()
