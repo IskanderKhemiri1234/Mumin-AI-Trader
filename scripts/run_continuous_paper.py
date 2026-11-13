@@ -13,6 +13,7 @@ from pathlib import Path
 
 from mumin_trader.strategy.smart_sniper import SmartSniperStrategy
 from mumin_trader.risk.anti_loss_quantum_shield import AntiLossQuantumShield, ShieldAssessment
+from mumin_trader.strategy.compounding import DynamicCompoundingMatrix
 
 from mumin_trader.exchanges.binance.public_market_data import (
     ALLOWED_SYMBOLS,
@@ -24,6 +25,8 @@ QUOTE = "USDT"
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "BNBUSDT")
 INITIAL_CASH = Decimal(os.getenv("INITIAL_CAPITAL_USD", "70.00"))
 MAX_TRADE = Decimal(os.getenv("MAX_TRADE_ALLOCATION_USD", "5.00"))
+# Conservative seed ticket; any amount above this must be backed by realized net profit.
+BASE_TRADE_ALLOCATION = Decimal("1.00")
 RESERVE_PERCENT = Decimal(os.getenv("CAPITAL_RESERVE_PERCENT", "20"))
 MAX_CAPITAL = Decimal(os.getenv("MAX_CAPITAL_ALLOCATION_USD", str(INITIAL_CASH)))
 MAX_TOTAL_EXPOSURE = MAX_CAPITAL * (Decimal("100") - RESERVE_PERCENT) / Decimal("100")
@@ -79,6 +82,7 @@ class ContinuousPaperBot:
         self.initial_cash = Decimal(initial_cash)
         self.strategy = SmartSniperStrategy()
         self.anti_loss_shield = AntiLossQuantumShield()
+        self.compounding_matrix = DynamicCompoundingMatrix()
         if database != ":memory:":
             Path(database).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -115,6 +119,7 @@ class ContinuousPaperBot:
                     entry_price TEXT NOT NULL,
                     entry_gross TEXT NOT NULL,
                     entry_fee TEXT NOT NULL,
+                    profit_funded_quote TEXT NOT NULL DEFAULT '0',
                     opened_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS bot_fills (
@@ -198,6 +203,13 @@ class ContinuousPaperBot:
                 CREATE INDEX IF NOT EXISTS idx_risk_events_tick_symbol
                     ON bot_risk_events(tick, symbol);
             """)
+            position_columns = {
+                column["name"] for column in db.execute("PRAGMA table_info(bot_positions)")
+            }
+            if "profit_funded_quote" not in position_columns:
+                db.execute(
+                    "ALTER TABLE bot_positions ADD COLUMN profit_funded_quote TEXT NOT NULL DEFAULT '0'"
+                )
             row = db.execute("SELECT initial_cash FROM bot_account WHERE id=1").fetchone()
             if row is None:
                 db.execute(
@@ -466,17 +478,21 @@ class ContinuousPaperBot:
                         if remaining_quantity > 0:
                             remaining_entry_gross = Decimal(position["entry_gross"]) - sold_entry_gross
                             remaining_entry_fee = Decimal(position["entry_fee"]) - sold_entry_fee
+                            remaining_profit_funded = (
+                                Decimal(position["profit_funded_quote"]) * (Decimal("1") - actual_fraction)
+                            )
                             db.execute(
-                                """UPDATE bot_positions SET quantity=?, entry_gross=?, entry_fee=?
-                                   WHERE symbol=?""",
+                                """UPDATE bot_positions SET quantity=?, entry_gross=?, entry_fee=?,
+                                   profit_funded_quote=? WHERE symbol=?""",
                                 (str(remaining_quantity), str(remaining_entry_gross),
-                                 str(remaining_entry_fee), symbol),
+                                 str(remaining_entry_fee), str(remaining_profit_funded), symbol),
                             )
                             open_positions[symbol] = {
                                 **dict(position),
                                 "quantity": str(remaining_quantity),
                                 "entry_gross": str(remaining_entry_gross),
                                 "entry_fee": str(remaining_entry_fee),
+                                "profit_funded_quote": str(remaining_profit_funded),
                             }
                             action = f"{symbol}:DE_RISK qty={quantity_to_sell}"
                         else:
@@ -507,8 +523,35 @@ class ContinuousPaperBot:
                          for pos_symbol, pos in open_positions.items()),
                         Decimal("0"),
                     )
-                    allocation = min(MAX_TRADE, max(Decimal("0"), cash - reserve_cash))
-                    if exposure + allocation <= MAX_TOTAL_EXPOSURE and allocation > 0:
+                    drawdown_percent = (
+                        max(Decimal("0"), (high_water - marked_equity) / high_water * Decimal("100"))
+                        if high_water > 0 else Decimal("0")
+                    )
+                    compounding = self.compounding_matrix.assess(
+                        realized_net_pnl=realized,
+                        momentum_score=assessment.score,
+                        drawdown_percent=drawdown_percent,
+                    )
+                    committed_profit = sum(
+                        (Decimal(pos["profit_funded_quote"]) for pos in open_positions.values()),
+                        Decimal("0"),
+                    )
+                    available_profit = max(
+                        Decimal("0"), compounding.reinvestment_budget - committed_profit
+                    )
+                    base_allocation = min(
+                        BASE_TRADE_ALLOCATION, max(Decimal("0"), cash - reserve_cash)
+                    )
+                    allocation = min(MAX_TRADE, base_allocation + available_profit)
+                    allocation = min(
+                        allocation,
+                        max(Decimal("0"), cash - reserve_cash),
+                        max(Decimal("0"), MAX_TOTAL_EXPOSURE - exposure),
+                    )
+                    profit_funded_quote = max(
+                        Decimal("0"), allocation - min(BASE_TRADE_ALLOCATION, allocation)
+                    )
+                    if allocation > 0:
                         fill = simulated_fill_price("BUY", bid, ask, SLIPPAGE_BPS)
                         quantity = (allocation / (fill * (Decimal(1) + FEE_RATE))).quantize(
                             Decimal("0.00000001"), rounding=ROUND_DOWN
@@ -521,9 +564,11 @@ class ContinuousPaperBot:
                             fees_paid += fee
                             db.execute(
                                 """INSERT INTO bot_positions
-                                (symbol,quantity,entry_price,entry_gross,entry_fee,opened_at)
-                                VALUES (?,?,?,?,?,?)""",
-                                (symbol, str(quantity), str(fill), str(gross), str(fee), timestamp),
+                                (symbol,quantity,entry_price,entry_gross,entry_fee,
+                                 profit_funded_quote,opened_at)
+                                VALUES (?,?,?,?,?,?,?)""",
+                                (symbol, str(quantity), str(fill), str(gross), str(fee),
+                                 str(profit_funded_quote), timestamp),
                             )
                             db.execute(
                                 """INSERT INTO bot_fills
@@ -535,7 +580,8 @@ class ContinuousPaperBot:
                             )
                             action = f"{symbol}:OPEN qty={quantity}"
                             open_positions[symbol] = {
-                                "symbol": symbol, "quantity": str(quantity)
+                                "symbol": symbol, "quantity": str(quantity),
+                                "profit_funded_quote": str(profit_funded_quote),
                             }
                 if action != "NONE":
                     actions.append(action)
@@ -629,6 +675,9 @@ class ContinuousPaperBot:
                 "trades": counts["total"] or 0, "wins": counts["wins"] or 0,
                 "losses": counts["losses"] or 0, "positions": symbols,
                 "halted": bool(account["halted"]), "halt_reason": account["halt_reason"],
+                "compounding_committed": sum(
+                    (Decimal(pos["profit_funded_quote"]) for pos in positions), Decimal("0")
+                ),
             }
 
     def save_hourly_report(self) -> dict:
