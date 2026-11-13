@@ -7,7 +7,7 @@ def rising_series():
     values = []
     price = Decimal("100")
     for index in range(55):
-        price *= Decimal("0.9975") if index % 3 == 2 else Decimal("1.005")
+        price *= Decimal("1.006") if index % 2 == 0 else Decimal("0.997")
         values.append(price)
     return values
 
