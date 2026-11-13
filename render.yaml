@@ -1,0 +1,43 @@
+services:
+  - type: web
+    name: mumin-ai-trader-mock-demo
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    startCommand: python scripts/run_render_demo.py
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: APP_ENV
+        value: demo
+      - key: TRADING_ENV
+        value: TESTNET
+      - key: TRADING_MODE
+        value: PAPER
+      - key: ALLOW_MAINNET
+        value: "false"
+      - key: LIVE_TRADING_ENABLED
+        value: "false"
+      - key: MAINNET_LEGAL_ELIGIBILITY_CONFIRMED
+        value: "false"
+      - key: MUMIN_MARKET_DATA_SOURCE
+        value: MOCK_SYNTHETIC
+      - key: MUMIN_DB_PATH
+        value: /tmp/mumin_render_demo.sqlite3
+      - key: MUMIN_INTERVAL_SECONDS
+        value: "3"
+      - key: INITIAL_CAPITAL_USD
+        value: "50.00"
+      - key: MAX_CAPITAL_ALLOCATION_USD
+        value: "50.00"
+      - key: MAX_TRADE_ALLOCATION_USD
+        value: "5.00"
+      - key: MIN_TRADE_ALLOCATION_USD
+        value: "5.00"
+      - key: MAX_RISK_PER_TRADE_PERCENT
+        value: "0.50"
+      - key: MAX_DAILY_LOSS_PERCENT
+        value: "2.00"
+      - key: MAX_DRAWDOWN_PERCENT
+        value: "5.00"
