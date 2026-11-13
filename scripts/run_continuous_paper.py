@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 
+from mumin_trader.strategy.smart_sniper import SmartSniperStrategy
+
 from mumin_trader.exchanges.binance.public_market_data import (
     ALLOWED_SYMBOLS,
     PublicMarketData,
@@ -74,6 +76,7 @@ class ContinuousPaperBot:
     def __init__(self, database: str, initial_cash: Decimal = INITIAL_CASH):
         self.database = database
         self.initial_cash = Decimal(initial_cash)
+        self.strategy = SmartSniperStrategy()
         if database != ":memory:":
             Path(database).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -338,22 +341,28 @@ class ContinuousPaperBot:
                         """SELECT price FROM bot_market_ticks
                            WHERE symbol=? AND data_source=? AND candle_close_time_ms IS NOT NULL
                            GROUP BY candle_close_time_ms
-                           ORDER BY MAX(tick) DESC LIMIT 4""",
+                           ORDER BY MAX(tick) DESC LIMIT 60""",
                         (symbol, source),
                     ).fetchall()
                 else:
                     history = db.execute(
                         """SELECT price FROM bot_market_ticks
-                           WHERE symbol=? AND data_source=? ORDER BY tick DESC LIMIT 4""",
+                           WHERE symbol=? AND data_source=? ORDER BY tick DESC LIMIT 60""",
                         (symbol, source),
                     ).fetchall()
-                momentum = self._momentum(
-                    [Decimal(row["price"]) for row in reversed(history)]
+                closes = [Decimal(row["price"]) for row in reversed(history)]
+                bid, ask = quotes.get(symbol, (price, price))
+                midpoint = (Decimal(bid) + Decimal(ask)) / Decimal("2")
+                spread_bps = (
+                    (Decimal(ask) - Decimal(bid)) / midpoint * Decimal("10000")
+                    if midpoint > 0 else Decimal("10000")
                 )
-                signal_name = "BUY" if momentum >= Decimal("8") else (
-                    "SELL" if momentum <= Decimal("-8") else "HOLD"
+                assessment = self.strategy.assess(closes, spread_bps=spread_bps)
+                signal_name = assessment.signal
+                signals.append(
+                    f"{symbol}:{signal_name}[{assessment.strategy}:"
+                    f"{assessment.score:.0f}:{assessment.regime}]"
                 )
-                signals.append(f"{symbol}:{signal_name}")
                 position = open_positions.get(symbol)
                 action = "NONE"
                 bid, ask = quotes.get(symbol, (price, price))
