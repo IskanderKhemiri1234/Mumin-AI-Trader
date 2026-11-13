@@ -23,10 +23,10 @@ The figures below are equally weighted averages of the 54 series' mean fold retu
 
 | Configuration | Mean series return | Positive series | Maximum observed drawdown | Closed trades | Incremental profit re-used |
 |---|---:|---:|---:|---:|---:|
-| Shield + compounding | -0.0032% | 6 / 54 | 0.1645% | 595 | 1.2258 USDT |
-| Shield only | -0.0031% | 6 / 54 | 0.1626% | 595 | 0 |
-| No shield + compounding | -0.0178% | 3 / 54 | 0.5156% | 1,709 | 7.0301 USDT |
-| Neither | -0.0175% | 3 / 54 | 0.5155% | 1,709 | 0 |
+| Shield + compounding | -0.0032% | 6 / 54 | 0.1645% | 593 | 1.2258 USDT |
+| Shield only | -0.0031% | 6 / 54 | 0.1626% | 593 | 0 |
+| No shield + compounding | -0.0178% | 3 / 54 | 0.5156% | 1,707 | 7.0301 USDT |
+| Neither | -0.0175% | 3 / 54 | 0.5155% | 1,707 | 0 |
 
 ## Interpretation
 
