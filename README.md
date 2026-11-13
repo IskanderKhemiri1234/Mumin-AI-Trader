@@ -26,6 +26,17 @@ The data API at `/api/dashboard` is protected by the server-side `DASHBOARD_ACCE
 
 The API reads `MUMIN_PAPER_DB_PATH`, defaulting to `data/mumin_public_paper.db`. Docker Compose's Paper worker writes to `/app/data/mumin_public_paper.db`, which matches this default. The API opens the SQLite database read-only and never creates or modifies ledger records.
 
+## Android companion app
+
+A lightweight Android WebView companion is built in `android/`. It loads the latest static Paper report from the `mumin-paper-ledger` branch on every launch and supports pull-to-refresh. It does not contain Binance credentials and cannot place orders.
+
+- GitHub Actions workflow: `.github/workflows/build-apk.yml`.
+- Trigger: changes to `android/**`, workflow dispatch, or pull requests that touch the Android app.
+- Output artifact: `Mumin-AI-Trader-APK`, containing `Mumin-AI-Trader.apk` and its SHA-256 checksum.
+- The CI artifact is a debug-signed installable APK for direct testing; it is not a Play Store release or a privately release-signed production package.
+- The app reads the report from a public GitHub repository. Anyone who can access that public branch can read the same report; installing the app does not make the underlying report private.
+- The report is a snapshot from the latest successful Paper export, not a live streaming screen. The app fetches the newest snapshot on launch or manual refresh.
+
 ## Run locally
 
 ```bash
