@@ -22,6 +22,8 @@ class PublicMarketSnapshot:
     received_at_ms: int
     quote_volume_ratio: Decimal | None = None
     trade_count_ratio: Decimal | None = None
+    higher_timeframe_closes: dict[str, tuple[Decimal, ...]] | None = None
+    atr_percent: Decimal | None = None
     source: str = "BINANCE_PUBLIC_MARKET_DATA"
 
 
@@ -60,9 +62,11 @@ class PublicMarketData:
         if symbol not in ALLOWED_SYMBOLS:
             raise ValueError(f"Symbol is not in the paper-trading allowlist: {symbol}")
 
-        book, candles, server = await asyncio.gather(
+        book, candles, five_minute, fifteen_minute, server = await asyncio.gather(
             self._get("/api/v3/ticker/bookTicker", {"symbol": symbol}),
             self._get("/api/v3/klines", {"symbol": symbol, "interval": "1m", "limit": 30}),
+            self._get("/api/v3/klines", {"symbol": symbol, "interval": "5m", "limit": 45}),
+            self._get("/api/v3/klines", {"symbol": symbol, "interval": "15m", "limit": 45}),
             self._get("/api/v3/time", {}),
         )
         received_at_ms = int(server["serverTime"])
@@ -106,6 +110,27 @@ class PublicMarketData:
             if median_trades and median_trades > 0 and current_trades > 0:
                 trade_count_ratio = current_trades / median_trades
 
+        def closed_closes(rows: list[Any]) -> tuple[Decimal, ...]:
+            return tuple(
+                Decimal(str(row[4])) for row in rows
+                if len(row) > 6 and int(row[6]) < received_at_ms
+                and Decimal(str(row[4])).is_finite() and Decimal(str(row[4])) > 0
+            )
+
+        one_minute_closed = [row for row in closed if len(row) > 8]
+        true_ranges: list[Decimal] = []
+        for index in range(1, len(one_minute_closed)):
+            current = one_minute_closed[index]
+            previous_close = Decimal(str(one_minute_closed[index - 1][4]))
+            high = Decimal(str(current[2]))
+            low = Decimal(str(current[3]))
+            true_ranges.append(max(high - low, abs(high - previous_close), abs(low - previous_close)))
+        atr_percent = (
+            sum(true_ranges[-14:], Decimal("0")) / Decimal(len(true_ranges[-14:]))
+            / close_price * Decimal("100")
+            if true_ranges else None
+        )
+
         return PublicMarketSnapshot(
             symbol=symbol,
             bid=bid,
@@ -115,6 +140,11 @@ class PublicMarketData:
             received_at_ms=received_at_ms,
             quote_volume_ratio=quote_volume_ratio,
             trade_count_ratio=trade_count_ratio,
+            higher_timeframe_closes={
+                "5m": closed_closes(five_minute),
+                "15m": closed_closes(fifteen_minute),
+            },
+            atr_percent=atr_percent,
         )
 
     async def snapshots(self, symbols: tuple[str, ...] = tuple(sorted(ALLOWED_SYMBOLS))) -> tuple[dict[str, PublicMarketSnapshot], dict[str, str]]:
