@@ -98,16 +98,23 @@ jobs:
           for invisible in ("\ufeff", "\u200b", "\u200c", "\u200d", "\u2060"):
               normalized = normalized.replace(invisible, "")
           normalized = re.sub(r"\s+", "", normalized).replace("-", "+").replace("_", "/")
-          # Repair only positions verified against the trusted local source file.
-          # These replacements are conditional: an unexpected character is never overwritten.
+          # Repair every clipboard-corrupted character verified against the
+          # original 3,700-character Base64 source. chr() avoids Unicode-escape
+          # ambiguity in YAML/Python quoting. Only exact observed values are changed.
           verified_repairs = {
-              83: ("\\u0441", "C"),
-              84: ("\\u0432", "B"),
-              85: ("\\u0430", "a"),
+              83: (chr(0x0441), "C"),
+              84: (chr(0x0432), "B"),
+              85: (chr(0x0430), "a"),
               609: ("@", "0"),
               918: ("@", "0"),
               1448: ("@", "4"),
               1581: ("@", "y"),
+              1658: ("@", "D"),
+              2237: ("@", "r"),
+              2470: ("@", "e"),
+              2807: ("@", "A"),
+              3168: ("@", "N"),
+              3393: ("@", "o"),
           }
           for position, (observed, trusted) in verified_repairs.items():
               if len(normalized) > position and normalized[position] == observed:
