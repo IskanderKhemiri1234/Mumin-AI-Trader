@@ -12,6 +12,10 @@ on:
       - ".github/workflows/smart-sniper-research.yml"
   workflow_dispatch:
 
+concurrency:
+  group: smart-sniper-research-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
