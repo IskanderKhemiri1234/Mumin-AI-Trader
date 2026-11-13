@@ -18,6 +18,7 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.core.view.WindowCompat
+import androidx.core.view.isVisible
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import java.net.HttpURLConnection
 import java.net.URL
@@ -140,11 +141,11 @@ class MainActivity : Activity() {
                     url: String,
                     favicon: android.graphics.Bitmap?
                 ) {
-                    progress.setVisibility(View.VISIBLE)
+                    progress.isVisible = true
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
-                    progress.setVisibility(View.GONE)
+                    progress.isVisible = false
                     swipeRefresh.isRefreshing = false
                 }
 
@@ -154,7 +155,7 @@ class MainActivity : Activity() {
                     error: WebResourceError
                 ) {
                     if (request.isForMainFrame) {
-                        progress.visibility = View.GONE
+                        progress.isVisible = false
                         swipeRefresh.isRefreshing = false
                         view.loadDataWithBaseURL(
                             null,
@@ -193,7 +194,7 @@ class MainActivity : Activity() {
     }
 
     private fun loadLatestReport() {
-        progress.visibility = View.VISIBLE
+        progress.isVisible = true
         webView.loadUrl(REPORT_URL, mapOf(
             "Cache-Control" to "no-cache",
             "Pragma" to "no-cache"
