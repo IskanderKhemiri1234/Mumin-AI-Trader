@@ -224,7 +224,18 @@ class SmartSniperStrategy:
         # Stop remains the existing 0.50% risk limit. Target is selected at
         # 2.5R or 3R; higher score selects 3R. The existing account-level
         # daily-loss and drawdown guards remain independent.
-        risk_reward = Decimal("2.5")
+        # Prefer 3R only when the observed momentum has enough room to clear
+        # the larger target plus round-trip costs and the net-edge buffer.
+        # Otherwise retain the 2.5R floor; never relax the cost-aware gate.
+        three_r_target_bps = STOP_PERCENT * Decimal("3.0") * Decimal("100")
+        three_r_required_move = (
+            three_r_target_bps + estimated_cost + self.minimum_net_edge_bps
+        )
+        risk_reward = (
+            Decimal("3.0")
+            if chosen_score >= Decimal("90") and expected_move >= three_r_required_move
+            else Decimal("2.5")
+        )
         target_percent = STOP_PERCENT * risk_reward
         target_bps = target_percent * Decimal("100")
         net_edge = expected_move - estimated_cost
