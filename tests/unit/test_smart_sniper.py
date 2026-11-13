@@ -19,7 +19,7 @@ def test_insufficient_history_fails_closed():
 
 
 def bullish_timeframes():
-    return {"5m": rising_series(), "15m": rising_series()}
+    return {"higher_1": rising_series(), "higher_2": rising_series()}
 
 
 def test_sustained_rise_requires_multi_timeframe_confluence_and_asymmetric_target():
@@ -67,7 +67,7 @@ def test_sideways_higher_timeframe_blocks_local_momentum():
     result = SmartSniperStrategy().assess(
         rising_series(),
         spread_bps=Decimal("2"),
-        higher_timeframe_closes={"5m": rising_series(), "15m": flat},
+        higher_timeframe_closes={"higher_1": rising_series(), "higher_2": flat},
     )
     assert result.signal == "HOLD"
     assert result.mtf_confluence is False
