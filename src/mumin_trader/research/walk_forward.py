@@ -123,7 +123,7 @@ def _evaluate_fold(
             ).quantize(Decimal("0.00000001"), rounding=ROUND_DOWN)
             entry_gross = quantity * entry_fill
             entry_fee = (entry_gross * FEE_RATE).quantize(Decimal("0.00000001"))
-            if quantity > ZERO and entry_gross >= Decimal("1") and entry_gross + entry_fee <= cash - RESERVE_CASH:
+            if quantity > ZERO and entry_gross + entry_fee >= Decimal("1") and entry_gross + entry_fee <= cash - RESERVE_CASH:
                 cash -= entry_gross + entry_fee
                 fees_paid += entry_fee
                 position = {
