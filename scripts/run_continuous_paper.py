@@ -202,6 +202,25 @@ class ContinuousPaperBot:
                 );
                 CREATE INDEX IF NOT EXISTS idx_risk_events_tick_symbol
                     ON bot_risk_events(tick, symbol);
+                CREATE TABLE IF NOT EXISTS bot_compounding_events (
+                    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tick INTEGER NOT NULL,
+                    symbol TEXT NOT NULL,
+                    realized_profit_pool TEXT NOT NULL,
+                    momentum_score TEXT NOT NULL,
+                    drawdown_percent TEXT NOT NULL,
+                    reinvestment_fraction TEXT NOT NULL,
+                    budget_ceiling TEXT NOT NULL,
+                    committed_before TEXT NOT NULL,
+                    available_profit_budget TEXT NOT NULL,
+                    base_ticket TEXT NOT NULL,
+                    allocated_profit TEXT NOT NULL,
+                    order_notional TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_compounding_events_tick_symbol
+                    ON bot_compounding_events(tick, symbol);
             """)
             position_columns = {
                 column["name"] for column in db.execute("PRAGMA table_info(bot_positions)")
@@ -560,6 +579,20 @@ class ContinuousPaperBot:
                         fee = (gross * FEE_RATE).quantize(Decimal("0.00000001"))
                         total = gross + fee
                         if quantity > 0 and gross >= Decimal("1.00") and total <= cash - reserve_cash:
+                            db.execute(
+                                """INSERT INTO bot_compounding_events
+                                (tick,symbol,realized_profit_pool,momentum_score,drawdown_percent,
+                                 reinvestment_fraction,budget_ceiling,committed_before,
+                                 available_profit_budget,base_ticket,allocated_profit,
+                                 order_notional,reason,created_at)
+                                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                (tick, symbol, str(max(Decimal("0"), realized)),
+                                 str(assessment.score), str(drawdown_percent),
+                                 str(compounding.reinvestment_fraction),
+                                 str(compounding.reinvestment_budget), str(committed_profit),
+                                 str(available_profit), str(base_allocation),
+                                 str(profit_funded_quote), str(total), compounding.reason, timestamp),
+                            )
                             cash -= total
                             fees_paid += fee
                             db.execute(
@@ -660,6 +693,12 @@ class ContinuousPaperBot:
                 SUM(CASE WHEN CAST(net_pnl AS REAL)<0 THEN 1 ELSE 0 END) AS losses
                 FROM bot_fills WHERE side='SELL'"""
             ).fetchone()
+            compounding_events = db.execute(
+                "SELECT allocated_profit FROM bot_compounding_events ORDER BY event_id"
+            ).fetchall()
+            compounding_total_allocated = sum(
+                (Decimal(row["allocated_profit"]) for row in compounding_events), Decimal("0")
+            )
             symbols = {
                 row["symbol"]: {
                     "quantity": Decimal(row["quantity"]),
@@ -678,6 +717,8 @@ class ContinuousPaperBot:
                 "compounding_committed": sum(
                     (Decimal(pos["profit_funded_quote"]) for pos in positions), Decimal("0")
                 ),
+                "compounding_total_allocated": compounding_total_allocated,
+                "compounding_events": len(compounding_events),
             }
 
     def save_hourly_report(self) -> dict:
