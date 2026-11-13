@@ -27,8 +27,8 @@ jobs:
       - name: Checkout persistent Paper ledger
         uses: actions/checkout@v4
         with:
-          ref: paper-state
-          path: paper-state
+          ref: mumin-paper-ledger
+          path: mumin-paper-ledger
           fetch-depth: 0
 
       - name: Set up Python
@@ -73,7 +73,7 @@ jobs:
                   raise SystemExit(f"Unsafe Paper configuration: {key}={actual!r}")
           print("Paper risk configuration verified.")
           PY
-          test ! -e paper-state/mumin_public_paper.db || test -s paper-state/mumin_public_paper.db
+          test ! -e mumin-paper-ledger/mumin_public_paper.db || test -s mumin-paper-ledger/mumin_public_paper.db
 
       - name: Run one Binance public-market-data Paper cycle
         env:
@@ -88,7 +88,7 @@ jobs:
           MAX_DRAWDOWN_PERCENT: "5.00"
         run: |
           python scripts/run_continuous_paper.py \
-            --db paper-state/mumin_public_paper.db \
+            --db mumin-paper-ledger/mumin_public_paper.db \
             --interval-seconds 1 \
             --cycles 1 \
             --data-source BINANCE_PUBLIC_MARKET_DATA
@@ -97,7 +97,7 @@ jobs:
         run: |
           python - <<'PY'
           import sqlite3
-          path = "paper-state/mumin_public_paper.db"
+          path = "mumin-paper-ledger/mumin_public_paper.db"
           connection = sqlite3.connect(path, timeout=20)
           result = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
           connection.close()
@@ -105,21 +105,24 @@ jobs:
               raise SystemExit(f"SQLite checkpoint was busy: {result}")
           PY
           python scripts/export_paper_report.py \
-            --db paper-state/mumin_public_paper.db \
-            --markdown paper-state/latest-report.md \
-            --html paper-state/latest-report.html
+            --db mumin-paper-ledger/mumin_public_paper.db \
+            --markdown mumin-paper-ledger/latest-report.md \
+            --html mumin-paper-ledger/latest-report.html
 
       - name: Commit durable ledger and latest report
         run: |
-          git -C paper-state config user.name "github-actions[bot]"
-          git -C paper-state config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C paper-state add mumin_public_paper.db latest-report.md latest-report.html
-          if ! git -C paper-state diff --cached --quiet; then
-            git -C paper-state commit -m "Update Paper ledger and mobile report"
-            git -C paper-state push origin paper-state
-          else
-            echo "No Paper ledger changes to persist."
-          fi
+          mkdir -p "$RUNNER_TEMP/mumin-paper-state"
+          cp mumin-paper-ledger/mumin_public_paper.db "$RUNNER_TEMP/mumin-paper-state/"
+          cp mumin-paper-ledger/latest-report.md "$RUNNER_TEMP/mumin-paper-state/"
+          cp mumin-paper-ledger/latest-report.html "$RUNNER_TEMP/mumin-paper-state/"
+          git -C mumin-paper-ledger config user.name "github-actions[bot]"
+          git -C mumin-paper-ledger config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C mumin-paper-ledger switch --orphan paper-ledger-snapshot
+          git -C mumin-paper-ledger clean -fdx
+          cp "$RUNNER_TEMP/mumin-paper-state/"* mumin-paper-ledger/
+          git -C mumin-paper-ledger add mumin_public_paper.db latest-report.md latest-report.html
+          git -C mumin-paper-ledger commit -m "Refresh latest Paper ledger snapshot"
+          git -C mumin-paper-ledger push --force origin HEAD:mumin-paper-ledger
 
       - name: Upload mobile report
         id: report
@@ -127,8 +130,8 @@ jobs:
         with:
           name: mumin-paper-dashboard-${{ github.run_number }}
           path: |
-            paper-state/latest-report.html
-            paper-state/latest-report.md
+            mumin-paper-ledger/latest-report.html
+            mumin-paper-ledger/latest-report.md
           if-no-files-found: error
           retention-days: 30
 
@@ -137,7 +140,7 @@ jobs:
         env:
           REPORT_URL: ${{ steps.report.outputs.artifact-url }}
         run: |
-          cat paper-state/latest-report.md >> "$GITHUB_STEP_SUMMARY"
+          cat mumin-paper-ledger/latest-report.md >> "$GITHUB_STEP_SUMMARY"
           {
             echo
             echo "---"
