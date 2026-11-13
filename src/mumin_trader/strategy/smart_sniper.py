@@ -122,8 +122,8 @@ class SmartSniperStrategy:
             raise ValueError("Spread must be a finite non-negative value.")
         mtf = higher_timeframe_closes or {}
         mtf_confluence = (
-            _timeframe_bullish([Decimal(v) for v in mtf.get("5m", [])])
-            and _timeframe_bullish([Decimal(v) for v in mtf.get("15m", [])])
+            _timeframe_bullish([Decimal(v) for v in mtf.get("higher_1", [])])
+            and _timeframe_bullish([Decimal(v) for v in mtf.get("higher_2", [])])
         )
         volatility = (
             _close_volatility_percent(prices)
