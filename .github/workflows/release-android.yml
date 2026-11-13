@@ -106,6 +106,10 @@ jobs:
           # the mobile-copied secret contains Cyrillic U+0432 at that position.
           if len(normalized) > 84 and normalized[84] == "\u0432":
               normalized = normalized[:84] + "B" + normalized[85:]
+          # The trusted source has ASCII 'a' at zero-based position 85;
+          # the copied secret has Cyrillic U+0430 (visually similar to Latin a).
+          if len(normalized) > 85 and normalized[85] == "\u0430":
+              normalized = normalized[:85] + "a" + normalized[86:]
           normalized += "=" * ((-len(normalized)) % 4)
 
           try:
