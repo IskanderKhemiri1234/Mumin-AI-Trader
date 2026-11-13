@@ -73,3 +73,34 @@ def test_walk_forward_rejects_non_chronological_data():
     )
     with pytest.raises(ValueError, match="chronological"):
         walk_forward(series, warmup_bars=60, test_bars=20, step_bars=20)
+
+
+def test_research_engine_executes_seed_ticket_and_reinvests_only_realized_profit(monkeypatch):
+    from types import SimpleNamespace
+
+    import mumin_trader.research.walk_forward as research
+
+    class AlwaysBuy:
+        def assess(self, closes, spread_bps=Decimal("0")):
+            return SimpleNamespace(signal="BUY", score=Decimal("95"))
+
+    monkeypatch.setattr(research, "SmartSniperStrategy", AlwaysBuy)
+    series = []
+    price = Decimal("100")
+    for index in range(110):
+        price *= Decimal("1.002")
+        series.append(HistoricalCandle(
+            timestamp_ms=1_800_000_000_000 + index * 60_000,
+            open=price * Decimal("0.999"),
+            high=price * Decimal("1.002"),
+            low=price * Decimal("0.998"),
+            close=price,
+            quote_volume=Decimal("1000"),
+            trade_count=Decimal("100"),
+            spread_bps=Decimal("2"),
+        ))
+
+    result = research.run_backtest(series, warmup_bars=60)
+    assert result.entry_orders > 0
+    assert result.closed_trades > 0
+    assert result.compounding_reinvested > Decimal("0")
