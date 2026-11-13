@@ -74,18 +74,24 @@ def main() -> None:
                     HistoricalCandle(**row, spread_bps=spread)
                     for row in raw
                 ]
-                report = walk_forward(
-                    candles,
-                    warmup_bars=args.warmup_bars,
-                    test_bars=args.test_bars,
-                    step_bars=args.step_bars,
-                )
-                results.append({
-                    "symbol": symbol,
-                    "interval": args.interval,
-                    "spread_assumption_bps": str(spread),
-                    "closed_candles": len(candles),
-                    "folds": [
+                for shield_enabled in (True, False):
+                    for compounding_enabled in (True, False):
+                        report = walk_forward(
+                            candles,
+                            warmup_bars=args.warmup_bars,
+                            test_bars=args.test_bars,
+                            step_bars=args.step_bars,
+                            enable_shield=shield_enabled,
+                            enable_compounding=compounding_enabled,
+                        )
+                        results.append({
+                            "symbol": symbol,
+                            "interval": args.interval,
+                            "spread_assumption_bps": str(spread),
+                            "shield_enabled": shield_enabled,
+                            "compounding_enabled": compounding_enabled,
+                            "closed_candles": len(candles),
+                            "folds": [
                         {
                             "start_index": fold.start_index,
                             "end_index": fold.end_index,
@@ -106,9 +112,9 @@ def main() -> None:
                             "entry_orders": fold.entry_orders,
                             "compounding_reinvested": str(fold.compounding_reinvested),
                         }
-                        for fold in report.folds
-                    ],
-                })
+                            for fold in report.folds
+                            ],
+                        })
 
     payload = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
