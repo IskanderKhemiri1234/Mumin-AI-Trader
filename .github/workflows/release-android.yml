@@ -71,20 +71,20 @@ jobs:
           # If the entire secrets text file was pasted, extract only the
           # ANDROID_KEYSTORE_BASE64 section and stop before the next secret.
           section = re.search(
-              r"(?ims)^\\s*ANDROID_KEYSTORE_BASE64\\s*[:=]?\\s*\\n(.*?)(?=^\\s*ANDROID_[A-Z0-9_]+\\s*[:=]?\\s*$|\\Z)",
+              r"(?ims)^\s*ANDROID_KEYSTORE_BASE64\s*[:=]?\s*\n(.*?)(?=^\s*ANDROID_[A-Z0-9_]+\s*[:=]?\s*$|\Z)",
               value,
           )
           if section:
               value = section.group(1)
 
           # Normalize common mobile-copy formatting and URL-safe Base64.
-          value = re.sub(r"(?m)^\\s*`{3}[^\\n]*$|^\\s*`{3}\\s*$", "", value)
-          normalized = value.strip().replace("\\\\n", "").replace("\\\\r", "")
+          value = re.sub(r"(?m)^\s*`{3}[^\n]*$|^\s*`{3}\s*$", "", value)
+          normalized = value.strip().replace("\\n", "").replace("\\r", "")
           normalized = re.sub(r"^data:[^,]*;base64,", "", normalized, flags=re.I)
           if normalized.lower().startswith("base64:"):
               normalized = normalized.split(":", 1)[1]
           normalized = normalized.strip().strip("\'").strip(\'"\')
-          normalized = re.sub(r"\\s+", "", normalized).replace("-", "+").replace("_", "/")
+          normalized = re.sub(r"\s+", "", normalized).replace("-", "+").replace("_", "/")
           normalized += "=" * ((-len(normalized)) % 4)
 
           try:
