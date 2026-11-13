@@ -43,7 +43,8 @@ async def test_public_market_data_uses_unauthenticated_endpoints_and_closed_cand
     assert snapshot.last_closed_price == Decimal("2995")
     assert snapshot.candle_close_time_ms == 1_699_999_999_000
     assert snapshot.source == "BINANCE_PUBLIC_MARKET_DATA"
-    assert len(calls) == 3
+    assert len(calls) == 5
+    assert {request.url.params.get('interval') for request in calls if request.url.path.endswith('/klines')} == {'1m', '5m', '15m'}
     assert all("X-MBX-APIKEY" not in request.headers for request in calls)
     await feed.close()
     await client.aclose()
