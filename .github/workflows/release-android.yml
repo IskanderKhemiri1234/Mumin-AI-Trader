@@ -74,14 +74,14 @@ jobs:
           lines = value.splitlines()
           extracted = None
           for index, line in enumerate(lines):
-              match = re.match(r"^\\s*ANDROID_KEYSTORE_BASE64\\s*[:=]\\s*(.*)$", line)
+              match = re.match(r"^\s*ANDROID_KEYSTORE_BASE64\s*[:=]\s*(.*)$", line)
               if match:
                   parts = [match.group(1)] if match.group(1) else []
                   for following in lines[index + 1:]:
-                      if re.match(r"^\\s*ANDROID_[A-Z0-9_]+\\s*[:=]", following):
+                      if re.match(r"^\s*ANDROID_[A-Z0-9_]+\s*[:=]", following):
                           break
                       parts.append(following)
-                  extracted = "\\n".join(parts)
+                  extracted = "\n".join(parts)
                   break
           if extracted is not None:
               value = extracted
