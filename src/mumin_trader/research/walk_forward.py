@@ -345,6 +345,8 @@ def run_backtest(
     if warmup_bars < 30 or len(candles) <= warmup_bars:
         raise ValueError("At least 30 warm-up bars and one test bar are required.")
     _validate_series(candles)
+    for history in (higher_timeframes or {}).values():
+        _validate_series(history)
     return _evaluate_fold(
         candles, warmup_bars, len(candles), higher_timeframes=higher_timeframes,
         initial_cash=initial_cash, enable_shield=enable_shield,
@@ -371,6 +373,8 @@ def walk_forward(
     if warmup_bars < 30 or test_bars <= 0 or step_bars <= 0:
         raise ValueError("Invalid walk-forward window sizes.")
     _validate_series(candles)
+    for history in (higher_timeframes or {}).values():
+        _validate_series(history)
     folds: list[BacktestMetrics] = []
     start = warmup_bars
     while start + test_bars <= len(candles):
