@@ -70,7 +70,7 @@ class MainActivity : Activity() {
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             isIndeterminate = true
             indeterminateTintList = android.content.res.ColorStateList.valueOf(GOLD)
-            visibility = View.GONE
+            setVisibility(View.GONE)
         }
         root.addView(progress, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, dp(3)
@@ -138,11 +138,11 @@ class MainActivity : Activity() {
                     url: String,
                     favicon: android.graphics.Bitmap?
                 ) {
-                    progress.visibility = View.VISIBLE
+                    progress.setVisibility(View.VISIBLE)
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
-                    progress.visibility = View.GONE
+                    progress.setVisibility(View.GONE)
                     swipeRefresh.isRefreshing = false
                 }
 
@@ -152,7 +152,7 @@ class MainActivity : Activity() {
                     error: WebResourceError
                 ) {
                     if (request.isForMainFrame) {
-                        progress.visibility = View.GONE
+                        progress.setVisibility(View.GONE)
                         swipeRefresh.isRefreshing = false
                         view.loadDataWithBaseURL(
                             null,
@@ -191,7 +191,7 @@ class MainActivity : Activity() {
     }
 
     private fun loadLatestReport() {
-        progress.visibility = View.VISIBLE
+        progress.setVisibility(View.VISIBLE)
         webView.loadUrl(REPORT_URL, mapOf(
             "Cache-Control" to "no-cache",
             "Pragma" to "no-cache"
