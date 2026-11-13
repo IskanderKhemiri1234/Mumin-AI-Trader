@@ -138,6 +138,7 @@ def _evaluate_fold(
                     "quantity": quantity,
                     "entry_gross": entry_gross,
                     "entry_fee": entry_fee,
+                    "target_percent": pending_entry["target_percent"],
                     "realized_net": ZERO,
                 }
             pending_entry = None
@@ -217,7 +218,7 @@ def _evaluate_fold(
             )
             hard_exit = (
                 net_return_percent <= -STOP_LOSS_PERCENT
-                or net_return_percent >= TAKE_PROFIT_PERCENT
+                or net_return_percent >= position["target_percent"]
                 or assessment.signal == "SELL"
             )
             exit_fraction = Decimal("1") if hard_exit else shield_decision.exit_fraction
@@ -279,7 +280,12 @@ def _evaluate_fold(
             allocation = min(MAX_TICKET, BASE_TICKET + reinvestment_budget)
             allocation = min(allocation, max(ZERO, cash - RESERVE_CASH))
             if allocation >= Decimal("1"):
-                pending_entry = {"allocation": allocation}
+                pending_entry = {
+                    "allocation": allocation,
+                    "target_percent": (
+                        Decimal(getattr(assessment, "target_percent", TAKE_PROFIT_PERCENT))
+                    ),
+                }
                 entry_orders += 1
                 compounding_reinvested += max(ZERO, allocation - BASE_TICKET)
 
