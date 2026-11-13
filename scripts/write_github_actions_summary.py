@@ -67,7 +67,6 @@ def main() -> None:
                ORDER BY p.symbol"""
         ).fetchall()
 
-        tick_count = db.execute("SELECT COUNT(*) FROM bot_equity").fetchone()[0]
         market_ticks = db.execute("SELECT COUNT(*) FROM bot_market_ticks").fetchone()[0]
         reports = db.execute("SELECT COUNT(*) FROM bot_reports").fetchone()[0]
 
