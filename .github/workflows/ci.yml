@@ -53,18 +53,19 @@ jobs:
           grep -q '^LIVE_TRADING_ENABLED=false$' .env
       - name: Build container image
         run: docker compose build
-      - name: Start API and continuous Paper bot
+      - name: Start API and verify dashboard route
         run: |
           docker compose up -d mumin-ai-trader
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8000/health; then
               echo
-              exit 0
+              break
             fi
             sleep 2
           done
-          docker compose logs
-          exit 1
+          curl --fail --silent http://127.0.0.1:8000/health
+          curl --fail --silent http://127.0.0.1:8000/dashboard | grep -q "MUMIN"
+          echo "Dashboard HTML served successfully from the container."
       - name: Run finite multi-symbol Paper loop in Docker
         run: |
           docker compose run --name mumin-paper-bot-smoke --no-deps --entrypoint python mumin-paper-bot scripts/run_continuous_paper.py --db /app/data/mumin_public_paper.db --interval-seconds 0.01 --cycles 40 --data-source MOCK_SYNTHETIC
