@@ -68,6 +68,15 @@ def load_snapshot(database: str) -> dict[str, Any]:
         source = connection.execute(
             "SELECT data_source FROM bot_market_ticks ORDER BY id DESC LIMIT 1"
         ).fetchone()
+        latest_tick = connection.execute(
+            "SELECT signal,action,price FROM bot_equity ORDER BY tick DESC LIMIT 1"
+        ).fetchone()
+        signals = {}
+        if latest_tick and latest_tick["signal"]:
+            for item in str(latest_tick["signal"]).split(","):
+                if ":" in item:
+                    symbol, signal = item.split(":", 1)
+                    signals[symbol] = signal
         return {
             "tick": int(account["tick_count"]),
             "initial_cash": initial,
@@ -89,6 +98,10 @@ def load_snapshot(database: str) -> dict[str, Any]:
             "wins": int(counts["wins"]),
             "losses": int(counts["losses"]),
             "positions": positions,
+            "market_prices": prices,
+            "signals": signals,
+            "last_action": str(latest_tick["action"]) if latest_tick else "NO_TICK",
+            "last_price": Decimal(latest_tick["price"]) if latest_tick else None,
             "fills": fills,
             "history": list(reversed(history)),
             "halted": bool(account["halted"]),
@@ -139,6 +152,22 @@ def render_markdown(snapshot: dict[str, Any]) -> str:
         "",
         "هذه حدود منطقية داخل المحاكاة وليست أوامر حماية لدى Binance، ولا تمنع فجوات الأسعار أو تأخر التشغيل.",
         "",
+        "## مراقبة السوق وإشارات Smart Sniper",
+        "",
+        f"**آخر إجراء:** {snapshot['last_action']}",
+        "",
+        "| الرمز | آخر سعر عام | الإشارة |",
+        "|---|---:|---|",
+    ]
+    if snapshot["market_prices"]:
+        for symbol, price in sorted(snapshot["market_prices"].items()):
+            rows.append(
+                f"| {symbol} | {_money(price)} | {snapshot['signals'].get(symbol, '—')} |"
+            )
+    else:
+        rows.append("| لا توجد بيانات سوق حديثة | — | — |")
+    rows.extend([
+        "",
         "## المراكز المفتوحة",
         "",
         "| الأصل | الكمية | الدخول | السعر المرجعي | القيمة |",
@@ -186,6 +215,14 @@ def render_html(snapshot: dict[str, Any]) -> str:
         "</tr>"
         for item in snapshot["positions"]
     ) or '<tr><td colspan="5" class="empty">لا توجد مراكز مفتوحة</td></tr>'
+    watch_rows = "".join(
+        "<tr>"
+        f"<td>{html.escape(symbol)}</td>"
+        f"<td>{html.escape(_money(price))}</td>"
+        f"<td>{html.escape(snapshot['signals'].get(symbol, '—'))}</td>"
+        "</tr>"
+        for symbol, price in sorted(snapshot["market_prices"].items())
+    ) or '<tr><td colspan="3" class="empty">لا توجد بيانات سوق حديثة</td></tr>'
     fill_rows = "".join(
         "<tr>"
         f"<td>{item['tick']}</td><td>{html.escape(item['symbol'])}</td>"
@@ -239,6 +276,7 @@ svg{{width:100%;height:190px;background:#091d17;border-radius:12px}}.risk{{displ
 <div>الخسارة اليومية القصوى<b>2.00%</b></div><div>التراجع الأقصى<b>5.00%</b></div>
 <div>أقصى تخصيص للصفقة<b>5 USDT</b></div><div>الاحتياطي النقدي<b>20%</b></div>
 </div><p class="muted">لا تمنع هذه الحدود الخسائر أو فجوات الأسعار أو تأخر GitHub Actions. لا تستخدمها لحماية أموال حقيقية.</p></section>
+<section class="panel"><h2>مراقبة السوق وإشارات Smart Sniper</h2><p class="muted">آخر إجراء: {html.escape(snapshot['last_action'])}</p><div class="scroll"><table><thead><tr><th>الرمز</th><th>آخر سعر عام</th><th>الإشارة</th></tr></thead><tbody>{watch_rows}</tbody></table></div></section>
 <section class="panel"><h2>المراكز المفتوحة</h2><div class="scroll"><table><thead><tr><th>الأصل</th><th>الكمية</th><th>الدخول</th><th>السعر المرجعي</th><th>القيمة</th></tr></thead><tbody>{position_rows}</tbody></table></div></section>
 <section class="panel"><h2>آخر الصفقات</h2><div class="scroll"><table><thead><tr><th>الدورة</th><th>الأصل</th><th>الجانب</th><th>سعر التنفيذ</th><th>صافي النتيجة</th><th>الوقت</th></tr></thead><tbody>{fill_rows}</tbody></table></div></section>
 <footer>الجدولة كل خمس دقائق هي طلب GitHub Actions وليست ضماناً. لا يوجد محرك متصل 24/7. هذا التقرير لا يقدم نصيحة استثمارية ولا يضمن الربح.</footer>
