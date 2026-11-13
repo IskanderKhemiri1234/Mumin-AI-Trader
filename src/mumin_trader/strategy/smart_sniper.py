@@ -98,10 +98,19 @@ class SmartSniperStrategy:
         rsi = _rsi(prices)
         momentum_3 = (prices[-1] / prices[-4] - Decimal("1")) * BPS
         momentum_12 = (prices[-1] / prices[-13] - Decimal("1")) * BPS
-        peak = max(prices[-13:])
-        trough = min(prices[-13:])
-        drawdown = (trough / peak - Decimal("1")) * BPS
-        rebound = (prices[-1] / trough - Decimal("1")) * BPS if trough > ZERO else ZERO
+        recovery_window = prices[-13:]
+        peak_index = max(range(len(recovery_window)), key=recovery_window.__getitem__)
+        peak = recovery_window[peak_index]
+        # A recovery requires a decline AFTER a local peak, then a rebound
+        # from the subsequent trough. A monotonic rise is not a drawdown.
+        post_peak = recovery_window[peak_index + 1:]
+        if post_peak:
+            trough = min(post_peak)
+            drawdown = (trough / peak - Decimal("1")) * BPS
+            rebound = (prices[-1] / trough - Decimal("1")) * BPS
+        else:
+            drawdown = ZERO
+            rebound = ZERO
         trend_up = fast > slow and fast > prior_fast
         trend_down = fast < slow and fast < prior_fast
         regime = "BULL" if trend_up else ("BEAR" if trend_down else "RANGE")
