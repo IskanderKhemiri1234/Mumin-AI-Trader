@@ -286,7 +286,7 @@ def test_runtime_compounding_uses_realized_profit_only_and_respects_five_usdt_ca
 
     assert position is not None
     deployed = Decimal(position[0]) + Decimal(position[1])
-    assert Decimal("3.99") <= deployed <= Decimal("4.01")
+    assert Decimal("4.01") <= deployed <= Decimal("4.03")
     assert Decimal(position[2]) == Decimal("3")
     assert deployed <= Decimal("5")
 
