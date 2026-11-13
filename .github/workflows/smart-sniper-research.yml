@@ -19,7 +19,7 @@ jobs:
   historical-research:
     name: Public Binance data and spread-sensitivity walk-forward
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,7 +39,7 @@ jobs:
             python scripts/run_binance_walk_forward.py \
               --symbols BTCUSDT,ETHUSDT,BNBUSDT \
               --interval "$interval" \
-              --limit 1000 \
+              --limit 2000 \
               --warmup-bars 240 \
               --test-bars 120 \
               --step-bars 120 \
