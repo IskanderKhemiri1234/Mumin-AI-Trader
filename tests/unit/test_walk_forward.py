@@ -115,7 +115,7 @@ def test_walk_forward_ablation_measures_shield_and_compounding_effects(monkeypat
     import mumin_trader.research.walk_forward as research
 
     class AlwaysBuy:
-        def assess(self, closes, spread_bps=Decimal("0")):
+        def assess(self, closes, spread_bps=Decimal("0"), **kwargs):
             return SimpleNamespace(
                 signal="BUY", score=Decimal("95"), regime="BULL",
                 mtf_confluence=True, atr_percent=Decimal("0.30"),
