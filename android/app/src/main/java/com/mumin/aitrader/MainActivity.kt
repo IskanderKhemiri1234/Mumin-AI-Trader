@@ -2,6 +2,17 @@ package com.mumin.aitrader
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.AlertDialog
+import android.app.DownloadManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
@@ -20,12 +31,24 @@ import androidx.core.view.WindowCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import java.net.HttpURLConnection
 import java.net.URL
+import java.io.File
+import java.util.concurrent.Executors
+import org.json.JSONObject
+import androidx.core.content.FileProvider
 
 class MainActivity : Activity() {
     private lateinit var webView: WebView
     private lateinit var swipeRefresh: SwipeRefreshLayout
+    private var updateDownloadId: Long = -1L
+    private var pendingUpdateUri: Uri? = null
+    private val updateExecutor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var updateReceiver: BroadcastReceiver? = null
 
     companion object {
+        private const val LATEST_RELEASE_URL = "https://api.github.com/repos/IskanderKhemiri1234/Mumin-AI-Trader/releases/latest"
+        private const val CURRENT_VERSION = "1.1.0"
+        private const val INSTALL_REQUEST_CODE = 7102
         private const val REPORT_URL =
             "https://raw.githubusercontent.com/IskanderKhemiri1234/Mumin-AI-Trader/mumin-paper-ledger/latest-report.html"
         private const val EMERALD = 0xFF071C17.toInt()
@@ -196,6 +219,139 @@ class MainActivity : Activity() {
         } else {
             webView.restoreState(savedInstanceState)
             if (webView.url.isNullOrBlank()) loadLatestReport()
+        }
+    }
+
+    private fun checkForUpdates() {
+        updateExecutor.execute {
+            try {
+                val connection = URL(LATEST_RELEASE_URL).openConnection() as HttpURLConnection
+                connection.connectTimeout = 10_000
+                connection.readTimeout = 10_000
+                connection.setRequestProperty("Accept", "application/vnd.github+json")
+                connection.setRequestProperty("User-Agent", "Mumin-AI-Trader-Android")
+                val json = connection.inputStream.bufferedReader().use { it.readText() }
+                connection.disconnect()
+                val release = JSONObject(json)
+                val latestVersion = release.optString("tag_name").removePrefix("v")
+                val assets = release.optJSONArray("assets") ?: return@execute
+                var apkUrl: String? = null
+                for (index in 0 until assets.length()) {
+                    val asset = assets.getJSONObject(index)
+                    if (asset.optString("name").endsWith(".apk", ignoreCase = true)) {
+                        apkUrl = asset.optString("browser_download_url")
+                        break
+                    }
+                }
+                if (apkUrl.isNullOrBlank() || !apkUrl.startsWith("https://github.com/")) return@execute
+                if (compareVersions(latestVersion, CURRENT_VERSION) > 0) {
+                    mainHandler.post {
+                        AlertDialog.Builder(this)
+                            .setTitle("تحديث جديد متاح")
+                            .setMessage("يتوفر الإصدار $latestVersion من Mumin AI Trader. نزّله لتثبيت التحسينات والميزات الجديدة.")
+                            .setNegativeButton("لاحقاً", null)
+                            .setPositiveButton("تنزيل التحديث") { _, _ -> downloadUpdate(apkUrl) }
+                            .show()
+                    }
+                }
+            } catch (_: Exception) {
+                // Update checks are best-effort; the report remains usable offline.
+            }
+        }
+    }
+
+    private fun compareVersions(first: String, second: String): Int {
+        val a = first.split(".").map { it.toIntOrNull() ?: 0 }
+        val b = second.split(".").map { it.toIntOrNull() ?: 0 }
+        for (index in 0 until maxOf(a.size, b.size)) {
+            val left = a.getOrElse(index) { 0 }
+            val right = b.getOrElse(index) { 0 }
+            if (left != right) return left.compareTo(right)
+        }
+        return 0
+    }
+
+    private fun downloadUpdate(url: String) {
+        try {
+            val request = DownloadManager.Request(Uri.parse(url))
+                .setTitle("Mumin AI Trader update")
+                .setDescription("Downloading the latest verified app release")
+                .setMimeType("application/vnd.android.package-archive")
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, "Mumin-AI-Trader-update.apk")
+            val manager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            updateDownloadId = manager.enqueue(request)
+            registerUpdateReceiver()
+        } catch (_: Exception) {
+            AlertDialog.Builder(this)
+                .setMessage("تعذر بدء تنزيل التحديث. تحقق من الاتصال وحاول مجدداً.")
+                .setPositiveButton("حسناً", null)
+                .show()
+        }
+    }
+
+    private fun registerUpdateReceiver() {
+        if (updateReceiver != null) return
+        updateReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L) != updateDownloadId) return
+                val manager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                val query = DownloadManager.Query().setFilterById(updateDownloadId)
+                manager.query(query).use { cursor ->
+                    if (!cursor.moveToFirst()) return
+                    val status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                    if (status != DownloadManager.STATUS_SUCCESSFUL) {
+                        AlertDialog.Builder(this@MainActivity)
+                            .setMessage("لم يكتمل تنزيل التحديث. حاول مرة أخرى.")
+                            .setPositiveButton("حسناً", null)
+                            .show()
+                        return
+                    }
+                    pendingUpdateUri = manager.getUriForDownloadedFile(updateDownloadId)
+                    installDownloadedUpdate()
+                }
+            }
+        }
+        val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(updateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(updateReceiver, filter)
+        }
+    }
+
+    private fun installDownloadedUpdate() {
+        val uri = pendingUpdateUri ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+            val settingsIntent = Intent(
+                android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                Uri.parse("package:$packageName")
+            )
+            startActivityForResult(settingsIntent, INSTALL_REQUEST_CODE)
+            return
+        }
+        val installUri = FileProvider.getUriForFile(this, "$packageName.fileprovider",
+            File(filesDir.parentFile, "no-such-file").takeIf { false } ?: getDownloadedApkFile())
+        val installIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(installUri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(installIntent)
+    }
+
+    private fun getDownloadedApkFile(): File {
+        val directory = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+            ?: throw IllegalStateException("Download directory unavailable")
+        return File(directory, "Mumin-AI-Trader-update.apk")
+    }
+
+    @Deprecated("Deprecated by Android; retained for Android 6+ package installer settings result")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == INSTALL_REQUEST_CODE && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            packageManager.canRequestPackageInstalls()) {
+            installDownloadedUpdate()
         }
     }
 
