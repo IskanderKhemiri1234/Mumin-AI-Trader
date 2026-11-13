@@ -92,8 +92,8 @@ def main() -> None:
         raise SystemExit(f"Unsupported base interval: {args.interval}")
     if not symbols or any(symbol not in ALLOWED for symbol in symbols):
         raise SystemExit(f"Symbols must be selected from: {', '.join(sorted(ALLOWED))}")
-    if not 400 <= args.limit <= 3000:
-        raise SystemExit("--limit must be between 400 and 3000.")
+    if not 400 <= args.limit <= 10000:
+        raise SystemExit("--limit must be between 400 and 10000.")
     spreads = [Decimal(item.strip()) for item in args.spread_scenarios.split(",")]
     if not spreads or any(value < 0 for value in spreads):
         raise SystemExit("Spread scenarios must be non-negative basis-point values.")
