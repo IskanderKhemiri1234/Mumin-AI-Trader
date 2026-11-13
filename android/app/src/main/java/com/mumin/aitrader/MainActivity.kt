@@ -1,13 +1,15 @@
 package com.mumin.aitrader
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
-import android.view.Gravity
 import android.view.View
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -16,7 +18,8 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.core.view.WindowCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-import android.app.Activity
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : Activity() {
     private lateinit var webView: WebView
@@ -87,8 +90,42 @@ class MainActivity : Activity() {
             settings.loadsImagesAutomatically = true
             settings.javaScriptCanOpenWindowsAutomatically = false
             settings.setSupportMultipleWindows(false)
-            settings.safeBrowsingEnabled = true
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                settings.safeBrowsingEnabled = true
+            }
             webViewClient = object : WebViewClient() {
+                // raw.githubusercontent.com may label HTML as text/plain.
+                // Intercept the report and explicitly expose it to WebView as HTML.
+                override fun shouldInterceptRequest(
+                    view: WebView,
+                    request: WebResourceRequest
+                ): WebResourceResponse? {
+                    if (!request.isForMainFrame || request.url.toString() != REPORT_URL) {
+                        return null
+                    }
+                    return try {
+                        val connection = URL(REPORT_URL).openConnection() as HttpURLConnection
+                        connection.instanceFollowRedirects = true
+                        connection.connectTimeout = 15_000
+                        connection.readTimeout = 20_000
+                        connection.setRequestProperty("Cache-Control", "no-cache")
+                        connection.setRequestProperty("Pragma", "no-cache")
+                        connection.connect()
+                        if (connection.responseCode in 200..299) {
+                            WebResourceResponse(
+                                "text/html",
+                                "UTF-8",
+                                connection.inputStream
+                            )
+                        } else {
+                            connection.disconnect()
+                            null
+                        }
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+
                 override fun shouldOverrideUrlLoading(
                     view: WebView,
                     request: WebResourceRequest
@@ -97,7 +134,11 @@ class MainActivity : Activity() {
                         request.url.host != "raw.githubusercontent.com"
                 }
 
-                override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                override fun onPageStarted(
+                    view: WebView,
+                    url: String,
+                    favicon: android.graphics.Bitmap?
+                ) {
                     progress.visibility = View.VISIBLE
                 }
 
@@ -166,6 +207,7 @@ class MainActivity : Activity() {
         super.onSaveInstanceState(outState)
     }
 
+    @Suppress("DEPRECATION")
     override fun onBackPressed() {
         if (::webView.isInitialized && webView.canGoBack()) {
             webView.goBack()
