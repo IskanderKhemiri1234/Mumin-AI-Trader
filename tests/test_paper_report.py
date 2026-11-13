@@ -1,6 +1,5 @@
 from decimal import Decimal
 
-from mumin_trader.main import app  # noqa: F401
 from scripts.export_paper_report import load_snapshot, render_html, render_markdown
 from scripts.run_continuous_paper import ContinuousPaperBot
 
