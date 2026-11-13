@@ -15,7 +15,6 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.core.view.WindowCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
@@ -25,7 +24,6 @@ import java.net.URL
 class MainActivity : Activity() {
     private lateinit var webView: WebView
     private lateinit var swipeRefresh: SwipeRefreshLayout
-    private lateinit var progress: ProgressBar
 
     companion object {
         private const val REPORT_URL =
@@ -66,15 +64,6 @@ class MainActivity : Activity() {
             setPadding(0, dp(4), 0, 0)
         })
         root.addView(header)
-
-        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            isIndeterminate = true
-            indeterminateTintList = android.content.res.ColorStateList.valueOf(GOLD)
-            alpha = 0f
-        }
-        root.addView(progress, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(3)
-        ))
 
         swipeRefresh = SwipeRefreshLayout(this).apply {
             setColorSchemeColors(GOLD)
@@ -138,11 +127,9 @@ class MainActivity : Activity() {
                     url: String,
                     favicon: android.graphics.Bitmap?
                 ) {
-                    progress.alpha = 1f
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
-                    progress.alpha = 0f
                     swipeRefresh.isRefreshing = false
                 }
 
@@ -152,7 +139,6 @@ class MainActivity : Activity() {
                     error: WebResourceError
                 ) {
                     if (request.isForMainFrame) {
-                        progress.alpha = 0f
                         swipeRefresh.isRefreshing = false
                         view.loadDataWithBaseURL(
                             null,
@@ -191,7 +177,6 @@ class MainActivity : Activity() {
     }
 
     private fun loadLatestReport() {
-        progress.alpha = 1f
         webView.loadUrl(REPORT_URL, mapOf(
             "Cache-Control" to "no-cache",
             "Pragma" to "no-cache"
