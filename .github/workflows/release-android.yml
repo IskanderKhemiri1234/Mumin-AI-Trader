@@ -91,7 +91,7 @@ jobs:
               raise SystemExit("Decoded keystore is empty.")
 
           # JKS magic or ZIP-based PKCS12 container; keytool performs final validation.
-          if not (decoded.startswith(bytes.fromhex("feedfeed")) or decoded.startswith(b"PK")):
+          if not (decoded.startswith(bytes.fromhex("feedfeed")) or decoded.startswith(b"PK") or decoded.startswith(b"\\x30")):
               raise SystemExit(
                   "Decoded data is not recognized as a JKS or PKCS12 keystore. "
                   "The secret may contain a different file or an incomplete encoding."
