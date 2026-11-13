@@ -1,0 +1,148 @@
+name: Mumin Paper Engine (Free)
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mumin-paper-engine
+  cancel-in-progress: false
+
+jobs:
+  paper-cycle:
+    name: One safe Paper cycle and mobile report
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Checkout application
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Checkout persistent Paper ledger
+        uses: actions/checkout@v4
+        with:
+          ref: paper-state
+          path: paper-state
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install application
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+
+      - name: Validate safety configuration
+        env:
+          INITIAL_CAPITAL_USD: "70.00"
+          MAX_CAPITAL_ALLOCATION_USD: "70.00"
+          MAX_TRADE_ALLOCATION_USD: "5.00"
+          CAPITAL_RESERVE_PERCENT: "20"
+          MAX_OPEN_POSITIONS: "2"
+          SIMULATED_STOP_LOSS_PERCENT: "0.50"
+          SIMULATED_TAKE_PROFIT_PERCENT: "1.00"
+          MAX_DAILY_LOSS_PERCENT: "2.00"
+          MAX_DRAWDOWN_PERCENT: "5.00"
+        run: |
+          python - <<'PY'
+          import os
+          expected = {
+              "INITIAL_CAPITAL_USD": "70.00",
+              "MAX_CAPITAL_ALLOCATION_USD": "70.00",
+              "MAX_TRADE_ALLOCATION_USD": "5.00",
+              "CAPITAL_RESERVE_PERCENT": "20",
+              "MAX_OPEN_POSITIONS": "2",
+              "SIMULATED_STOP_LOSS_PERCENT": "0.50",
+              "SIMULATED_TAKE_PROFIT_PERCENT": "1.00",
+              "MAX_DAILY_LOSS_PERCENT": "2.00",
+              "MAX_DRAWDOWN_PERCENT": "5.00",
+          }
+          for key, value in expected.items():
+              actual = os.environ.get(key)
+              if actual != value:
+                  raise SystemExit(f"Unsafe Paper configuration: {key}={actual!r}")
+          print("Paper risk configuration verified.")
+          PY
+          test ! -e paper-state/mumin_public_paper.db || test -s paper-state/mumin_public_paper.db
+
+      - name: Run one Binance public-market-data Paper cycle
+        env:
+          INITIAL_CAPITAL_USD: "70.00"
+          MAX_CAPITAL_ALLOCATION_USD: "70.00"
+          MAX_TRADE_ALLOCATION_USD: "5.00"
+          CAPITAL_RESERVE_PERCENT: "20"
+          MAX_OPEN_POSITIONS: "2"
+          SIMULATED_STOP_LOSS_PERCENT: "0.50"
+          SIMULATED_TAKE_PROFIT_PERCENT: "1.00"
+          MAX_DAILY_LOSS_PERCENT: "2.00"
+          MAX_DRAWDOWN_PERCENT: "5.00"
+        run: |
+          python scripts/run_continuous_paper.py \
+            --db paper-state/mumin_public_paper.db \
+            --interval-seconds 1 \
+            --cycles 1 \
+            --data-source BINANCE_PUBLIC_MARKET_DATA
+
+      - name: Checkpoint SQLite and export mobile dashboard
+        run: |
+          python - <<'PY'
+          import sqlite3
+          path = "paper-state/mumin_public_paper.db"
+          connection = sqlite3.connect(path, timeout=20)
+          result = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+          connection.close()
+          if result and result[0] != 0:
+              raise SystemExit(f"SQLite checkpoint was busy: {result}")
+          PY
+          python scripts/export_paper_report.py \
+            --db paper-state/mumin_public_paper.db \
+            --markdown paper-state/latest-report.md \
+            --html paper-state/latest-report.html
+
+      - name: Commit durable ledger and latest report
+        run: |
+          git -C paper-state config user.name "github-actions[bot]"
+          git -C paper-state config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C paper-state add mumin_public_paper.db latest-report.md latest-report.html
+          if ! git -C paper-state diff --cached --quiet; then
+            git -C paper-state commit -m "Update Paper ledger and mobile report"
+            git -C paper-state push origin paper-state
+          else
+            echo "No Paper ledger changes to persist."
+          fi
+
+      - name: Upload mobile report
+        id: report
+        uses: actions/upload-artifact@v4
+        with:
+          name: mumin-paper-dashboard-${{ github.run_number }}
+          path: |
+            paper-state/latest-report.html
+            paper-state/latest-report.md
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish mobile report in Job Summary
+        if: success()
+        env:
+          REPORT_URL: ${{ steps.report.outputs.artifact-url }}
+        run: |
+          cat paper-state/latest-report.md >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo
+            echo "---"
+            echo
+            echo "**ملف التقرير لهذه الدورة:** [فتح / تنزيل لوحة Paper]($REPORT_URL)"
+            echo
+            echo "الجدولة كل 5 دقائق هي أفضل جهد من GitHub وليست ضماناً للوقت أو التشغيل المتصل 24/7."
+          } >> "$GITHUB_STEP_SUMMARY"
