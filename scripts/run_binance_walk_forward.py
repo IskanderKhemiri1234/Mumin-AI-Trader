@@ -101,6 +101,9 @@ def main() -> None:
                             ),
                             "fees_paid": str(fold.fees_paid),
                             "shield_blocks": fold.shield_blocks,
+                            "buy_candidates": fold.buy_candidates,
+                            "blocked_buy_candidates": fold.blocked_buy_candidates,
+                            "entry_orders": fold.entry_orders,
                             "compounding_reinvested": str(fold.compounding_reinvested),
                         }
                         for fold in report.folds
