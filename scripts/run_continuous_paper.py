@@ -34,7 +34,7 @@ MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "2"))
 FEE_RATE = Decimal("0.001")
 SLIPPAGE_BPS = Decimal("2")
 STOP_LOSS_PERCENT = Decimal(os.getenv("SIMULATED_STOP_LOSS_PERCENT", "0.50"))
-TAKE_PROFIT_PERCENT = Decimal(os.getenv("SIMULATED_TAKE_PROFIT_PERCENT", "1.00"))
+TAKE_PROFIT_PERCENT = Decimal(os.getenv("SIMULATED_TAKE_PROFIT_PERCENT", "1.25"))
 MAX_DAILY_LOSS_PERCENT = Decimal(os.getenv("MAX_DAILY_LOSS_PERCENT", "2.00"))
 MAX_DRAWDOWN_PERCENT = Decimal(os.getenv("MAX_DRAWDOWN_PERCENT", "5.00"))
 
@@ -45,8 +45,8 @@ if INITIAL_CASH != Decimal("70.00"):
     raise RuntimeError("Paper engine requires the configured 70.00 USDT starting capital.")
 if STOP_LOSS_PERCENT != Decimal("0.50"):
     raise RuntimeError("Paper stop-loss is fixed at 0.50%.")
-if TAKE_PROFIT_PERCENT != Decimal("1.00"):
-    raise RuntimeError("Paper take-profit is fixed at 1.00%.")
+if TAKE_PROFIT_PERCENT != Decimal("1.25"):
+    raise RuntimeError("Paper take-profit is fixed at 1.25% (2.5R against the 0.50% stop).")
 if MAX_DAILY_LOSS_PERCENT != Decimal("2.00"):
     raise RuntimeError("Paper daily loss limit is fixed at 2.00%.")
 
@@ -557,6 +557,13 @@ class ContinuousPaperBot:
                         realized_net_pnl=realized,
                         momentum_score=assessment.score,
                         drawdown_percent=drawdown_percent,
+                        atr_percent=assessment.atr_percent,
+                        trend_clear=assessment.mtf_confluence and assessment.regime == "BULL",
+                        liquidity_high=(
+                            spread_bps <= Decimal("8")
+                            and volume_ratio is not None and Decimal("0.80") <= volume_ratio <= Decimal("2.50")
+                            and trade_ratio is not None and Decimal("0.80") <= trade_ratio <= Decimal("2.50")
+                        ),
                     )
                     committed_profit = sum(
                         (Decimal(pos["profit_funded_quote"]) for pos in open_positions.values()),
