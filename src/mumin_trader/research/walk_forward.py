@@ -111,6 +111,10 @@ def _evaluate_fold(
     compounding_reinvested = ZERO
     position: dict[str, Decimal] | None = None
     pending_entry: dict[str, Decimal] | None = None
+    timeframe_indexes = {
+        timeframe: ([item.timestamp_ms for item in history], history)
+        for timeframe, history in (higher_timeframes or {}).items()
+    }
 
     for index in range(start, end):
         bar = candles[index]
@@ -138,12 +142,13 @@ def _evaluate_fold(
                 }
             pending_entry = None
 
-        closes = [item.close for item in candles[: index + 1]]
+        closes = [item.close for item in candles[max(0, index - 60):index + 1]]
         aligned_timeframes: dict[str, list[Decimal]] = {}
-        for timeframe, history in (higher_timeframes or {}).items():
-            timestamps = [item.timestamp_ms for item in history]
+        for timeframe, (timestamps, history) in timeframe_indexes.items():
             eligible_count = bisect_right(timestamps, bar.timestamp_ms)
-            aligned_timeframes[timeframe] = [item.close for item in history[:eligible_count]]
+            aligned_timeframes[timeframe] = [
+                item.close for item in history[max(0, eligible_count - 45):eligible_count]
+            ]
         atr_window = candles[max(0, index - 14):index + 1]
         true_ranges: list[Decimal] = []
         for atr_index in range(1, len(atr_window)):
