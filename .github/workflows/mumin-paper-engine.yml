@@ -119,7 +119,7 @@ jobs:
           cp mumin-paper-ledger/latest-report.html "$RUNNER_TEMP/mumin-paper-state/"
           git -C mumin-paper-ledger config user.name "github-actions[bot]"
           git -C mumin-paper-ledger config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C mumin-paper-ledger switch --orphan --discard-changes paper-ledger-snapshot
+          git -C mumin-paper-ledger switch --discard-changes --orphan paper-ledger-snapshot
           git -C mumin-paper-ledger clean -fdx
           cp "$RUNNER_TEMP/mumin-paper-state/"* mumin-paper-ledger/
           git -C mumin-paper-ledger add mumin_public_paper.db latest-report.md latest-report.html
