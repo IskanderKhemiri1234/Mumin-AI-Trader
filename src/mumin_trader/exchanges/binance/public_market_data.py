@@ -71,7 +71,7 @@ class PublicMarketData:
         if not bid.is_finite() or not ask.is_finite() or bid <= 0 or ask < bid:
             raise ValueError(f"Invalid public order-book quote for {symbol}")
 
-        closed = [row for row in candles if len(row) > 8 and int(row[6]) < received_at_ms]
+        closed = [row for row in candles if len(row) > 6 and int(row[6]) < received_at_ms]
         if not closed:
             raise ValueError(f"No fully closed one-minute candle for {symbol}")
         candle = closed[-1]
