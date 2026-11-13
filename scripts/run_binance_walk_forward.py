@@ -128,7 +128,7 @@ def main() -> None:
             "Walk-forward folds are out-of-sample windows; no ML model is trained.",
             "Stops and targets are evaluated at candle closes, not inferred intrabar paths.",
             "Historical performance does not guarantee future results.",
-            "Research uses a 1 USDT seed ticket; only incremental ticket size comes from realized net profits.",
+            "Research uses a 1.02 USDT seed ticket to clear minimum notional after fees; only incremental ticket size comes from realized net profits.",
         ],
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
