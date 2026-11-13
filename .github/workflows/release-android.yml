@@ -154,6 +154,45 @@ jobs:
           import hashlib
           expected_sha256 = "2000f0797ff56c2a79f49a3ea38730fe0f643b5a2f32ab119222ec4afd4b183b"
           actual_sha256 = hashlib.sha256(decoded).hexdigest()
+          # If mobile clipboard changed one additional valid Base64 character,
+          # recover it deterministically by matching the trusted SHA-256 fingerprint.
+          # No candidate value or keystore content is ever printed.
+          if len(decoded) == 2774 and actual_sha256 != expected_sha256:
+              alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+              matches = []
+              chars = list(normalized)
+              for position, current in enumerate(chars):
+                  if current == "=":
+                      continue
+                  for candidate in alphabet:
+                      if candidate == current:
+                          continue
+                      trial_chars = chars.copy()
+                      trial_chars[position] = candidate
+                      try:
+                          trial_decoded = base64.b64decode("".join(trial_chars), validate=True)
+                      except Exception:
+                          continue
+                      if (
+                          len(trial_decoded) == 2774
+                          and hashlib.sha256(trial_decoded).hexdigest() == expected_sha256
+                      ):
+                          matches.append((position, candidate, trial_decoded))
+                          if len(matches) > 1:
+                              break
+                  if len(matches) > 1:
+                      break
+
+              if len(matches) == 1:
+                  position, candidate, decoded = matches[0]
+                  chars[position] = candidate
+                  normalized = "".join(chars)
+                  actual_sha256 = hashlib.sha256(decoded).hexdigest()
+                  print(
+                      "Recovered one remaining clipboard-corrupted Base64 character "
+                      "using the trusted SHA-256 fingerprint; the character is not shown."
+                  )
+
           if len(decoded) != 2774 or actual_sha256 != expected_sha256:
               print(
                   "SAFE_DIAGNOSTIC "
