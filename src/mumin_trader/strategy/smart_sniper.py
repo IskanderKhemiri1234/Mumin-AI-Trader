@@ -5,6 +5,7 @@ from decimal import Decimal
 
 ZERO = Decimal("0")
 BPS = Decimal("10000")
+STOP_PERCENT = Decimal("0.50")
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +21,10 @@ class StrategyAssessment:
     rsi: Decimal
     estimated_cost_bps: Decimal
     expected_edge_bps: Decimal
+    risk_reward_ratio: Decimal
+    target_percent: Decimal
+    atr_percent: Decimal
+    mtf_confluence: bool
     reasons: tuple[str, ...]
 
 
@@ -43,11 +48,28 @@ def _rsi(values: list[Decimal], period: int = 14) -> Decimal:
     return Decimal("100") - Decimal("100") / (Decimal(1) + gains / losses)
 
 
-class SmartSniperStrategy:
-    """Deterministic, explainable dual-regime strategy research engine.
+def _close_volatility_percent(values: list[Decimal], period: int = 14) -> Decimal:
+    changes = [
+        abs(values[index] / values[index - 1] - Decimal("1")) * Decimal("100")
+        for index in range(max(1, len(values) - period), len(values))
+    ]
+    return sum(changes, ZERO) / Decimal(len(changes)) if changes else ZERO
 
-    Scores are heuristic rankings, not calibrated probabilities. No execution
-    authority is granted here; portfolio risk and Paper execution remain separate.
+
+def _timeframe_bullish(values: list[Decimal]) -> bool:
+    if len(values) < 30 or any(not value.is_finite() or value <= ZERO for value in values):
+        return False
+    fast = _ema(values[-40:], 9)
+    slow = _ema(values[-40:], 21)
+    prior_fast = _ema(values[-41:-1], 9) if len(values) >= 41 else _ema(values[-40:-1], 9)
+    return values[-1] > fast > slow and fast > prior_fast
+
+
+class SmartSniperStrategy:
+    """Explainable entry filter with cost-aware asymmetric targets and MTF confirmation.
+
+    Scores are heuristic rankings, not calibrated probabilities. Missing higher
+    timeframe data fails closed; portfolio risk and Paper execution remain separate.
     """
 
     def __init__(
@@ -74,23 +96,41 @@ class SmartSniperStrategy:
 
     @property
     def estimated_cost_bps(self) -> Decimal:
-        # Conservative estimate includes both fees, two-sided slippage and spread allowance.
         return (
             self.buy_fee_bps + self.sell_fee_bps
             + self.slippage_bps_per_side * Decimal("2") + Decimal("4")
         )
 
-    def assess(self, closes: list[Decimal], spread_bps: Decimal = ZERO) -> StrategyAssessment:
+    def assess(
+        self,
+        closes: list[Decimal],
+        spread_bps: Decimal = ZERO,
+        *,
+        higher_timeframe_closes: dict[str, list[Decimal]] | None = None,
+        atr_percent: Decimal | None = None,
+    ) -> StrategyAssessment:
         prices = [Decimal(value) for value in closes]
+        fallback = (
+            "HOLD", "UNKNOWN", "NONE", ZERO, ZERO, ZERO, ZERO, ZERO,
+            Decimal("50"), self.estimated_cost_bps, ZERO, Decimal("0"),
+            Decimal("0"), ZERO, False,
+        )
         if len(prices) < 30 or any(not value.is_finite() or value <= ZERO for value in prices):
-            return StrategyAssessment(
-                "HOLD", "UNKNOWN", "NONE", ZERO, ZERO, ZERO, ZERO, ZERO,
-                Decimal("50"), self.estimated_cost_bps, ZERO,
-                ("Insufficient valid closed-candle history.",),
-            )
+            return StrategyAssessment(*fallback, ("Insufficient valid closed-candle history.",))
         spread = Decimal(spread_bps)
         if not spread.is_finite() or spread < ZERO:
             raise ValueError("Spread must be a finite non-negative value.")
+        mtf = higher_timeframe_closes or {}
+        mtf_confluence = (
+            _timeframe_bullish([Decimal(v) for v in mtf.get("5m", [])])
+            and _timeframe_bullish([Decimal(v) for v in mtf.get("15m", [])])
+        )
+        volatility = (
+            _close_volatility_percent(prices)
+            if atr_percent is None else Decimal(atr_percent)
+        )
+        if not volatility.is_finite() or volatility < ZERO:
+            raise ValueError("ATR/volatility must be finite and non-negative.")
 
         fast = _ema(prices[-40:], 9)
         slow = _ema(prices[-40:], 21)
@@ -101,68 +141,73 @@ class SmartSniperStrategy:
         recovery_window = prices[-13:]
         peak_index = max(range(len(recovery_window)), key=recovery_window.__getitem__)
         peak = recovery_window[peak_index]
-        # A recovery requires a decline AFTER a local peak, then a rebound
-        # from the subsequent trough. A monotonic rise is not a drawdown.
         post_peak = recovery_window[peak_index + 1:]
         if post_peak:
             trough = min(post_peak)
             drawdown = (trough / peak - Decimal("1")) * BPS
             rebound = (prices[-1] / trough - Decimal("1")) * BPS
         else:
-            drawdown = ZERO
-            rebound = ZERO
+            drawdown = rebound = ZERO
         trend_up = fast > slow and fast > prior_fast
         trend_down = fast < slow and fast < prior_fast
         regime = "BULL" if trend_up else ("BEAR" if trend_down else "RANGE")
         estimated_cost = self.estimated_cost_bps + spread
         reasons: list[str] = []
 
-        # Existing positions may be exited on a confirmed weakening regime.
         if trend_down and momentum_3 < Decimal("-8") and rsi < Decimal("48"):
             return StrategyAssessment(
                 "SELL", regime, "RISK_EXIT", Decimal("80"), momentum_3,
                 momentum_12, drawdown, rebound, rsi, estimated_cost,
-                momentum_12 - estimated_cost,
+                momentum_12 - estimated_cost, Decimal("0"), Decimal("0"),
+                volatility, mtf_confluence,
                 ("Downtrend confirmed by EMA structure and negative short momentum.",),
             )
 
         momentum_score = ZERO
         if trend_up:
-            momentum_score += Decimal("30")
-            reasons.append("EMA trend and fast-EMA slope are positive.")
+            momentum_score += Decimal("25")
+            reasons.append("Local EMA trend and fast-EMA slope are positive.")
         if momentum_3 > Decimal("5"):
-            momentum_score += Decimal("15")
+            momentum_score += Decimal("10")
             reasons.append("Short-horizon momentum is positive.")
         if Decimal("48") <= rsi <= Decimal("68"):
-            momentum_score += Decimal("15")
+            momentum_score += Decimal("10")
             reasons.append("RSI confirms strength without an overbought reading.")
         if momentum_12 > estimated_cost + self.minimum_net_edge_bps:
-            momentum_score += Decimal("25")
+            momentum_score += Decimal("20")
             reasons.append("12-candle move clears estimated round-trip costs and edge buffer.")
         if spread <= Decimal("12"):
-            momentum_score += Decimal("15")
+            momentum_score += Decimal("10")
             reasons.append("Bid/ask spread is within the liquidity-quality limit.")
+        if mtf_confluence:
+            momentum_score += Decimal("25")
+            reasons.append("5m and 15m trends confirm the local bullish setup.")
+        else:
+            reasons.append("Missing or non-confluent 5m/15m trend confirmation.")
 
         recovery_score = ZERO
         recovery_setup = drawdown <= Decimal("-150") and rebound >= Decimal("60")
         if recovery_setup:
-            recovery_score += Decimal("25")
+            recovery_score += Decimal("20")
             reasons.append("A material pullback is followed by a measurable rebound.")
         if fast > prior_fast and prices[-1] > fast:
-            recovery_score += Decimal("20")
+            recovery_score += Decimal("15")
             reasons.append("Price has reclaimed a rising fast EMA.")
         if momentum_3 > ZERO and momentum_12 > ZERO:
-            recovery_score += Decimal("15")
+            recovery_score += Decimal("10")
             reasons.append("Both short and medium lookback momentum have turned positive.")
         if Decimal("35") <= rsi <= Decimal("62"):
-            recovery_score += Decimal("15")
-            reasons.append("Recovery RSI is constructive without chasing extreme strength.")
+            recovery_score += Decimal("10")
+            reasons.append("Recovery RSI is constructive.")
         if momentum_12 > estimated_cost + self.minimum_net_edge_bps:
             recovery_score += Decimal("15")
-            reasons.append("Recovery move clears estimated costs and the edge buffer.")
+            reasons.append("Recovery move clears estimated costs and edge buffer.")
         if spread <= Decimal("12"):
             recovery_score += Decimal("10")
             reasons.append("Spread passes the execution-quality filter.")
+        if mtf_confluence:
+            recovery_score += Decimal("20")
+            reasons.append("Higher timeframes confirm the recovery direction.")
 
         if momentum_score >= recovery_score:
             chosen_score, chosen_strategy = momentum_score, "MOMENTUM"
@@ -176,22 +221,31 @@ class SmartSniperStrategy:
             expected_move = min(rebound, momentum_12)
             eligible = recovery_setup and fast > prior_fast and prices[-1] > fast
 
+        # Stop remains the existing 0.50% risk limit. Target is selected at
+        # 2.5R or 3R; higher score selects 3R. The existing account-level
+        # daily-loss and drawdown guards remain independent.
+        risk_reward = Decimal("3.0") if chosen_score >= Decimal("90") else Decimal("2.5")
+        target_percent = STOP_PERCENT * risk_reward
+        target_bps = target_percent * Decimal("100")
         net_edge = expected_move - estimated_cost
-        if not eligible:
-            reasons.append("No complete entry setup; remain in HOLD.")
-        if net_edge <= self.minimum_net_edge_bps:
-            reasons.append("Expected move does not clear costs plus the required net-edge buffer.")
+        if volatility < Decimal("0.08") or volatility > Decimal("1.20"):
+            eligible = False
+            reasons.append("Volatility is outside the accepted ATR band.")
+        if not mtf_confluence:
+            eligible = False
+        if expected_move < target_bps + estimated_cost + self.minimum_net_edge_bps:
+            eligible = False
+            reasons.append("Expected move does not cover the asymmetric target plus all estimated costs.")
         if chosen_score < self.minimum_score:
+            eligible = False
             reasons.append("Quality score is below the configured acceptance threshold.")
 
-        signal = "BUY" if (
-            eligible and net_edge > self.minimum_net_edge_bps
-            and chosen_score >= self.minimum_score
-        ) else "HOLD"
-        if not reasons:
-            reasons.append("No actionable signal.")
+        signal = "BUY" if eligible else "HOLD"
+        if not eligible:
+            reasons.append("Asymmetric Alpha Filter rejected the entry; remain in HOLD.")
         return StrategyAssessment(
             signal, regime, chosen_strategy, chosen_score, momentum_3,
             momentum_12, drawdown, rebound, rsi, estimated_cost, net_edge,
-            tuple(reasons),
+            risk_reward, target_percent, volatility, mtf_confluence,
+            tuple(reasons) or ("No actionable signal.",),
         )
