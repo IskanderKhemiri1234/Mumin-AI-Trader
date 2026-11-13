@@ -14,31 +14,52 @@ BASE_URL = "https://data-api.binance.vision"
 ALLOWED = {"BTCUSDT", "ETHUSDT", "BNBUSDT"}
 
 
+HIGHER_TIMEFRAMES = {
+    "1m": ("5m", "15m"),
+    "5m": ("15m", "1h"),
+    "15m": ("1h", "4h"),
+    "1h": ("4h", "1d"),
+    "4h": ("1d", "1w"),
+    "1d": ("1w", "1M"),
+}
+
+
 def fetch_history(client: httpx.Client, symbol: str, interval: str, limit: int):
     server = client.get(f"{BASE_URL}/api/v3/time")
     server.raise_for_status()
     server_time = int(server.json()["serverTime"])
-    response = client.get(
-        f"{BASE_URL}/api/v3/klines",
-        params={"symbol": symbol, "interval": interval, "limit": limit},
-    )
-    response.raise_for_status()
-    rows = response.json()
-    candles = []
-    for row in rows:
-        if len(row) < 9 or int(row[6]) >= server_time:
-            continue
-        candles.append({
-            "timestamp_ms": int(row[6]),
-            "open": Decimal(str(row[1])),
-            "high": Decimal(str(row[2])),
-            "low": Decimal(str(row[3])),
-            "close": Decimal(str(row[4])),
-            "quote_volume": Decimal(str(row[7])),
-            "trade_count": Decimal(str(row[8])),
-        })
+    collected = []
+    end_time = None
+    while len(collected) < limit:
+        page_limit = min(1000, limit - len(collected))
+        params = {"symbol": symbol, "interval": interval, "limit": page_limit}
+        if end_time is not None:
+            params["endTime"] = end_time
+        response = client.get(f"{BASE_URL}/api/v3/klines", params=params)
+        response.raise_for_status()
+        rows = response.json()
+        closed_rows = [row for row in rows if len(row) >= 9 and int(row[6]) < server_time]
+        if not closed_rows:
+            break
+        collected = closed_rows + collected
+        oldest_open_time = int(closed_rows[0][0])
+        if len(rows) < page_limit or oldest_open_time <= 0:
+            break
+        end_time = oldest_open_time - 1
+    # Retain a strict chronological tail and remove any boundary duplicates.
+    deduplicated = {int(row[0]): row for row in collected}
+    rows = [deduplicated[key] for key in sorted(deduplicated)][-limit:]
+    candles = [{
+        "timestamp_ms": int(row[6]),
+        "open": Decimal(str(row[1])),
+        "high": Decimal(str(row[2])),
+        "low": Decimal(str(row[3])),
+        "close": Decimal(str(row[4])),
+        "quote_volume": Decimal(str(row[7])),
+        "trade_count": Decimal(str(row[8])),
+    } for row in rows]
     if len(candles) < 400:
-        raise RuntimeError(f"Only {len(candles)} closed candles returned for {symbol}.")
+        raise RuntimeError(f"Only {len(candles)} closed candles returned for {symbol} {interval}.")
     return candles
 
 
@@ -59,8 +80,8 @@ def main() -> None:
     symbols = [item.strip().upper() for item in args.symbols.split(",") if item.strip()]
     if not symbols or any(symbol not in ALLOWED for symbol in symbols):
         raise SystemExit(f"Symbols must be selected from: {', '.join(sorted(ALLOWED))}")
-    if not 400 <= args.limit <= 1000:
-        raise SystemExit("--limit must be between 400 and 1000.")
+    if not 400 <= args.limit <= 3000:
+        raise SystemExit("--limit must be between 400 and 3000.")
     spreads = [Decimal(item.strip()) for item in args.spread_scenarios.split(",")]
     if not spreads or any(value < 0 for value in spreads):
         raise SystemExit("Spread scenarios must be non-negative basis-point values.")
@@ -69,12 +90,13 @@ def main() -> None:
     with httpx.Client(timeout=20.0, headers={"Accept": "application/json"}) as client:
         for symbol in symbols:
             raw = fetch_history(client, symbol, args.interval, args.limit)
+            higher_interval_names = HIGHER_TIMEFRAMES[args.interval]
             timeframe_raw = {
                 timeframe: (
                     raw if timeframe == args.interval
                     else fetch_history(client, symbol, timeframe, args.limit)
                 )
-                for timeframe in ("5m", "15m")
+                for timeframe in higher_interval_names
             }
             for spread in spreads:
                 candles = [
@@ -82,11 +104,11 @@ def main() -> None:
                     for row in raw
                 ]
                 higher_timeframes = {
-                    timeframe: [
+                    slot: [
                         HistoricalCandle(**row, spread_bps=spread)
-                        for row in rows
+                        for row in timeframe_raw[timeframe]
                     ]
-                    for timeframe, rows in timeframe_raw.items()
+                    for slot, timeframe in zip(("higher_1", "higher_2"), higher_interval_names)
                 }
                 for shield_enabled in (True, False):
                     for compounding_enabled in (True, False):
@@ -102,6 +124,7 @@ def main() -> None:
                         results.append({
                             "symbol": symbol,
                             "interval": args.interval,
+                            "higher_timeframes": list(higher_interval_names),
                             "spread_assumption_bps": str(spread),
                             "shield_enabled": shield_enabled,
                             "compounding_enabled": compounding_enabled,
@@ -142,7 +165,7 @@ def main() -> None:
             "The strategy is heuristic and is not a calibrated probability model.",
             "Walk-forward folds are out-of-sample windows; no ML model is trained.",
             "Stops and targets are evaluated at candle closes, not inferred intrabar paths.",
-            "5m and 15m confirmation uses only fully closed candles whose close timestamps are not later than the base candle.",
+            "The two higher-timeframe confirmations are selected per base interval and use only fully closed candles whose close timestamps are not later than the base candle.",
             "ATR is calculated from OHLC true range; spread scenarios are explicit assumptions rather than archived order-book depth.",
             "Historical performance does not guarantee future results.",
             "Research uses a 1.02 USDT seed ticket to clear minimum notional after fees; only incremental ticket size comes from realized net profits.",
