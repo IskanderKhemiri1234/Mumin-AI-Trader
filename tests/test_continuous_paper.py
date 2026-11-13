@@ -287,13 +287,19 @@ def test_runtime_compounding_uses_realized_profit_only_and_respects_five_usdt_ca
         positions = db.execute(
             "SELECT entry_gross, entry_fee, profit_funded_quote FROM bot_positions ORDER BY symbol"
         ).fetchall()
+        compounding_events = db.execute(
+            "SELECT allocated_profit FROM bot_compounding_events ORDER BY event_id"
+        ).fetchall()
 
     assert len(positions) == 2
+    assert len(compounding_events) == 2
     deployed = [Decimal(row[0]) + Decimal(row[1]) for row in positions]
     funded = [Decimal(row[2]) for row in positions]
     assert all(Decimal("1.01") <= amount <= Decimal("4.03") for amount in deployed)
     assert sum(funded, Decimal("0")) == Decimal("3")
     assert sorted(funded) == [Decimal("0"), Decimal("3")]
+    event_allocations = [Decimal(row[0]) for row in compounding_events]
+    assert sorted(event_allocations) == [Decimal("0"), Decimal("3")]
     assert all(amount <= Decimal("5") for amount in deployed)
 
 
