@@ -88,7 +88,7 @@ class PublicMarketData:
         quote_volume_ratio = None
         trade_count_ratio = None
         baseline = closed[-21:-1]
-        if len(baseline) == 20:
+        if len(baseline) == 20 and all(len(row) > 8 for row in [*baseline, candle]):
             baseline_quote = [
                 Decimal(str(row[7])) for row in baseline
                 if Decimal(str(row[7])).is_finite() and Decimal(str(row[7])) > 0
