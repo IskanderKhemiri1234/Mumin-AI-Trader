@@ -6,8 +6,8 @@ from mumin_trader.strategy.smart_sniper import SmartSniperStrategy
 def rising_series():
     values = []
     price = Decimal("100")
-    for _ in range(55):
-        price *= Decimal("1.002")
+    for index in range(55):
+        price *= Decimal("0.9975") if index % 3 == 2 else Decimal("1.005")
         values.append(price)
     return values
 
