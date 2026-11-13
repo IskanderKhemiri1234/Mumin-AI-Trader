@@ -68,14 +68,23 @@ jobs:
           if not value.strip():
               raise SystemExit("ANDROID_KEYSTORE_BASE64 is empty.")
 
-          # If the entire secrets text file was pasted, extract only the
-          # ANDROID_KEYSTORE_BASE64 section and stop before the next secret.
-          section = re.search(
-              r"(?ims)^\s*ANDROID_KEYSTORE_BASE64\s*[:=]?\s*\n(.*?)(?=^\s*ANDROID_[A-Z0-9_]+\s*[:=]?\s*$|\Z)",
-              value,
-          )
-          if section:
-              value = section.group(1)
+          # Accept either a raw Base64 value or a complete secrets-file paste.
+          # When a key/value label is present, extract only its value and stop
+          # at the next ANDROID_* assignment (including assignments with values).
+          lines = value.splitlines()
+          extracted = None
+          for index, line in enumerate(lines):
+              match = re.match(r"^\\s*ANDROID_KEYSTORE_BASE64\\s*[:=]\\s*(.*)$", line)
+              if match:
+                  parts = [match.group(1)] if match.group(1) else []
+                  for following in lines[index + 1:]:
+                      if re.match(r"^\\s*ANDROID_[A-Z0-9_]+\\s*[:=]", following):
+                          break
+                      parts.append(following)
+                  extracted = "\\n".join(parts)
+                  break
+          if extracted is not None:
+              value = extracted
 
           # Normalize common mobile-copy formatting and URL-safe Base64.
           value = re.sub(r"(?m)^\s*`{3}[^\n]*$|^\s*`{3}\s*$", "", value)
