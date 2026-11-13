@@ -115,6 +115,10 @@ jobs:
               2807: ("@", "A"),
               3168: ("@", "N"),
               3393: ("@", "o"),
+              # The verified source has one final data character followed by
+              # a single '='. A damaged clipboard copy had two '=' padding
+              # characters, dropping the final decoded byte.
+              3698: ("=", "A"),
           }
           for position, (observed, trusted) in verified_repairs.items():
               if len(normalized) > position and normalized[position] == observed:
