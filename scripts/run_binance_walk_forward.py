@@ -69,11 +69,25 @@ def main() -> None:
     with httpx.Client(timeout=20.0, headers={"Accept": "application/json"}) as client:
         for symbol in symbols:
             raw = fetch_history(client, symbol, args.interval, args.limit)
+            timeframe_raw = {
+                timeframe: (
+                    raw if timeframe == args.interval
+                    else fetch_history(client, symbol, timeframe, args.limit)
+                )
+                for timeframe in ("5m", "15m")
+            }
             for spread in spreads:
                 candles = [
                     HistoricalCandle(**row, spread_bps=spread)
                     for row in raw
                 ]
+                higher_timeframes = {
+                    timeframe: [
+                        HistoricalCandle(**row, spread_bps=spread)
+                        for row in rows
+                    ]
+                    for timeframe, rows in timeframe_raw.items()
+                }
                 for shield_enabled in (True, False):
                     for compounding_enabled in (True, False):
                         report = walk_forward(
@@ -81,6 +95,7 @@ def main() -> None:
                             warmup_bars=args.warmup_bars,
                             test_bars=args.test_bars,
                             step_bars=args.step_bars,
+                            higher_timeframes=higher_timeframes,
                             enable_shield=shield_enabled,
                             enable_compounding=compounding_enabled,
                         )
@@ -127,6 +142,8 @@ def main() -> None:
             "The strategy is heuristic and is not a calibrated probability model.",
             "Walk-forward folds are out-of-sample windows; no ML model is trained.",
             "Stops and targets are evaluated at candle closes, not inferred intrabar paths.",
+            "5m and 15m confirmation uses only fully closed candles whose close timestamps are not later than the base candle.",
+            "ATR is calculated from OHLC true range; spread scenarios are explicit assumptions rather than archived order-book depth.",
             "Historical performance does not guarantee future results.",
             "Research uses a 1.02 USDT seed ticket to clear minimum notional after fees; only incremental ticket size comes from realized net profits.",
         ],
