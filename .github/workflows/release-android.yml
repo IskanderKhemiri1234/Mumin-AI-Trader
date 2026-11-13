@@ -47,14 +47,64 @@ jobs:
           test -n "$ANDROID_KEY_ALIAS"
           test -n "$ANDROID_KEY_PASSWORD"
 
-      - name: Decode private signing key
+      - name: Decode and validate private signing key
         shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           set -euo pipefail
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/mumin-release-key.jks"
-          test -s "$RUNNER_TEMP/mumin-release-key.jks"
+          KEYSTORE_PATH="$RUNNER_TEMP/mumin-release-key.jks"
+          export KEYSTORE_PATH
+
+          python - <<'PY'
+          import base64
+          import os
+          import re
+          from pathlib import Path
+
+          value = os.environ.get("ANDROID_KEYSTORE_BASE64", "")
+          if not value.strip():
+              raise SystemExit("ANDROID_KEYSTORE_BASE64 is empty.")
+
+          # Accept pasted Base64 with line breaks, spaces, surrounding quotes,
+          # an optional data-URI/base64: prefix, or URL-safe Base64 characters.
+          normalized = value.strip().replace("\\n", "").replace("\\r", "")
+          normalized = re.sub(r"^data:[^,]*;base64,", "", normalized, flags=re.I)
+          if normalized.lower().startswith("base64:"):
+              normalized = normalized.split(":", 1)[1]
+          normalized = normalized.strip().strip("'").strip('"')
+          normalized = re.sub(r"\\s+", "", normalized).replace("-", "+").replace("_", "/")
+          normalized += "=" * ((-len(normalized)) % 4)
+
+          try:
+              decoded = base64.b64decode(normalized, validate=True)
+          except Exception as exc:
+              raise SystemExit(
+                  "ANDROID_KEYSTORE_BASE64 is present but is not valid Base64 "
+                  "after safe whitespace/URL-safe normalization. Check that the "
+                  "GitHub secret contains the complete Base64 text."
+              ) from exc
+
+          if not decoded:
+              raise SystemExit("Decoded keystore is empty.")
+
+          # JKS magic or ZIP-based PKCS12 container; keytool performs final validation.
+          if not (decoded.startswith(bytes.fromhex("feedfeed")) or decoded.startswith(b"PK")):
+              raise SystemExit(
+                  "Decoded data is not recognized as a JKS or PKCS12 keystore. "
+                  "The secret may contain a different file or an incomplete encoding."
+              )
+
+          Path(os.environ["KEYSTORE_PATH"]).write_bytes(decoded)
+          print(f"Keystore decoded successfully ({len(decoded)} bytes); contents are not printed.")
+          PY
+
+          test -s "$KEYSTORE_PATH"
+          keytool -list -keystore "$KEYSTORE_PATH" -storepass "$ANDROID_KEYSTORE_PASSWORD" >/dev/null
+          keytool -list -keystore "$KEYSTORE_PATH" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null
+          echo "Keystore format, password, and configured alias validated successfully."
 
       - name: Build signed release APK
         env:
