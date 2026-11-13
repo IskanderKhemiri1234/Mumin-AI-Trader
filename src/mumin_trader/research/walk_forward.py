@@ -224,7 +224,7 @@ def _evaluate_fold(
             and assessment.signal == "BUY" and not shield_decision.block_entries
         ):
             drawdown_percent = (
-                (high_water - cash) / high_water * Decimal("100")
+                max(ZERO, (high_water - cash) / high_water * Decimal("100"))
                 if high_water > ZERO else ZERO
             )
             matrix = (
