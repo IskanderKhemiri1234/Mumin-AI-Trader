@@ -253,3 +253,73 @@ def test_anti_loss_shield_reduces_position_in_stages_when_spread_is_executable(t
     assert result.action.startswith("BTCUSDT:DE_RISK")
     assert sold == Decimal("0.01250000")
     assert remaining == Decimal("0.03750000")
+
+def test_runtime_compounding_uses_realized_profit_only_and_respects_five_usdt_cap(tmp_path):
+    from types import SimpleNamespace
+
+    database = tmp_path / "compounding-runtime.sqlite3"
+    bot = ContinuousPaperBot(str(database))
+    bot.strategy.assess = lambda *args, **kwargs: SimpleNamespace(
+        signal="BUY", score=Decimal("95")
+    )
+    with sqlite3.connect(database) as db:
+        db.execute(
+            "UPDATE bot_account SET cash='80', realized_pnl='10', high_watermark='80' WHERE id=1"
+        )
+        for tick in range(-30, 0):
+            db.execute(
+                """INSERT INTO bot_market_ticks
+                   (tick,symbol,price,bid,ask,data_source,candle_close_time_ms,received_at_ms)
+                   VALUES (?, 'BTCUSDT', '100', '100', '100', 'MOCK_SYNTHETIC', NULL, ?)""",
+                (tick, 1_800_000_000_000 + tick * 1000),
+            )
+
+    bot.step(
+        {"BTCUSDT": Decimal("100")},
+        source="MOCK_SYNTHETIC",
+        quotes={"BTCUSDT": (Decimal("100"), Decimal("100"))},
+    )
+    with sqlite3.connect(database) as db:
+        position = db.execute(
+            "SELECT entry_gross, entry_fee, profit_funded_quote FROM bot_positions WHERE symbol='BTCUSDT'"
+        ).fetchone()
+
+    assert position is not None
+    deployed = Decimal(position[0]) + Decimal(position[1])
+    assert Decimal("3.99") <= deployed <= Decimal("4.01")
+    assert Decimal(position[2]) == Decimal("3")
+    assert deployed <= Decimal("5")
+
+
+def test_runtime_compounding_does_not_increase_seed_ticket_without_realized_profit(tmp_path):
+    from types import SimpleNamespace
+
+    database = tmp_path / "compounding-seed.sqlite3"
+    bot = ContinuousPaperBot(str(database))
+    bot.strategy.assess = lambda *args, **kwargs: SimpleNamespace(
+        signal="BUY", score=Decimal("99")
+    )
+    with sqlite3.connect(database) as db:
+        for tick in range(-30, 0):
+            db.execute(
+                """INSERT INTO bot_market_ticks
+                   (tick,symbol,price,bid,ask,data_source,candle_close_time_ms,received_at_ms)
+                   VALUES (?, 'BTCUSDT', '100', '100', '100', 'MOCK_SYNTHETIC', NULL, ?)""",
+                (tick, 1_800_000_000_000 + tick * 1000),
+            )
+
+    bot.step(
+        {"BTCUSDT": Decimal("100")},
+        source="MOCK_SYNTHETIC",
+        quotes={"BTCUSDT": (Decimal("100"), Decimal("100"))},
+    )
+    with sqlite3.connect(database) as db:
+        position = db.execute(
+            "SELECT entry_gross, entry_fee, profit_funded_quote FROM bot_positions WHERE symbol='BTCUSDT'"
+        ).fetchone()
+
+    assert position is not None
+    deployed = Decimal(position[0]) + Decimal(position[1])
+    assert Decimal("0.99") <= deployed <= Decimal("1.01")
+    assert Decimal(position[2]) == Decimal("0")
+
