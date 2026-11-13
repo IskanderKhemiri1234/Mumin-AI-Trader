@@ -57,7 +57,7 @@ class MainActivity : Activity() {
             setTypeface(null, android.graphics.Typeface.BOLD)
         })
         header.addView(TextView(this).apply {
-            text = "PAPER PORTFOLIO  •  70 USDT"
+            text = "ROYAL EDITION  •  PAPER PORTFOLIO"
             setTextColor(Color.rgb(190, 205, 197))
             textSize = 11f
             letterSpacing = 0.08f
@@ -131,6 +131,29 @@ class MainActivity : Activity() {
 
                 override fun onPageFinished(view: WebView, url: String) {
                     swipeRefresh.isRefreshing = false
+                    val royalCss = """
+                        :root{--bg:#050505!important;--surface:#101010!important;--surface2:#17130b!important;--line:#4b3b19!important;--gold:#e7c56f!important;--text:#f7f2e5!important;--muted:#b4a98f!important;--green:#d8b66a!important;--red:#ff8b80!important}
+                        html,body{background:#050505!important;color:#f7f2e5!important}
+                        body{background:radial-gradient(ellipse at 85% -15%,#332710 0,transparent 38%),#050505!important}
+                        .hero{background:linear-gradient(135deg,#17130b,#080808 72%)!important;border:1px solid #8b6b2b!important;box-shadow:0 18px 48px #000b,0 0 28px #d8b66a12!important}
+                        .hero:after{border-color:#d8b66a55!important;box-shadow:0 0 0 24px #d8b66a18,0 0 0 48px #d8b66a0c!important}
+                        .brand,h1,h2,.metric strong,.asset-price{color:#e7c56f!important}
+                        .pill,nav,.metric,.panel,.asset-card,.risk-item,.chart-wrap{background:linear-gradient(145deg,#15120c,#080808)!important;border-color:#51401f!important}
+                        nav{backdrop-filter:blur(14px)!important}
+                        nav a:focus,nav a:hover{background:#3a2d15!important;color:#ffe3a0!important}
+                        .paper-warning{background:#211a0d!important;border-color:#9b7835!important;color:#f1dfb3!important}
+                        th{background:#211a0d!important;color:#d9c58e!important}
+                        td,th{border-color:#302718!important}
+                        tbody tr:hover{background:#d8b66a0c!important}
+                        .buy{background:#332914!important;color:#f1d58d!important}
+                        .sell{background:#421d1a!important;color:#ffaaa3!important}
+                        .hold{background:#302817!important;color:#e8d69c!important}
+                        .chart-wrap{background:#090909!important}
+                        footer{color:#a99a75!important}
+                        a{color:#e7c56f!important}
+                    """.trimIndent()
+                    val script = "(function(){var s=document.getElementById('mumin-royal-theme');if(!s){s=document.createElement('style');s.id='mumin-royal-theme';document.head.appendChild(s);}s.textContent=" + org.json.JSONObject.quote(royalCss) + ";})();"
+                    view.evaluateJavascript(script, null)
                 }
 
                 override fun onReceivedError(
