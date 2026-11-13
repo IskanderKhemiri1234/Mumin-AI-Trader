@@ -31,6 +31,19 @@ STOP_LOSS_PERCENT = Decimal(os.getenv("SIMULATED_STOP_LOSS_PERCENT", "0.50"))
 TAKE_PROFIT_PERCENT = Decimal(os.getenv("SIMULATED_TAKE_PROFIT_PERCENT", "1.00"))
 MAX_DAILY_LOSS_PERCENT = Decimal(os.getenv("MAX_DAILY_LOSS_PERCENT", "2.00"))
 MAX_DRAWDOWN_PERCENT = Decimal(os.getenv("MAX_DRAWDOWN_PERCENT", "5.00"))
+
+# These are explicit product-level safety limits for the 70 USDT Paper account.
+# An unexpected environment override must stop the engine rather than silently
+# weaken the agreed risk policy.
+if INITIAL_CASH != Decimal("70.00"):
+    raise RuntimeError("Paper engine requires the configured 70.00 USDT starting capital.")
+if STOP_LOSS_PERCENT != Decimal("0.50"):
+    raise RuntimeError("Paper stop-loss is fixed at 0.50%.")
+if TAKE_PROFIT_PERCENT != Decimal("1.00"):
+    raise RuntimeError("Paper take-profit is fixed at 1.00%.")
+if MAX_DAILY_LOSS_PERCENT != Decimal("2.00"):
+    raise RuntimeError("Paper daily loss limit is fixed at 2.00%.")
+
 REPORT_SECONDS = 3600
 SYNTHETIC_SOURCE = "MOCK_SYNTHETIC"
 PUBLIC_SOURCE = "BINANCE_PUBLIC_MARKET_DATA"
