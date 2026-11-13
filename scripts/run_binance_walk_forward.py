@@ -78,6 +78,8 @@ def main() -> None:
     args = parser.parse_args()
 
     symbols = [item.strip().upper() for item in args.symbols.split(",") if item.strip()]
+    if args.interval not in HIGHER_TIMEFRAMES:
+        raise SystemExit(f"Unsupported base interval: {args.interval}")
     if not symbols or any(symbol not in ALLOWED for symbol in symbols):
         raise SystemExit(f"Symbols must be selected from: {', '.join(sorted(ALLOWED))}")
     if not 400 <= args.limit <= 3000:
