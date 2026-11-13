@@ -43,7 +43,7 @@ main{max-width:1120px;margin:auto;padding:22px 16px 48px}.top{display:flex;justi
 </main>
 <script>
 const $=id=>document.getElementById(id);let summary=null,equityRows=[],tradeRows=[];
-const money=v=>Number.isFinite(Number(v))?Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:4})+' USDT':'—';
+const money=v=>v===null||v===undefined||v===''?'—':Number.isFinite(Number(v))?Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:4})+' USDT':'—';
 const val=(o,...keys)=>{for(const k of keys)if(o&&o[k]!==undefined&&o[k]!==null)return o[k];return null};
 function parseCSV(text){const rows=[];let row=[],cell='',q=false;for(let i=0;i<text.length;i++){const c=text[i];if(q&&c==='"'&&text[i+1]==='"'){cell+='"';i++}else if(c==='"')q=!q;else if(c===','&&!q){row.push(cell);cell=''}else if((c==='\n'||c==='\r')&&!q){if(c==='\r'&&text[i+1]==='\n')i++;row.push(cell);if(row.some(x=>x!==''))rows.push(row);row=[];cell=''}else cell+=c}if(cell.length||row.length){row.push(cell);rows.push(row)}if(!rows.length)return[];const headers=rows.shift().map(x=>x.trim());return rows.map(r=>Object.fromEntries(headers.map((h,i)=>[h,(r[i]||'').trim()])));}
 function setMetric(id,v,cls){const el=$(id);el.textContent=v===null||v===undefined?'—':v;el.classList.remove('positive','negative');if(cls)el.classList.add(cls)}
