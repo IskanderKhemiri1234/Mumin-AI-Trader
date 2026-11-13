@@ -18,7 +18,6 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.core.view.WindowCompat
-import androidx.core.view.isVisible
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import java.net.HttpURLConnection
 import java.net.URL
@@ -96,8 +95,6 @@ class MainActivity : Activity() {
                 settings.safeBrowsingEnabled = true
             }
             webViewClient = object : WebViewClient() {
-                // raw.githubusercontent.com may label HTML as text/plain.
-                // Intercept the report and explicitly expose it to WebView as HTML.
                 override fun shouldInterceptRequest(
                     view: WebView,
                     request: WebResourceRequest
@@ -141,11 +138,11 @@ class MainActivity : Activity() {
                     url: String,
                     favicon: android.graphics.Bitmap?
                 ) {
-                    progress.isVisible = true
+                    progress.visibility = View.VISIBLE
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
-                    progress.isVisible = false
+                    progress.visibility = View.GONE
                     swipeRefresh.isRefreshing = false
                 }
 
@@ -155,7 +152,7 @@ class MainActivity : Activity() {
                     error: WebResourceError
                 ) {
                     if (request.isForMainFrame) {
-                        progress.isVisible = false
+                        progress.visibility = View.GONE
                         swipeRefresh.isRefreshing = false
                         view.loadDataWithBaseURL(
                             null,
@@ -194,7 +191,7 @@ class MainActivity : Activity() {
     }
 
     private fun loadLatestReport() {
-        progress.isVisible = true
+        progress.visibility = View.VISIBLE
         webView.loadUrl(REPORT_URL, mapOf(
             "Cache-Control" to "no-cache",
             "Pragma" to "no-cache"
