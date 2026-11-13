@@ -151,9 +151,18 @@ jobs:
           expected_sha256 = "2000f0797ff56c2a79f49a3ea38730fe0f643b5a2f32ab119222ec4afd4b183b"
           actual_sha256 = hashlib.sha256(decoded).hexdigest()
           if len(decoded) != 2774 or actual_sha256 != expected_sha256:
+              print(
+                  "SAFE_DIAGNOSTIC "
+                  f"normalized_base64_length={len(normalized)} "
+                  f"decoded_bytes={len(decoded)} "
+                  f"decoded_sha256={actual_sha256} "
+                  f"expected_bytes=2774 "
+                  f"expected_sha256={expected_sha256}"
+              )
               raise SystemExit(
-                  "Decoded keystore does not match the verified original "
-                  "(safe integrity check failed; secret value is not printed)."
+                  "Decoded keystore does not match the verified original. "
+                  "Only lengths and SHA-256 fingerprints were reported; "
+                  "the secret and keystore contents were not printed."
               )
 
           # JKS magic or ZIP-based PKCS12 container; keytool performs final validation.
