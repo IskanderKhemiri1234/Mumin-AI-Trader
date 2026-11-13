@@ -104,3 +104,46 @@ def test_research_engine_executes_seed_ticket_and_reinvests_only_realized_profit
     assert result.entry_orders > 0
     assert result.closed_trades > 0
     assert result.compounding_reinvested > Decimal("0")
+
+
+def test_walk_forward_ablation_measures_shield_and_compounding_effects(monkeypatch):
+    from types import SimpleNamespace
+
+    import mumin_trader.research.walk_forward as research
+
+    class AlwaysBuy:
+        def assess(self, closes, spread_bps=Decimal("0")):
+            return SimpleNamespace(signal="BUY", score=Decimal("95"))
+
+    monkeypatch.setattr(research, "SmartSniperStrategy", AlwaysBuy)
+    series = []
+    price = Decimal("100")
+    for index in range(110):
+        price *= Decimal("1.002")
+        abnormal = index == 60
+        series.append(HistoricalCandle(
+            timestamp_ms=1_800_000_000_000 + index * 60_000,
+            open=price * Decimal("0.999"),
+            high=price * Decimal("1.002"),
+            low=price * Decimal("0.998"),
+            close=price,
+            quote_volume=Decimal("100") if abnormal else Decimal("1000"),
+            trade_count=Decimal("10") if abnormal else Decimal("100"),
+            spread_bps=Decimal("2"),
+        ))
+
+    protected = research.run_backtest(
+        series, warmup_bars=60, enable_shield=True, enable_compounding=True
+    )
+    unprotected = research.run_backtest(
+        series, warmup_bars=60, enable_shield=False, enable_compounding=False
+    )
+    fixed_size = research.run_backtest(
+        series, warmup_bars=60, enable_shield=True, enable_compounding=False
+    )
+
+    assert protected.blocked_buy_candidates >= 1
+    assert unprotected.shield_blocks == 0
+    assert protected.entry_orders < unprotected.entry_orders
+    assert fixed_size.compounding_reinvested == Decimal("0")
+    assert protected.compounding_reinvested >= Decimal("0")
