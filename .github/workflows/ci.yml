@@ -64,7 +64,8 @@ jobs:
             sleep 2
           done
           curl --fail --silent http://127.0.0.1:8000/health
-          curl --fail --silent http://127.0.0.1:8000/dashboard | grep -q "MUMIN"
+          curl --fail --silent --show-error http://127.0.0.1:8000/dashboard --output /tmp/mumin-dashboard.html
+          grep -q "Mumin AI Trader" /tmp/mumin-dashboard.html
           echo "Dashboard HTML served successfully from the container."
       - name: Run finite multi-symbol Paper loop in Docker
         run: |
