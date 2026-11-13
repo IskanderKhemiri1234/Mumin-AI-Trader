@@ -291,6 +291,7 @@ class ContinuousPaperBot:
         candle_close_times: dict[str, int] | None = None,
         received_at_ms: int | None = None,
         liquidity_metrics: dict[str, tuple[Decimal | None, Decimal | None]] | None = None,
+        higher_timeframe_metrics: dict[str, tuple[dict[str, list[Decimal]], Decimal | None]] | None = None,
     ) -> TickResult:
         if source not in {SYNTHETIC_SOURCE, PUBLIC_SOURCE}:
             raise ValueError("Unknown market data source.")
@@ -312,6 +313,7 @@ class ContinuousPaperBot:
         quotes = quotes or {symbol: (price, price) for symbol, price in normalized.items()}
         candle_close_times = candle_close_times or {}
         liquidity_metrics = liquidity_metrics or {}
+        higher_timeframe_metrics = higher_timeframe_metrics or {}
 
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -409,7 +411,12 @@ class ContinuousPaperBot:
                     (Decimal(ask) - Decimal(bid)) / midpoint * Decimal("10000")
                     if midpoint > 0 else Decimal("10000")
                 )
-                assessment = self.strategy.assess(closes, spread_bps=spread_bps)
+                timeframe_closes, atr_percent = higher_timeframe_metrics.get(symbol, ({}, None))
+                assessment = self.strategy.assess(
+                    closes, spread_bps=spread_bps,
+                    higher_timeframe_closes=timeframe_closes,
+                    atr_percent=atr_percent,
+                )
                 signal_name = assessment.signal
                 volume_ratio, trade_ratio = liquidity_metrics.get(symbol, (None, None))
                 previous_close = closes[-2] if len(closes) >= 2 else price
@@ -793,11 +800,19 @@ async def run_bot(
                     symbol: (item.quote_volume_ratio, item.trade_count_ratio)
                     for symbol, item in snapshots.items()
                 }
+                higher_timeframe_metrics = {
+                    symbol: (
+                        {name: list(values) for name, values in (item.higher_timeframe_closes or {}).items()},
+                        item.atr_percent,
+                    )
+                    for symbol, item in snapshots.items()
+                }
                 received = min(item.received_at_ms for item in snapshots.values())
                 result = bot.step(
                     prices, source=PUBLIC_SOURCE, quotes=quotes,
                     candle_close_times=candle_times, received_at_ms=received,
                     liquidity_metrics=liquidity_metrics,
+                    higher_timeframe_metrics=higher_timeframe_metrics,
                 )
 
             print(
