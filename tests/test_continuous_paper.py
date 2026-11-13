@@ -267,28 +267,34 @@ def test_runtime_compounding_uses_realized_profit_only_and_respects_five_usdt_ca
             "UPDATE bot_account SET cash='80', realized_pnl='10', high_watermark='80' WHERE id=1"
         )
         for tick in range(-30, 0):
-            db.execute(
-                """INSERT INTO bot_market_ticks
-                   (tick,symbol,price,bid,ask,data_source,candle_close_time_ms,received_at_ms)
-                   VALUES (?, 'BTCUSDT', '100', '100', '100', 'MOCK_SYNTHETIC', NULL, ?)""",
-                (tick, 1_800_000_000_000 + tick * 1000),
-            )
+            for symbol in ("BTCUSDT", "ETHUSDT"):
+                db.execute(
+                    """INSERT INTO bot_market_ticks
+                       (tick,symbol,price,bid,ask,data_source,candle_close_time_ms,received_at_ms)
+                       VALUES (?, ?, '100', '100', '100', 'MOCK_SYNTHETIC', NULL, ?)""",
+                    (tick, symbol, 1_800_000_000_000 + tick * 1000),
+                )
 
     bot.step(
-        {"BTCUSDT": Decimal("100")},
+        {"BTCUSDT": Decimal("100"), "ETHUSDT": Decimal("100")},
         source="MOCK_SYNTHETIC",
-        quotes={"BTCUSDT": (Decimal("100"), Decimal("100"))},
+        quotes={
+            "BTCUSDT": (Decimal("100"), Decimal("100")),
+            "ETHUSDT": (Decimal("100"), Decimal("100")),
+        },
     )
     with sqlite3.connect(database) as db:
-        position = db.execute(
-            "SELECT entry_gross, entry_fee, profit_funded_quote FROM bot_positions WHERE symbol='BTCUSDT'"
-        ).fetchone()
+        positions = db.execute(
+            "SELECT entry_gross, entry_fee, profit_funded_quote FROM bot_positions ORDER BY symbol"
+        ).fetchall()
 
-    assert position is not None
-    deployed = Decimal(position[0]) + Decimal(position[1])
-    assert Decimal("4.01") <= deployed <= Decimal("4.03")
-    assert Decimal(position[2]) == Decimal("3")
-    assert deployed <= Decimal("5")
+    assert len(positions) == 2
+    deployed = [Decimal(row[0]) + Decimal(row[1]) for row in positions]
+    funded = [Decimal(row[2]) for row in positions]
+    assert all(Decimal("1.01") <= amount <= Decimal("4.03") for amount in deployed)
+    assert sum(funded, Decimal("0")) == Decimal("3")
+    assert sorted(funded) == [Decimal("0"), Decimal("3")]
+    assert all(amount <= Decimal("5") for amount in deployed)
 
 
 def test_runtime_compounding_does_not_increase_seed_ticket_without_realized_profit(tmp_path):
