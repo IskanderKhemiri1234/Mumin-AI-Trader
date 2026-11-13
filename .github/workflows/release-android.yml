@@ -110,6 +110,10 @@ jobs:
           # the copied secret has Cyrillic U+0430 (visually similar to Latin a).
           if len(normalized) > 85 and normalized[85] == "\u0430":
               normalized = normalized[:85] + "a" + normalized[86:]
+          # The trusted source has ASCII '0' at zero-based position 609;
+          # the copied GitHub secret contains '@' at that position.
+          if len(normalized) > 609 and normalized[609] == "@":
+              normalized = normalized[:609] + "0" + normalized[610:]
           normalized += "=" * ((-len(normalized)) % 4)
 
           try:
