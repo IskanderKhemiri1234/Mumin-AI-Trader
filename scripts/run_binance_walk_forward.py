@@ -11,7 +11,11 @@ import httpx
 from mumin_trader.research.walk_forward import HistoricalCandle, walk_forward
 
 BASE_URL = "https://data-api.binance.vision"
-ALLOWED = {"BTCUSDT", "ETHUSDT", "BNBUSDT"}
+# Research-only universe expansion; the live Paper execution allowlist remains unchanged.
+ALLOWED = {
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
+    "XRPUSDT", "ADAUSDT", "DOGEUSDT", "LINKUSDT",
+}
 
 
 HIGHER_TIMEFRAMES = {
@@ -163,6 +167,7 @@ def main() -> None:
     payload = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "source": "BINANCE_PUBLIC_MARKET_DATA",
+        "research_universe": symbols,
         "method": "rolling out-of-sample evaluation of a fixed rule-based strategy",
         "spread_scenarios_bps": [str(value) for value in spreads],
         "results": results,
