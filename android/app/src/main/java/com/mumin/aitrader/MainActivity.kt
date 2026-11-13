@@ -244,7 +244,8 @@ class MainActivity : Activity() {
                     }
                 }
                 if (apkUrl.isNullOrBlank() || !apkUrl.startsWith("https://github.com/")) return@execute
-                if (compareVersions(latestVersion, CURRENT_VERSION) > 0) {
+                val installedVersion = packageManager.getPackageInfo(packageName, 0).versionName ?: CURRENT_VERSION
+                if (compareVersions(latestVersion, installedVersion) > 0) {
                     mainHandler.post {
                         AlertDialog.Builder(this)
                             .setTitle("تحديث جديد متاح")
@@ -331,8 +332,7 @@ class MainActivity : Activity() {
             startActivityForResult(settingsIntent, INSTALL_REQUEST_CODE)
             return
         }
-        val installUri = FileProvider.getUriForFile(this, "$packageName.fileprovider",
-            File(filesDir.parentFile, "no-such-file").takeIf { false } ?: getDownloadedApkFile())
+        val installUri = FileProvider.getUriForFile(this, packageName + ".fileprovider", getDownloadedApkFile())
         val installIntent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(installUri, "application/vnd.android.package-archive")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -380,6 +380,9 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        updateReceiver?.let { try { unregisterReceiver(it) } catch (_: IllegalArgumentException) { } }
+        updateReceiver = null
+        updateExecutor.shutdownNow()
         if (::webView.isInitialized) {
             webView.stopLoading()
             webView.destroy()
