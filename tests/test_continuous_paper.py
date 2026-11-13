@@ -203,7 +203,11 @@ def test_anti_loss_shield_blocks_new_entries_when_liquidity_is_abnormal(tmp_path
         buys = db.execute(
             "SELECT COUNT(*) FROM bot_fills WHERE side='BUY'"
         ).fetchone()[0]
+        risk_event = db.execute(
+            "SELECT shield_mode, block_entries FROM bot_risk_events WHERE symbol='BTCUSDT'"
+        ).fetchone()
     assert buys == 0
+    assert risk_event == ("CRITICAL", 1)
 
 
 def test_anti_loss_shield_reduces_position_in_stages_when_spread_is_executable(tmp_path):
