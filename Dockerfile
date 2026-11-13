@@ -8,6 +8,7 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src ./src
 COPY scripts ./scripts
+COPY dashboard ./dashboard
 RUN pip install --upgrade pip && pip install .
 RUN useradd --create-home --uid 10001 appuser && \
     mkdir -p /app/data && chown -R appuser:appuser /app
