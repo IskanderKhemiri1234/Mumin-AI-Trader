@@ -224,7 +224,7 @@ class SmartSniperStrategy:
         # Stop remains the existing 0.50% risk limit. Target is selected at
         # 2.5R or 3R; higher score selects 3R. The existing account-level
         # daily-loss and drawdown guards remain independent.
-        risk_reward = Decimal("3.0") if chosen_score >= Decimal("90") else Decimal("2.5")
+        risk_reward = Decimal("2.5")
         target_percent = STOP_PERCENT * risk_reward
         target_bps = target_percent * Decimal("100")
         net_edge = expected_move - estimated_cost
