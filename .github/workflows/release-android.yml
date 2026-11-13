@@ -87,17 +87,17 @@ jobs:
               value = extracted
 
           # Normalize mobile clipboard artifacts without exposing the secret.
-          value = value.lstrip("\\ufeff")
-          value = re.sub(r"(?m)^\\s*`{3}[^\\n]*$|^\\s*`{3}\\s*$", "", value)
+          value = value.lstrip("\ufeff")
+          value = re.sub(r"(?m)^\s*`{3}[^\n]*$|^\s*`{3}\s*$", "", value)
           normalized = value.strip().replace("\\n", "").replace("\\r", "")
           normalized = re.sub(r"^data:[^,]*;base64,", "", normalized, flags=re.I)
           if normalized.lower().startswith("base64:"):
               normalized = normalized.split(":", 1)[1]
           normalized = normalized.strip().strip("'").strip('"')
           # Remove invisible Unicode characters commonly introduced by mobile copy/paste.
-          for invisible in ("\\ufeff", "\\u200b", "\\u200c", "\\u200d", "\\u2060"):
+          for invisible in ("\ufeff", "\u200b", "\u200c", "\u200d", "\u2060"):
               normalized = normalized.replace(invisible, "")
-          normalized = re.sub(r"\\s+", "", normalized).replace("-", "+").replace("_", "/")
+          normalized = re.sub(r"\s+", "", normalized).replace("-", "+").replace("_", "/")
           normalized += "=" * ((-len(normalized)) % 4)
 
           try:
