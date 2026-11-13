@@ -638,7 +638,7 @@ class ContinuousPaperBot:
                             open_positions[symbol] = {
                                 "symbol": symbol, "quantity": str(quantity),
                                 "profit_funded_quote": str(profit_funded_quote),
-                                "take_profit_percent": str(assessment.target_percent),
+                                "take_profit_percent": str(getattr(assessment, "target_percent", TAKE_PROFIT_PERCENT)),
                             }
                 if action != "NONE":
                     actions.append(action)
