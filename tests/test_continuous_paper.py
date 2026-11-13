@@ -335,3 +335,36 @@ def test_runtime_compounding_does_not_increase_seed_ticket_without_realized_prof
     assert Decimal("1.01") <= deployed <= Decimal("1.03")
     assert Decimal(position[2]) == Decimal("0")
 
+def test_compounding_schema_migrates_existing_paper_positions_without_reset(tmp_path):
+    database = tmp_path / "legacy-paper.sqlite3"
+    with sqlite3.connect(database) as db:
+        db.execute(
+            """CREATE TABLE bot_positions (
+                symbol TEXT PRIMARY KEY,
+                quantity TEXT NOT NULL,
+                entry_price TEXT NOT NULL,
+                entry_gross TEXT NOT NULL,
+                entry_fee TEXT NOT NULL,
+                opened_at TEXT NOT NULL
+            )"""
+        )
+        db.execute(
+            """INSERT INTO bot_positions
+               (symbol,quantity,entry_price,entry_gross,entry_fee,opened_at)
+               VALUES ('BTCUSDT','0.001','60000','60','0.06','2026-11-13T00:00:00+00:00')"""
+        )
+
+    ContinuousPaperBot(str(database))
+    with sqlite3.connect(database) as db:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(bot_positions)")}
+        position = db.execute(
+            "SELECT quantity, profit_funded_quote FROM bot_positions WHERE symbol='BTCUSDT'"
+        ).fetchone()
+        event_table = db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='bot_compounding_events'"
+        ).fetchone()
+
+    assert "profit_funded_quote" in columns
+    assert position == ("0.001", "0")
+    assert event_table == ("bot_compounding_events",)
+
