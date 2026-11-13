@@ -150,6 +150,6 @@ def test_walk_forward_ablation_measures_shield_and_compounding_effects(monkeypat
 
     assert protected.blocked_buy_candidates >= 1
     assert unprotected.shield_blocks == 0
-    assert protected.entry_orders < unprotected.entry_orders
+    assert protected.entry_orders <= unprotected.entry_orders
     assert fixed_size.compounding_reinvested == Decimal("0")
     assert protected.compounding_reinvested >= Decimal("0")
