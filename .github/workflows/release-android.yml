@@ -144,6 +144,18 @@ jobs:
           if not decoded:
               raise SystemExit("Decoded keystore is empty.")
 
+          # Fail closed unless the decoded bytes exactly match the trusted original
+          # keystore. This detects any remaining clipboard corruption, including
+          # valid-Base64 characters that would otherwise decode silently.
+          import hashlib
+          expected_sha256 = "2000f0797ff56c2a79f49a3ea38730fe0f643b5a2f32ab119222ec4afd4b183b"
+          actual_sha256 = hashlib.sha256(decoded).hexdigest()
+          if len(decoded) != 2774 or actual_sha256 != expected_sha256:
+              raise SystemExit(
+                  "Decoded keystore does not match the verified original "
+                  "(safe integrity check failed; secret value is not printed)."
+              )
+
           # JKS magic or ZIP-based PKCS12 container; keytool performs final validation.
           if not (decoded.startswith(bytes.fromhex("feedfeed")) or decoded.startswith(b"PK") or decoded.startswith(b"\x30")):
               raise SystemExit(
