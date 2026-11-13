@@ -83,7 +83,7 @@ jobs:
           normalized = re.sub(r"^data:[^,]*;base64,", "", normalized, flags=re.I)
           if normalized.lower().startswith("base64:"):
               normalized = normalized.split(":", 1)[1]
-          normalized = normalized.strip().strip("\'").strip(\'"\')
+          normalized = normalized.strip().strip("'").strip('"')
           normalized = re.sub(r"\s+", "", normalized).replace("-", "+").replace("_", "/")
           normalized += "=" * ((-len(normalized)) % 4)
 
