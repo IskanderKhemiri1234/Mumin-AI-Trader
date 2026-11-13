@@ -63,3 +63,12 @@ No live orders, withdrawals, margin, or futures. Before any live deployment, add
 A mobile-first, dependency-free dashboard is available at `/dashboard` when the FastAPI app is running. It reads the existing report exports in the browser: choose `summary.json`, `equity.csv`, and `trades.csv` from a downloaded GitHub Actions artifact. It displays portfolio metrics, an equity curve, open positions, and recent fills. The files are processed locally in the browser and are not uploaded to this service. The dashboard does not request or store API credentials and cannot submit orders.
 
 The dashboard is a report viewer, not a hosted always-on trading service. GitHub Actions artifacts remain the source of truth for each run; the user must load the latest report files into the dashboard. Do not publish private account reports to a public repository or public Pages site.
+
+
+## Verify Binance Spot Testnet credentials (read-only)
+
+1. In GitHub repository Settings → Secrets and variables → Actions, create repository secrets named `BINANCE_API_KEY` and `BINANCE_API_SECRET` using **Binance Spot Testnet** credentials.
+2. Open Actions → **Binance Spot Testnet Account Check** → Run workflow.
+3. Review the log for the connection result and the Testnet USDT free/locked balance.
+
+This workflow is read-only: it calls Spot Testnet ping and account endpoints only. It never submits an order. The configured strategy capital ceiling is 70 USDT, but the actual available Testnet balance is determined by the exchange account. Keep withdrawals, margin, futures, and Mainnet disabled. Do not paste credentials into issues, pull requests, source files, or chat.
