@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal, ROUND_DOWN
 from typing import Sequence
 
-from mumin_trader.risk.anti_loss_quantum_shield import AntiLossQuantumShield
+from mumin_trader.risk.anti_loss_quantum_shield import AntiLossQuantumShield, ShieldAssessment
 from mumin_trader.strategy.compounding import DynamicCompoundingMatrix
 from mumin_trader.strategy.smart_sniper import SmartSniperStrategy
 
@@ -92,6 +92,8 @@ def _evaluate_fold(
     end: int,
     *,
     initial_cash: Decimal = INITIAL_CASH,
+    enable_shield: bool = True,
+    enable_compounding: bool = True,
 ) -> BacktestMetrics:
     strategy = SmartSniperStrategy()
     shield = AntiLossQuantumShield()
@@ -151,12 +153,16 @@ def _evaluate_fold(
             if len(prior_window) == 20 and median_trades and median_trades > ZERO
             else None
         )
-        shield_decision = shield.assess(
-            spread_bps=bar.spread_bps,
-            quote_volume_ratio=volume_ratio,
-            trade_count_ratio=trade_ratio,
-            price_change_bps=price_change_bps,
-            candle_age_ms=0,
+        shield_decision = (
+            shield.assess(
+                spread_bps=bar.spread_bps,
+                quote_volume_ratio=volume_ratio,
+                trade_count_ratio=trade_ratio,
+                price_change_bps=price_change_bps,
+                candle_age_ms=0,
+            )
+            if enable_shield
+            else ShieldAssessment("BYPASS", False, ZERO, ("Shield disabled for control run.",))
         )
 
         if shield_decision.block_entries:
@@ -221,14 +227,18 @@ def _evaluate_fold(
                 (high_water - cash) / high_water * Decimal("100")
                 if high_water > ZERO else ZERO
             )
-            matrix = compounding.assess(
-                realized_net_pnl=realized,
-                momentum_score=assessment.score,
-                drawdown_percent=drawdown_percent,
+            matrix = (
+                compounding.assess(
+                    realized_net_pnl=realized,
+                    momentum_score=assessment.score,
+                    drawdown_percent=drawdown_percent,
+                )
+                if enable_compounding else None
             )
             # A $1 research seed is exposed; only the incremental amount above
             # it can come from realized profits. The $5 hard ticket ceiling stays.
-            allocation = min(MAX_TICKET, BASE_TICKET + matrix.reinvestment_budget)
+            reinvestment_budget = matrix.reinvestment_budget if matrix else ZERO
+            allocation = min(MAX_TICKET, BASE_TICKET + reinvestment_budget)
             allocation = min(allocation, max(ZERO, cash - RESERVE_CASH))
             if allocation >= Decimal("1"):
                 pending_entry = {"allocation": allocation}
@@ -289,12 +299,17 @@ def run_backtest(
     *,
     warmup_bars: int = 60,
     initial_cash: Decimal = INITIAL_CASH,
+    enable_shield: bool = True,
+    enable_compounding: bool = True,
 ) -> BacktestMetrics:
     """Run one strictly out-of-sample test segment after an indicator warm-up."""
     if warmup_bars < 30 or len(candles) <= warmup_bars:
         raise ValueError("At least 30 warm-up bars and one test bar are required.")
     _validate_series(candles)
-    return _evaluate_fold(candles, warmup_bars, len(candles), initial_cash=initial_cash)
+    return _evaluate_fold(
+        candles, warmup_bars, len(candles), initial_cash=initial_cash,
+        enable_shield=enable_shield, enable_compounding=enable_compounding,
+    )
 
 
 def walk_forward(
@@ -304,6 +319,8 @@ def walk_forward(
     test_bars: int = 120,
     step_bars: int = 120,
     initial_cash: Decimal = INITIAL_CASH,
+    enable_shield: bool = True,
+    enable_compounding: bool = True,
 ) -> WalkForwardReport:
     """Evaluate consecutive unseen windows using only earlier bars as warm-up.
 
@@ -318,7 +335,8 @@ def walk_forward(
     while start + test_bars <= len(candles):
         folds.append(
             _evaluate_fold(
-                candles, start, start + test_bars, initial_cash=initial_cash
+                candles, start, start + test_bars, initial_cash=initial_cash,
+                enable_shield=enable_shield, enable_compounding=enable_compounding,
             )
         )
         start += step_bars
