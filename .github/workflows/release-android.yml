@@ -98,6 +98,10 @@ jobs:
           for invisible in ("\ufeff", "\u200b", "\u200c", "\u200d", "\u2060"):
               normalized = normalized.replace(invisible, "")
           normalized = re.sub(r"\s+", "", normalized).replace("-", "+").replace("_", "/")
+          # Repair the confirmed mobile-copy homoglyph at zero-based position 83.
+          # The trusted source has ASCII 'C' at this position; the pasted secret had Cyrillic U+0441.
+          if len(normalized) > 83 and normalized[83] == "\u0441":
+              normalized = normalized[:83] + "C" + normalized[84:]
           normalized += "=" * ((-len(normalized)) % 4)
 
           try:
