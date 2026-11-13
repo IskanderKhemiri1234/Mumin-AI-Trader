@@ -64,7 +64,7 @@ jobs:
           import re
           from pathlib import Path
 
-          value = os.environ.get("ANDROID_KEYSTORE_BASE64", "")
+          value = os.environ.get("ANDROID_KEYSTORE_BASE64", "").lstrip("\ufeff")
           if not value.strip():
               raise SystemExit("ANDROID_KEYSTORE_BASE64 is empty.")
 
