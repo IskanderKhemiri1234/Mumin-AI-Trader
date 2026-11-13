@@ -58,8 +58,12 @@ def fetch_history(client: httpx.Client, symbol: str, interval: str, limit: int):
         "quote_volume": Decimal(str(row[7])),
         "trade_count": Decimal(str(row[8])),
     } for row in rows]
-    if len(candles) < 400:
-        raise RuntimeError(f"Only {len(candles)} closed candles returned for {symbol} {interval}.")
+    minimum_history = 60 if interval == "1M" else 400
+    if len(candles) < minimum_history:
+        raise RuntimeError(
+            f"Only {len(candles)} closed candles returned for {symbol} {interval}; "
+            f"minimum required is {minimum_history}."
+        )
     return candles
 
 
