@@ -114,6 +114,10 @@ jobs:
           # the copied GitHub secret contains '@' at that position.
           if len(normalized) > 609 and normalized[609] == "@":
               normalized = normalized[:609] + "0" + normalized[610:]
+          # The trusted source has ASCII '0' at zero-based position 918;
+          # the copied GitHub secret contains '@' at that position.
+          if len(normalized) > 918 and normalized[918] == "@":
+              normalized = normalized[:918] + "0" + normalized[919:]
           normalized += "=" * ((-len(normalized)) % 4)
 
           try:
