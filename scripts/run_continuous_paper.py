@@ -31,6 +31,19 @@ STOP_LOSS_PERCENT = Decimal(os.getenv("SIMULATED_STOP_LOSS_PERCENT", "0.50"))
 TAKE_PROFIT_PERCENT = Decimal(os.getenv("SIMULATED_TAKE_PROFIT_PERCENT", "1.00"))
 MAX_DAILY_LOSS_PERCENT = Decimal(os.getenv("MAX_DAILY_LOSS_PERCENT", "2.00"))
 MAX_DRAWDOWN_PERCENT = Decimal(os.getenv("MAX_DRAWDOWN_PERCENT", "5.00"))
+
+# These are explicit product-level safety limits for the 70 USDT Paper account.
+# An unexpected environment override must stop the engine rather than silently
+# weaken the agreed risk policy.
+if INITIAL_CASH != Decimal("70.00"):
+    raise RuntimeError("Paper engine requires the configured 70.00 USDT starting capital.")
+if STOP_LOSS_PERCENT != Decimal("0.50"):
+    raise RuntimeError("Paper stop-loss is fixed at 0.50%.")
+if TAKE_PROFIT_PERCENT != Decimal("1.00"):
+    raise RuntimeError("Paper take-profit is fixed at 1.00%.")
+if MAX_DAILY_LOSS_PERCENT != Decimal("2.00"):
+    raise RuntimeError("Paper daily loss limit is fixed at 2.00%.")
+
 REPORT_SECONDS = 3600
 SYNTHETIC_SOURCE = "MOCK_SYNTHETIC"
 PUBLIC_SOURCE = "BINANCE_PUBLIC_MARKET_DATA"
@@ -305,6 +318,19 @@ class ContinuousPaperBot:
                 row["symbol"]: row for row in db.execute("SELECT * FROM bot_positions").fetchall()
             }
 
+            # Fail closed before considering any entry if the marked portfolio has
+            # already reached either account-level loss boundary.
+            marked_equity = cash + sum(
+                (Decimal(pos["quantity"]) * latest_prices.get(pos_symbol, Decimal("0"))
+                 for pos_symbol, pos in open_positions.items()),
+                Decimal("0"),
+            )
+            marked_daily_pnl = marked_equity - day_start
+            if marked_daily_pnl <= -(day_start * MAX_DAILY_LOSS_PERCENT / Decimal("100")):
+                halted, halt_reason = True, "MAX_DAILY_LOSS"
+            if high_water - marked_equity >= high_water * MAX_DRAWDOWN_PERCENT / Decimal("100"):
+                halted, halt_reason = True, "MAX_DRAWDOWN"
+
             # First manage existing positions for every symbol with a fresh quote.
             for symbol, price in normalized.items():
                 if candle_close_times.get(symbol) is not None:
@@ -332,21 +358,24 @@ class ContinuousPaperBot:
                 action = "NONE"
                 bid, ask = quotes.get(symbol, (price, price))
                 if position is not None:
-                    entry = Decimal(position["entry_price"])
-                    change_pct = (price / entry - Decimal(1)) * Decimal("100")
+                    # Trigger exits on estimated NET return after both entry and
+                    # exit fees plus conservative executable-side slippage.
+                    fill = simulated_fill_price("SELL", bid, ask, SLIPPAGE_BPS)
+                    quantity = Decimal(position["quantity"])
+                    gross = quantity * fill
+                    fee = (gross * FEE_RATE).quantize(Decimal("0.00000001"))
+                    entry_cost = Decimal(position["entry_gross"]) + Decimal(position["entry_fee"])
+                    projected_net = gross - fee - entry_cost
+                    net_return_pct = (
+                        projected_net / entry_cost * Decimal("100")
+                        if entry_cost > 0 else Decimal("-100")
+                    )
                     if (
-                        change_pct <= -STOP_LOSS_PERCENT
-                        or change_pct >= TAKE_PROFIT_PERCENT
+                        net_return_pct <= -STOP_LOSS_PERCENT
+                        or net_return_pct >= TAKE_PROFIT_PERCENT
                         or signal_name == "SELL"
                     ):
-                        fill = simulated_fill_price("SELL", bid, ask, SLIPPAGE_BPS)
-                        quantity = Decimal(position["quantity"])
-                        gross = quantity * fill
-                        fee = (gross * FEE_RATE).quantize(Decimal("0.00000001"))
-                        net_trade = (
-                            gross - Decimal(position["entry_gross"])
-                            - Decimal(position["entry_fee"]) - fee
-                        )
+                        net_trade = projected_net
                         cash += gross - fee
                         realized += net_trade
                         daily_realized += net_trade
@@ -362,6 +391,18 @@ class ContinuousPaperBot:
                         )
                         action = f"{symbol}:CLOSE net={net_trade:.8f}"
                         open_positions.pop(symbol, None)
+                        # Re-evaluate account-wide daily loss immediately after a
+                        # realized exit, before another symbol can open a position.
+                        marked_equity = cash + sum(
+                            (Decimal(pos["quantity"]) * latest_prices.get(pos_symbol, Decimal("0"))
+                             for pos_symbol, pos in open_positions.items()),
+                            Decimal("0"),
+                        )
+                        marked_daily_pnl = marked_equity - day_start
+                        if marked_daily_pnl <= -(day_start * MAX_DAILY_LOSS_PERCENT / Decimal("100")):
+                            halted, halt_reason = True, "MAX_DAILY_LOSS"
+                        if high_water - marked_equity >= high_water * MAX_DRAWDOWN_PERCENT / Decimal("100"):
+                            halted, halt_reason = True, "MAX_DRAWDOWN"
 
                 # Entries are considered only after exits, and share one cash/risk budget.
                 if (
