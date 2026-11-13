@@ -100,11 +100,32 @@ jobs:
           python - <<'PY'
           import sqlite3
           path = "mumin-paper-ledger/mumin_public_paper.db"
+          from decimal import Decimal
           connection = sqlite3.connect(path, timeout=20)
           result = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
-          connection.close()
           if result and result[0] != 0:
+              connection.close()
               raise SystemExit(f"SQLite checkpoint was busy: {result}")
+          integrity = connection.execute("PRAGMA integrity_check").fetchone()
+          if not integrity or integrity[0] != "ok":
+              connection.close()
+              raise SystemExit(f"Paper ledger integrity check failed: {integrity}")
+          account = connection.execute(
+              "SELECT initial_cash, tick_count FROM bot_account WHERE id=1"
+          ).fetchone()
+          if not account or Decimal(account[0]) != Decimal("70.00"):
+              connection.close()
+              raise SystemExit("Paper ledger account is missing or its initial capital is not 70.00 USDT.")
+          snapshots = connection.execute(
+              "SELECT COUNT(*) FROM bot_portfolio_snapshots"
+          ).fetchone()[0]
+          if snapshots != int(account[1]):
+              connection.close()
+              raise SystemExit(
+                  f"Paper ledger checkpoint mismatch: ticks={account[1]}, snapshots={snapshots}"
+              )
+          connection.close()
+          print(f"Paper ledger verified: {account[1]} durable cycles; SQLite integrity OK.")
           PY
           python scripts/export_paper_report.py \
             --db mumin-paper-ledger/mumin_public_paper.db \
