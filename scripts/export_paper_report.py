@@ -109,7 +109,7 @@ def render_markdown(snapshot: dict[str, Any]) -> str:
     rows = [
         "# Mumin AI Trader — تقرير Paper",
         "",
-        f"> **تنبيه:** محاكاة فقط، لا توجد أوامر Binance حقيقية ولا أرباح قابلة للسحب.",
+        "> **تنبيه:** محاكاة فقط، لا توجد أوامر Binance حقيقية ولا أرباح قابلة للسحب.",
         "",
         f"**الحالة:** {status}  ",
         f"**آخر تحديث:** {snapshot['updated_at']} UTC  ",
