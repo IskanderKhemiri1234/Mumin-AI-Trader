@@ -260,7 +260,8 @@ def test_runtime_compounding_uses_realized_profit_only_and_respects_five_usdt_ca
     database = tmp_path / "compounding-runtime.sqlite3"
     bot = ContinuousPaperBot(str(database))
     bot.strategy.assess = lambda *args, **kwargs: SimpleNamespace(
-        signal="BUY", score=Decimal("95")
+        signal="BUY", score=Decimal("95"), regime="BULL",
+        mtf_confluence=True, atr_percent=Decimal("0.30"),
     )
     with sqlite3.connect(database) as db:
         db.execute(
@@ -281,6 +282,14 @@ def test_runtime_compounding_uses_realized_profit_only_and_respects_five_usdt_ca
         quotes={
             "BTCUSDT": (Decimal("100"), Decimal("100")),
             "ETHUSDT": (Decimal("100"), Decimal("100")),
+        },
+        liquidity_metrics={
+            "BTCUSDT": (Decimal("1"), Decimal("1")),
+            "ETHUSDT": (Decimal("1"), Decimal("1")),
+        },
+        higher_timeframe_metrics={
+            "BTCUSDT": ({"5m": [], "15m": []}, Decimal("0.30")),
+            "ETHUSDT": ({"5m": [], "15m": []}, Decimal("0.30")),
         },
     )
     with sqlite3.connect(database) as db:
@@ -309,7 +318,8 @@ def test_runtime_compounding_does_not_increase_seed_ticket_without_realized_prof
     database = tmp_path / "compounding-seed.sqlite3"
     bot = ContinuousPaperBot(str(database))
     bot.strategy.assess = lambda *args, **kwargs: SimpleNamespace(
-        signal="BUY", score=Decimal("99")
+        signal="BUY", score=Decimal("99"), regime="BULL",
+        mtf_confluence=True, atr_percent=Decimal("0.30"),
     )
     with sqlite3.connect(database) as db:
         for tick in range(-30, 0):
