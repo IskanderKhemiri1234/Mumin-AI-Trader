@@ -16,6 +16,10 @@ def test_mobile_report_exports_paper_snapshot(tmp_path):
     assert result.equity == Decimal("70.00")
     assert snapshot["initial_cash"] == Decimal("70.00")
     assert snapshot["tick"] == 1
+    assert set(snapshot["market_prices"]) == {"BTCUSDT", "ETHUSDT", "BNBUSDT"}
+    assert snapshot["signals"]["BTCUSDT"] == "HOLD"
+    assert "مراقبة السوق وإشارات Smart Sniper" in markdown
+    assert "BTCUSDT" in page
     assert "Paper فقط" in page
     assert "0.50%" in page
     assert "1.00%" in page
