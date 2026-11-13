@@ -62,7 +62,9 @@ def fetch_history(client: httpx.Client, symbol: str, interval: str, limit: int):
         "quote_volume": Decimal(str(row[7])),
         "trade_count": Decimal(str(row[8])),
     } for row in rows]
-    minimum_history = 60 if interval == "1M" else 400
+    # Some newer assets (e.g. SOL) have fewer than 400 weekly candles;
+    # 60 closed bars still exceed the strategy's 30-bar MTF indicator warm-up.
+    minimum_history = 60 if interval in {"1w", "1M"} else 400
     if len(candles) < minimum_history:
         raise RuntimeError(
             f"Only {len(candles)} closed candles returned for {symbol} {interval}; "
