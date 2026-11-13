@@ -359,10 +359,7 @@ class ContinuousPaperBot:
                 )
                 assessment = self.strategy.assess(closes, spread_bps=spread_bps)
                 signal_name = assessment.signal
-                signals.append(
-                    f"{symbol}:{signal_name}[{assessment.strategy}:"
-                    f"{assessment.score:.0f}:{assessment.regime}]"
-                )
+                signals.append(f"{symbol}:{signal_name}")
                 position = open_positions.get(symbol)
                 action = "NONE"
                 bid, ask = quotes.get(symbol, (price, price))
