@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.view.View
+import android.view.ViewGroup
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -139,11 +140,11 @@ class MainActivity : Activity() {
                     url: String,
                     favicon: android.graphics.Bitmap?
                 ) {
-                    progress.visibility = View.VISIBLE
+                    progress.setVisibility(View.VISIBLE)
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
-                    progress.visibility = View.GONE
+                    progress.setVisibility(View.GONE)
                     swipeRefresh.isRefreshing = false
                 }
 
@@ -173,9 +174,9 @@ class MainActivity : Activity() {
             }
             webChromeClient = WebChromeClient()
         }
-        swipeRefresh.addView(webView, SwipeRefreshLayout.LayoutParams(
-            SwipeRefreshLayout.LayoutParams.MATCH_PARENT,
-            SwipeRefreshLayout.LayoutParams.MATCH_PARENT
+        swipeRefresh.addView(webView, ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
         ))
         swipeRefresh.setOnRefreshListener { loadLatestReport() }
         root.addView(swipeRefresh, LinearLayout.LayoutParams(
