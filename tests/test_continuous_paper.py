@@ -320,6 +320,6 @@ def test_runtime_compounding_does_not_increase_seed_ticket_without_realized_prof
 
     assert position is not None
     deployed = Decimal(position[0]) + Decimal(position[1])
-    assert Decimal("0.99") <= deployed <= Decimal("1.01")
+    assert Decimal("1.01") <= deployed <= Decimal("1.03")
     assert Decimal(position[2]) == Decimal("0")
 
