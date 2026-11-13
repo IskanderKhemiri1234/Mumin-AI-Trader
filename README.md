@@ -56,3 +56,10 @@ No live orders, withdrawals, margin, or futures. Before any live deployment, add
 ## GitHub helper
 
 `scripts/init_and_push.py` uses an existing authenticated GitHub CLI session and is intended to create a **new** repository. Do not run it against an existing repository; this project is being managed directly in the dedicated repository.
+
+
+## Mobile dashboard
+
+A mobile-first, dependency-free dashboard is available at `/dashboard` when the FastAPI app is running. It reads the existing report exports in the browser: choose `summary.json`, `equity.csv`, and `trades.csv` from a downloaded GitHub Actions artifact. It displays portfolio metrics, an equity curve, open positions, and recent fills. The files are processed locally in the browser and are not uploaded to this service. The dashboard does not request or store API credentials and cannot submit orders.
+
+The dashboard is a report viewer, not a hosted always-on trading service. GitHub Actions artifacts remain the source of truth for each run; the user must load the latest report files into the dashboard. Do not publish private account reports to a public repository or public Pages site.
