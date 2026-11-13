@@ -15,14 +15,25 @@ android {
         versionName = "1.1.0"
     }
 
+    signingConfigs {
+        create("release") {
+            val keystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+            if (!keystorePath.isNullOrBlank()) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ""
             versionNameSuffix = ""
         }
         release {
-            // CI publishes a debug-signed installable APK until a private release
-            // signing key is configured. No signing secrets are stored in Git.
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
         }
     }
