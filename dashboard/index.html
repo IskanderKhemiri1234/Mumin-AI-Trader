@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#071c17"><title>Mumin AI Trader · Dashboard</title>
+<style>
+:root{color-scheme:dark;--bg:#071c17;--panel:#0d2922;--panel2:#12362c;--line:#245044;--text:#f2f5ef;--muted:#9eb8ad;--gold:#dfbd72;--green:#45c69a;--red:#ff817c}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(900px 500px at 80% -10%,#174638 0%,transparent 60%),var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:1120px;margin:auto;padding:22px 16px 48px}.top{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}.brand{font-weight:800;letter-spacing:.04em}.brand span{color:var(--gold)}.sub,.muted{color:var(--muted)}h1{font-size:clamp(25px,5vw,38px);margin:12px 0 4px}.tag{border:1px solid var(--line);border-radius:99px;padding:7px 11px;color:var(--gold);font-size:12px}
+.panel,.metric{background:linear-gradient(145deg,#12372d,#0b241e);border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 12px 32px #0002}.load{margin:20px 0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.file label{display:block;color:var(--muted);font-size:12px;margin-bottom:6px}.file input{width:100%;font-size:12px;color:var(--text);max-width:100%}.hint{font-size:12px;color:var(--muted);margin-top:9px}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.metric small{color:var(--muted);display:block}.metric strong{display:block;font-size:clamp(20px,3.4vw,29px);margin-top:5px;overflow-wrap:anywhere}.positive{color:var(--green)}.negative{color:var(--red)}
+.section{margin-top:18px}.section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}.section h2{font-size:17px;margin:0}.chart-wrap{height:260px;position:relative}canvas{width:100%;height:100%;display:block}
+.tables{display:grid;grid-template-columns:1fr 1fr;gap:12px}.table-scroll{overflow:auto;max-height:360px}table{border-collapse:collapse;width:100%;font-size:12px;white-space:nowrap}th,td{text-align:left;padding:9px 8px;border-bottom:1px solid #245044}th{color:var(--muted);position:sticky;top:0;background:#103128}
+.status{font-size:13px;color:var(--muted);margin-top:10px}.empty{padding:35px 12px;text-align:center;color:var(--muted)}button{background:var(--gold);border:0;border-radius:11px;padding:10px 14px;color:#17251e;font-weight:750}
+@media(max-width:720px){main{padding:16px 12px 32px}.load{grid-template-columns:1fr}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.tables{grid-template-columns:1fr}.chart-wrap{height:220px}.panel,.metric{padding:13px}}
+</style>
+</head>
+<body><main>
+<header class="top"><div class="brand">MUMIN <span>AI TRADER</span></div><div class="tag" id="modeTag">WAITING FOR REPORT</div></header>
+<h1>Trading dashboard</h1><div class="sub">Portfolio performance, risk status and execution history — readable on mobile.</div>
+<section class="panel load">
+ <div class="file"><label for="summaryFile">1 · Summary JSON</label><input id="summaryFile" type="file" accept=".json,application/json"></div>
+ <div class="file"><label for="equityFile">2 · Equity CSV</label><input id="equityFile" type="file" accept=".csv,text/csv"></div>
+ <div class="file"><label for="tradesFile">3 · Trades CSV</label><input id="tradesFile" type="file" accept=".csv,text/csv"></div>
+ <div class="hint" style="grid-column:1/-1">Load the three files from the latest GitHub Actions artifact (reports/). This page never asks for API keys and does not place orders. Files stay in this browser session.</div>
+</section>
+<section class="grid" aria-live="polite">
+ <div class="metric"><small>Portfolio equity</small><strong id="equity">—</strong></div>
+ <div class="metric"><small>Available cash</small><strong id="cash">—</strong></div>
+ <div class="metric"><small>Realized net PnL</small><strong id="pnl">—</strong></div>
+ <div class="metric"><small>Daily net PnL</small><strong id="daily">—</strong></div>
+ <div class="metric"><small>Fees paid</small><strong id="fees">—</strong></div>
+ <div class="metric"><small>Closed trades</small><strong id="closed">—</strong></div>
+ <div class="metric"><small>Win / loss</small><strong id="winloss">—</strong></div>
+ <div class="metric"><small>Open positions</small><strong id="positions">—</strong></div>
+</section>
+<section class="panel section"><div class="section-head"><h2>Equity curve</h2><span class="muted" id="chartMeta">No equity history loaded</span></div><div class="chart-wrap"><canvas id="chart" aria-label="Equity curve chart"></canvas></div></section>
+<section class="tables section">
+ <div class="panel"><div class="section-head"><h2>Open positions</h2></div><div class="table-scroll"><table><thead><tr><th>Symbol</th><th>Quantity</th><th>Entry</th><th>Mark</th></tr></thead><tbody id="positionsTable"><tr><td colspan="4" class="empty">No report loaded</td></tr></tbody></table></div></div>
+ <div class="panel"><div class="section-head"><h2>Recent fills</h2></div><div class="table-scroll"><table><thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Price</th><th>Net PnL</th></tr></thead><tbody id="tradesTable"><tr><td colspan="5" class="empty">No report loaded</td></tr></tbody></table></div></div>
+</section>
+<div class="status" id="status" role="status">Dashboard ready. Import a report to display your actual ledger values.</div>
+</main>
+<script>
+const $=id=>document.getElementById(id);let summary=null,equityRows=[],tradeRows=[];
+const money=v=>Number.isFinite(Number(v))?Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:4})+' USDT':'—';
+const val=(o,...keys)=>{for(const k of keys)if(o&&o[k]!==undefined&&o[k]!==null)return o[k];return null};
+function parseCSV(text){const rows=[];let row=[],cell='',q=false;for(let i=0;i<text.length;i++){const c=text[i];if(q&&c==='"'&&text[i+1]==='"'){cell+='"';i++}else if(c==='"')q=!q;else if(c===','&&!q){row.push(cell);cell=''}else if((c==='\n'||c==='\r')&&!q){if(c==='\r'&&text[i+1]==='\n')i++;row.push(cell);if(row.some(x=>x!==''))rows.push(row);row=[];cell=''}else cell+=c}if(cell.length||row.length){row.push(cell);rows.push(row)}if(!rows.length)return[];const headers=rows.shift().map(x=>x.trim());return rows.map(r=>Object.fromEntries(headers.map((h,i)=>[h,(r[i]||'').trim()])));}
+function setMetric(id,v,cls){const el=$(id);el.textContent=v===null||v===undefined?'—':v;el.classList.remove('positive','negative');if(cls)el.classList.add(cls)}
+function renderSummary(){if(!summary)return;const equity=val(summary,'equity'),cash=val(summary,'cash'),pnl=val(summary,'realized_net_pnl','realized_pnl'),daily=val(summary,'daily_net_pnl','daily_pnl'),fees=val(summary,'fees_total','fees_paid');setMetric('equity',money(equity));setMetric('cash',money(cash));setMetric('pnl',money(pnl),Number(pnl)>=0?'positive':'negative');setMetric('daily',money(daily),Number(daily)>=0?'positive':'negative');setMetric('fees',money(fees));setMetric('closed',val(summary,'closed_trades','trades')??'—');setMetric('winloss',(val(summary,'wins')??'—')+' / '+(val(summary,'losses')??'—'));const ps=summary.open_positions||summary.positions||[];setMetric('positions',Array.isArray(ps)?ps.length:Object.keys(ps).length);$('modeTag').textContent=(summary.mode||'UNKNOWN')+' · '+(summary.market_data_source||'SOURCE UNKNOWN');$('positionsTable').innerHTML=Array.isArray(ps)&&ps.length?ps.map(p=>'<tr><td>'+esc(p.symbol)+'</td><td>'+esc(p.quantity)+'</td><td>'+money(p.entry_price)+'</td><td>'+money(p.mark_price)+'</td></tr>').join(''):'<tr><td colspan="4" class="empty">No open positions</td></tr>'; }
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function renderTrades(){const rows=tradeRows.slice(-40).reverse();$('tradesTable').innerHTML=rows.length?rows.map(t=>'<tr><td>'+esc(t.created_at||t.tick||'—')+'</td><td>'+esc(t.symbol)+'</td><td>'+esc(t.side)+'</td><td>'+money(t.fill_price)+'</td><td class="'+(Number(t.net_pnl)>=0?'positive':'negative')+'">'+money(t.net_pnl)+'</td></tr>').join(''):'<tr><td colspan="5" class="empty">No fills in this report</td></tr>';}
+function drawChart(){const c=$('chart'),ctx=c.getContext('2d'),w=c.clientWidth,h=c.clientHeight,dpr=Math.max(1,window.devicePixelRatio||1);c.width=w*dpr;c.height=h*dpr;ctx.scale(dpr,dpr);ctx.clearRect(0,0,w,h);const vals=equityRows.map(r=>Number(r.equity)).filter(Number.isFinite);if(vals.length<2){ctx.fillStyle='#9eb8ad';ctx.textAlign='center';ctx.font='13px system-ui';ctx.fillText('Load equity.csv to view portfolio history',w/2,h/2);return}const min=Math.min(...vals),max=Math.max(...vals),pad=22,span=max-min||1;ctx.strokeStyle='#245044';ctx.lineWidth=1;for(let i=0;i<4;i++){const y=pad+i*(h-2*pad)/3;ctx.beginPath();ctx.moveTo(pad,y);ctx.lineTo(w-pad,y);ctx.stroke()}ctx.beginPath();vals.forEach((v,i)=>{const x=pad+i*(w-2*pad)/(vals.length-1),y=h-pad-(v-min)/span*(h-2*pad);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.strokeStyle='#dfbd72';ctx.lineWidth=2.5;ctx.stroke();$('chartMeta').textContent=vals.length+' recorded equity points · '+money(vals[vals.length-1]);}
+$('summaryFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;try{summary=JSON.parse(await f.text());renderSummary();$('status').textContent='Summary loaded: '+(summary.market_data_source||'source not specified')+'.';}catch(err){$('status').textContent='Could not read summary.json: '+err.message;}});
+$('equityFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;try{equityRows=parseCSV(await f.text());drawChart();$('status').textContent='Equity history loaded ('+equityRows.length+' rows).';}catch(err){$('status').textContent='Could not read equity.csv: '+err.message;}});
+$('tradesFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;try{tradeRows=parseCSV(await f.text());renderTrades();$('status').textContent='Trade history loaded ('+tradeRows.length+' rows).';}catch(err){$('status').textContent='Could not read trades.csv: '+err.message;}});
+window.addEventListener('resize',drawChart);drawChart();
+</script></body></html>
