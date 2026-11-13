@@ -120,6 +120,7 @@ class ContinuousPaperBot:
                     entry_gross TEXT NOT NULL,
                     entry_fee TEXT NOT NULL,
                     profit_funded_quote TEXT NOT NULL DEFAULT '0',
+                    take_profit_percent TEXT NOT NULL DEFAULT '1.25',
                     opened_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS bot_fills (
@@ -228,6 +229,10 @@ class ContinuousPaperBot:
             if "profit_funded_quote" not in position_columns:
                 db.execute(
                     "ALTER TABLE bot_positions ADD COLUMN profit_funded_quote TEXT NOT NULL DEFAULT '0'"
+                )
+            if "take_profit_percent" not in position_columns:
+                db.execute(
+                    "ALTER TABLE bot_positions ADD COLUMN take_profit_percent TEXT NOT NULL DEFAULT '1.25'"
                 )
             row = db.execute("SELECT initial_cash FROM bot_account WHERE id=1").fetchone()
             if row is None:
@@ -474,7 +479,9 @@ class ContinuousPaperBot:
                     )
                     hard_exit = (
                         net_return_pct <= -STOP_LOSS_PERCENT
-                        or net_return_pct >= TAKE_PROFIT_PERCENT
+                        or net_return_pct >= Decimal(
+                            position["take_profit_percent"] or str(TAKE_PROFIT_PERCENT)
+                        )
                         or signal_name == "SELL"
                     )
                     exit_fraction = Decimal("1") if hard_exit else shield_decision.exit_fraction
@@ -612,10 +619,10 @@ class ContinuousPaperBot:
                             db.execute(
                                 """INSERT INTO bot_positions
                                 (symbol,quantity,entry_price,entry_gross,entry_fee,
-                                 profit_funded_quote,opened_at)
-                                VALUES (?,?,?,?,?,?,?)""",
+                                 profit_funded_quote,take_profit_percent,opened_at)
+                                VALUES (?,?,?,?,?,?,?,?)""",
                                 (symbol, str(quantity), str(fill), str(gross), str(fee),
-                                 str(profit_funded_quote), timestamp),
+                                 str(profit_funded_quote), str(assessment.target_percent), timestamp),
                             )
                             db.execute(
                                 """INSERT INTO bot_fills
@@ -629,6 +636,7 @@ class ContinuousPaperBot:
                             open_positions[symbol] = {
                                 "symbol": symbol, "quantity": str(quantity),
                                 "profit_funded_quote": str(profit_funded_quote),
+                                "take_profit_percent": str(assessment.target_percent),
                             }
                 if action != "NONE":
                     actions.append(action)
