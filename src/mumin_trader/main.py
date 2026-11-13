@@ -11,7 +11,11 @@ from fastapi.responses import FileResponse
 
 from config.config import get_settings
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = (
+    Path("/app")
+    if Path("/app/dashboard").is_dir()
+    else Path(__file__).resolve().parents[2]
+)
 DASHBOARD_FILE = PROJECT_ROOT / "dashboard" / "index.html"
 DEFAULT_PAPER_DB = PROJECT_ROOT / "data" / "mumin_public_paper.db"
 

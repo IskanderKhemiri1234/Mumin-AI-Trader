@@ -24,6 +24,8 @@ services:
 
   mumin-paper-bot:
     build: .
+    env_file:
+      - .env
     container_name: mumin-paper-bot
     command: ["python", "scripts/run_continuous_paper.py", "--db", "/app/data/mumin_public_paper.db", "--interval-seconds", "30", "--data-source", "${MUMIN_MARKET_DATA_SOURCE:-BINANCE_PUBLIC_MARKET_DATA}"]
     restart: unless-stopped
