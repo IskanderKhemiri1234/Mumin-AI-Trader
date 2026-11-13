@@ -98,30 +98,20 @@ jobs:
           for invisible in ("\ufeff", "\u200b", "\u200c", "\u200d", "\u2060"):
               normalized = normalized.replace(invisible, "")
           normalized = re.sub(r"\s+", "", normalized).replace("-", "+").replace("_", "/")
-          # Repair the confirmed mobile-copy homoglyph at zero-based position 83.
-          # The trusted source has ASCII 'C' at this position; the pasted secret had Cyrillic U+0441.
-          if len(normalized) > 83 and normalized[83] == "\u0441":
-              normalized = normalized[:83] + "C" + normalized[84:]
-          # The trusted source has ASCII 'B' at zero-based position 84;
-          # the mobile-copied secret contains Cyrillic U+0432 at that position.
-          if len(normalized) > 84 and normalized[84] == "\u0432":
-              normalized = normalized[:84] + "B" + normalized[85:]
-          # The trusted source has ASCII 'a' at zero-based position 85;
-          # the copied secret has Cyrillic U+0430 (visually similar to Latin a).
-          if len(normalized) > 85 and normalized[85] == "\u0430":
-              normalized = normalized[:85] + "a" + normalized[86:]
-          # The trusted source has ASCII '0' at zero-based position 609;
-          # the copied GitHub secret contains '@' at that position.
-          if len(normalized) > 609 and normalized[609] == "@":
-              normalized = normalized[:609] + "0" + normalized[610:]
-          # The trusted source has ASCII '0' at zero-based position 918;
-          # the copied GitHub secret contains '@' at that position.
-          if len(normalized) > 918 and normalized[918] == "@":
-              normalized = normalized[:918] + "0" + normalized[919:]
-          # The trusted source has ASCII '4' at zero-based position 1448;
-          # the copied GitHub secret contains '@' at that position.
-          if len(normalized) > 1448 and normalized[1448] == "@":
-              normalized = normalized[:1448] + "4" + normalized[1449:]
+          # Repair only positions verified against the trusted local source file.
+          # These replacements are conditional: an unexpected character is never overwritten.
+          verified_repairs = {
+              83: ("\\u0441", "C"),
+              84: ("\\u0432", "B"),
+              85: ("\\u0430", "a"),
+              609: ("@", "0"),
+              918: ("@", "0"),
+              1448: ("@", "4"),
+              1581: ("@", "y"),
+          }
+          for position, (observed, trusted) in verified_repairs.items():
+              if len(normalized) > position and normalized[position] == observed:
+                  normalized = normalized[:position] + trusted + normalized[position + 1:]
           normalized += "=" * ((-len(normalized)) % 4)
 
           try:
@@ -130,8 +120,12 @@ jobs:
               alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
               invalid = [(i, ord(ch)) for i, ch in enumerate(normalized) if ch not in alphabet]
               if invalid:
-                  position, codepoint = invalid[0]
-                  detail = f"first_invalid_character=U+{codepoint:04X}, position={position}"
+                  preview = invalid[:40]
+                  detail = "invalid_characters=" + ",".join(
+                      f"{position}:U+{codepoint:04X}" for position, codepoint in preview
+                  )
+                  if len(invalid) > len(preview):
+                      detail += f",and_{len(invalid) - len(preview)}_more"
               else:
                   detail = f"base64_length={len(normalized)}, remainder_mod_4={len(normalized) % 4}"
               raise SystemExit(
