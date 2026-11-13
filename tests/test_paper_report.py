@@ -23,6 +23,11 @@ def test_mobile_report_exports_paper_snapshot(tmp_path):
     assert "Paper فقط" in page
     assert "0.50%" in page
     assert "1.00%" in page
+    assert "viewport-fit=cover" in page
+    assert "nav aria-label=" in page
+    assert "asset-grid" in page
+    assert "prefers-reduced-motion" in page
+    assert "لا تُرسل أوامر إلى Binance" in page
     assert "2.00%" in markdown
     assert "70.0000 USDT" in markdown
     assert "لا توجد أوامر Binance حقيقية" in markdown
