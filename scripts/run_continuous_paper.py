@@ -622,7 +622,9 @@ class ContinuousPaperBot:
                                  profit_funded_quote,take_profit_percent,opened_at)
                                 VALUES (?,?,?,?,?,?,?,?)""",
                                 (symbol, str(quantity), str(fill), str(gross), str(fee),
-                                 str(profit_funded_quote), str(assessment.target_percent), timestamp),
+                                 str(profit_funded_quote), str(
+                                     getattr(assessment, "target_percent", TAKE_PROFIT_PERCENT)
+                                 ), timestamp),
                             )
                             db.execute(
                                 """INSERT INTO bot_fills
