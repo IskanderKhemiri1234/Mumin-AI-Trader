@@ -1,3 +1,5 @@
+> **Validation status:** These earlier findings predate the per-position 2.5R/3R target persistence fix now included in the follow-up validation branch. They are historical baseline results only and must not be treated as validation of the updated simulator.
+
 # Smart Sniper 2.0 — preliminary walk-forward findings
 
 **Research run:** GitHub Actions run [#43524247461](https://github.com/IskanderKhemiri1234/Mumin-AI-Trader/actions/runs/43524247461)  
