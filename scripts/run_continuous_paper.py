@@ -12,6 +12,7 @@ from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 
 from mumin_trader.strategy.smart_sniper import SmartSniperStrategy
+from mumin_trader.risk.anti_loss_quantum_shield import AntiLossQuantumShield, ShieldAssessment
 
 from mumin_trader.exchanges.binance.public_market_data import (
     ALLOWED_SYMBOLS,
@@ -77,6 +78,7 @@ class ContinuousPaperBot:
         self.database = database
         self.initial_cash = Decimal(initial_cash)
         self.strategy = SmartSniperStrategy()
+        self.anti_loss_shield = AntiLossQuantumShield()
         if database != ":memory:":
             Path(database).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -240,6 +242,7 @@ class ContinuousPaperBot:
         quotes: dict[str, tuple[Decimal, Decimal]] | None = None,
         candle_close_times: dict[str, int] | None = None,
         received_at_ms: int | None = None,
+        liquidity_metrics: dict[str, tuple[Decimal | None, Decimal | None]] | None = None,
     ) -> TickResult:
         if source not in {SYNTHETIC_SOURCE, PUBLIC_SOURCE}:
             raise ValueError("Unknown market data source.")
@@ -260,6 +263,7 @@ class ContinuousPaperBot:
             raise ValueError("Prices must contain positive finite values for allowlisted symbols.")
         quotes = quotes or {symbol: (price, price) for symbol, price in normalized.items()}
         candle_close_times = candle_close_times or {}
+        liquidity_metrics = liquidity_metrics or {}
 
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -359,6 +363,30 @@ class ContinuousPaperBot:
                 )
                 assessment = self.strategy.assess(closes, spread_bps=spread_bps)
                 signal_name = assessment.signal
+                if source == PUBLIC_SOURCE:
+                    volume_ratio, trade_ratio = liquidity_metrics.get(symbol, (None, None))
+                    previous_close = closes[-2] if len(closes) >= 2 else price
+                    price_change_bps = (
+                        (price / previous_close - Decimal("1")) * Decimal("10000")
+                        if previous_close > 0 else Decimal("0")
+                    )
+                    candle_age_ms = max(
+                        0, received - candle_close_times.get(symbol, received)
+                    )
+                    shield_decision = self.anti_loss_shield.assess(
+                        spread_bps=spread_bps,
+                        quote_volume_ratio=volume_ratio,
+                        trade_count_ratio=trade_ratio,
+                        price_change_bps=price_change_bps,
+                        candle_age_ms=candle_age_ms,
+                    )
+                else:
+                    shield_decision = ShieldAssessment(
+                        "BYPASSED_SYNTHETIC", False, Decimal("0"),
+                        ("Synthetic test feed has no real liquidity observations.",),
+                    )
+                if shield_decision.block_entries and signal_name == "BUY":
+                    signal_name = "HOLD"
                 signals.append(f"{symbol}:{signal_name}")
                 position = open_positions.get(symbol)
                 action = "NONE"
@@ -376,27 +404,55 @@ class ContinuousPaperBot:
                         projected_net / entry_cost * Decimal("100")
                         if entry_cost > 0 else Decimal("-100")
                     )
-                    if (
+                    hard_exit = (
                         net_return_pct <= -STOP_LOSS_PERCENT
                         or net_return_pct >= TAKE_PROFIT_PERCENT
                         or signal_name == "SELL"
-                    ):
-                        net_trade = projected_net
-                        cash += gross - fee
+                    )
+                    exit_fraction = Decimal("1") if hard_exit else shield_decision.exit_fraction
+                    quantity_to_sell = (
+                        quantity * exit_fraction
+                    ).quantize(Decimal("0.00000001"), rounding=ROUND_DOWN)
+                    if exit_fraction > 0 and quantity_to_sell > 0:
+                        actual_fraction = quantity_to_sell / quantity
+                        sold_gross = quantity_to_sell * fill
+                        sold_fee = (sold_gross * FEE_RATE).quantize(Decimal("0.00000001"))
+                        sold_entry_gross = Decimal(position["entry_gross"]) * actual_fraction
+                        sold_entry_fee = Decimal(position["entry_fee"]) * actual_fraction
+                        net_trade = sold_gross - sold_fee - sold_entry_gross - sold_entry_fee
+                        cash += sold_gross - sold_fee
                         realized += net_trade
                         daily_realized += net_trade
-                        fees_paid += fee
-                        db.execute("DELETE FROM bot_positions WHERE symbol=?", (symbol,))
+                        fees_paid += sold_fee
+                        remaining_quantity = quantity - quantity_to_sell
                         db.execute(
                             """INSERT INTO bot_fills
                             (tick,symbol,side,quantity,reference_price,fill_price,gross_quote,
                              fee_quote,net_pnl,data_source,created_at)
                             VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                            (tick, symbol, "SELL", str(quantity), str(price), str(fill),
-                             str(gross), str(fee), str(net_trade), source, timestamp),
+                            (tick, symbol, "SELL", str(quantity_to_sell), str(price), str(fill),
+                             str(sold_gross), str(sold_fee), str(net_trade), source, timestamp),
                         )
-                        action = f"{symbol}:CLOSE net={net_trade:.8f}"
-                        open_positions.pop(symbol, None)
+                        if remaining_quantity > 0:
+                            remaining_entry_gross = Decimal(position["entry_gross"]) - sold_entry_gross
+                            remaining_entry_fee = Decimal(position["entry_fee"]) - sold_entry_fee
+                            db.execute(
+                                """UPDATE bot_positions SET quantity=?, entry_gross=?, entry_fee=?
+                                   WHERE symbol=?""",
+                                (str(remaining_quantity), str(remaining_entry_gross),
+                                 str(remaining_entry_fee), symbol),
+                            )
+                            open_positions[symbol] = {
+                                **dict(position),
+                                "quantity": str(remaining_quantity),
+                                "entry_gross": str(remaining_entry_gross),
+                                "entry_fee": str(remaining_entry_fee),
+                            }
+                            action = f"{symbol}:DE_RISK qty={quantity_to_sell}"
+                        else:
+                            db.execute("DELETE FROM bot_positions WHERE symbol=?", (symbol,))
+                            action = f"{symbol}:CLOSE net={net_trade:.8f}"
+                            open_positions.pop(symbol, None)
                         # Re-evaluate account-wide daily loss immediately after a
                         # realized exit, before another symbol can open a position.
                         marked_equity = cash + sum(
@@ -611,10 +667,15 @@ async def run_bot(
                 prices = {symbol: item.last_closed_price for symbol, item in snapshots.items()}
                 quotes = {symbol: (item.bid, item.ask) for symbol, item in snapshots.items()}
                 candle_times = {symbol: item.candle_close_time_ms for symbol, item in snapshots.items()}
+                liquidity_metrics = {
+                    symbol: (item.quote_volume_ratio, item.trade_count_ratio)
+                    for symbol, item in snapshots.items()
+                }
                 received = min(item.received_at_ms for item in snapshots.values())
                 result = bot.step(
                     prices, source=PUBLIC_SOURCE, quotes=quotes,
                     candle_close_times=candle_times, received_at_ms=received,
+                    liquidity_metrics=liquidity_metrics,
                 )
 
             print(
