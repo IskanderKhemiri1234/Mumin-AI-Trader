@@ -130,6 +130,34 @@ def test_stop_loss_uses_net_exit_value_after_fees_and_slippage(tmp_path):
     assert Decimal(exit_row[0]) <= Decimal("-0.25")
 
 
+def test_persisted_three_r_target_does_not_exit_at_the_old_two_point_five_r_level(tmp_path):
+    database = tmp_path / "three-r-target.sqlite3"
+    bot = ContinuousPaperBot(str(database), initial_cash=Decimal("70.00"))
+    with sqlite3.connect(database) as db:
+        db.execute("UPDATE bot_account SET cash='19.95' WHERE id=1")
+        db.execute(
+            """INSERT INTO bot_positions
+               (symbol,quantity,entry_price,entry_gross,entry_fee,
+                take_profit_percent,opened_at)
+               VALUES ('BTCUSDT','0.5','100','50','0.05','1.50',
+                       '2026-11-13T00:00:00+00:00')"""
+        )
+
+    bot.step(
+        {"BTCUSDT": Decimal("101.5")},
+        source="BINANCE_PUBLIC_MARKET_DATA",
+        quotes={"BTCUSDT": (Decimal("101.5"), Decimal("101.6"))},
+        candle_close_times={"BTCUSDT": 1_800_000_000_000},
+        received_at_ms=1_800_000_000_100,
+    )
+
+    with sqlite3.connect(database) as db:
+        position = db.execute(
+            "SELECT take_profit_percent FROM bot_positions WHERE symbol='BTCUSDT'"
+        ).fetchone()
+    assert position == ("1.50",)
+
+
 def test_daily_loss_halts_entries_before_another_symbol_can_open(tmp_path):
     database = tmp_path / "daily-halt.sqlite3"
     bot = ContinuousPaperBot(str(database), initial_cash=Decimal("70.00"))
