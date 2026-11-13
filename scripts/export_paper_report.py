@@ -172,7 +172,7 @@ def render_markdown(snapshot: dict[str, Any]) -> str:
         "",
         "| الأصل | الكمية | الدخول | السعر المرجعي | القيمة |",
         "|---|---:|---:|---:|---:|",
-    ]
+    ])
     if snapshot["positions"]:
         for item in snapshot["positions"]:
             rows.append(
