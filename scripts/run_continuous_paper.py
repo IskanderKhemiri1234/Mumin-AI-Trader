@@ -26,7 +26,7 @@ SYMBOLS = ("BTCUSDT", "ETHUSDT", "BNBUSDT")
 INITIAL_CASH = Decimal(os.getenv("INITIAL_CAPITAL_USD", "70.00"))
 MAX_TRADE = Decimal(os.getenv("MAX_TRADE_ALLOCATION_USD", "5.00"))
 # Conservative seed ticket; any amount above this must be backed by realized net profit.
-BASE_TRADE_ALLOCATION = Decimal("1.00")
+BASE_TRADE_ALLOCATION = Decimal("1.02")
 RESERVE_PERCENT = Decimal(os.getenv("CAPITAL_RESERVE_PERCENT", "20"))
 MAX_CAPITAL = Decimal(os.getenv("MAX_CAPITAL_ALLOCATION_USD", str(INITIAL_CASH)))
 MAX_TOTAL_EXPOSURE = MAX_CAPITAL * (Decimal("100") - RESERVE_PERCENT) / Decimal("100")
