@@ -22,6 +22,7 @@ def test_mobile_report_exports_paper_snapshot(tmp_path):
     assert "BTCUSDT" in page
     assert "Paper فقط" in page
     assert "0.50%" in page
+    assert "صافي الخروج بعد رسوم الدخول والخروج والانزلاق السعري" in markdown
     assert "1.00%" in page
     assert "viewport-fit=cover" in page
     assert "nav aria-label=" in page
