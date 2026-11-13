@@ -171,3 +171,81 @@ def test_daily_loss_halts_entries_before_another_symbol_can_open(tmp_path):
         ).fetchone()[0]
     assert account == (1, "MAX_DAILY_LOSS")
     assert eth_buys == 0
+
+
+def test_anti_loss_shield_blocks_new_entries_when_liquidity_is_abnormal(tmp_path):
+    from types import SimpleNamespace
+
+    bot = ContinuousPaperBot(str(tmp_path / "shield-entry.sqlite3"))
+    bot.strategy.assess = lambda *args, **kwargs: SimpleNamespace(signal="BUY")
+    with sqlite3.connect(bot.database) as db:
+        for tick in range(-30, 0):
+            close_time = 1_800_000_000_000 + tick * 60_000
+            db.execute(
+                """INSERT INTO bot_market_ticks
+                   (tick,symbol,price,bid,ask,data_source,candle_close_time_ms,received_at_ms)
+                   VALUES (?, 'BTCUSDT', '100', '99.99', '100.01',
+                           'BINANCE_PUBLIC_MARKET_DATA', ?, ?)""",
+                (tick, close_time, close_time + 1000),
+            )
+
+    bot.step(
+        {"BTCUSDT": Decimal("100")},
+        source="BINANCE_PUBLIC_MARKET_DATA",
+        quotes={"BTCUSDT": (Decimal("99.99"), Decimal("100.01"))},
+        candle_close_times={"BTCUSDT": 1_800_000_000_000},
+        received_at_ms=1_800_000_001_000,
+        liquidity_metrics={
+            "BTCUSDT": (Decimal("0.10"), Decimal("0.10")),
+        },
+    )
+    with sqlite3.connect(bot.database) as db:
+        buys = db.execute(
+            "SELECT COUNT(*) FROM bot_fills WHERE side='BUY'"
+        ).fetchone()[0]
+    assert buys == 0
+
+
+def test_anti_loss_shield_reduces_position_in_stages_when_spread_is_executable(tmp_path):
+    from types import SimpleNamespace
+
+    database = tmp_path / "shield-derisk.sqlite3"
+    bot = ContinuousPaperBot(str(database))
+    bot.strategy.assess = lambda *args, **kwargs: SimpleNamespace(signal="HOLD")
+    with sqlite3.connect(database) as db:
+        db.execute("UPDATE bot_account SET cash='64.995' WHERE id=1")
+        db.execute(
+            """INSERT INTO bot_positions
+               (symbol,quantity,entry_price,entry_gross,entry_fee,opened_at)
+               VALUES ('BTCUSDT','0.05','100','5','0.005','2026-11-13T00:00:00+00:00')"""
+        )
+        for tick in range(-30, 0):
+            close_time = 1_800_000_000_000 + tick * 60_000
+            db.execute(
+                """INSERT INTO bot_market_ticks
+                   (tick,symbol,price,bid,ask,data_source,candle_close_time_ms,received_at_ms)
+                   VALUES (?, 'BTCUSDT', '100', '99.99', '100.01',
+                           'BINANCE_PUBLIC_MARKET_DATA', ?, ?)""",
+                (tick, close_time, close_time + 1000),
+            )
+
+    result = bot.step(
+        {"BTCUSDT": Decimal("100")},
+        source="BINANCE_PUBLIC_MARKET_DATA",
+        quotes={"BTCUSDT": (Decimal("99.99"), Decimal("100.01"))},
+        candle_close_times={"BTCUSDT": 1_800_000_000_000},
+        received_at_ms=1_800_000_001_000,
+        liquidity_metrics={
+            "BTCUSDT": (Decimal("0.30"), Decimal("0.40")),
+        },
+    )
+    with sqlite3.connect(database) as db:
+        remaining = Decimal(db.execute(
+            "SELECT quantity FROM bot_positions WHERE symbol='BTCUSDT'"
+        ).fetchone()[0])
+        sold = Decimal(db.execute(
+            "SELECT quantity FROM bot_fills WHERE side='SELL'"
+        ).fetchone()[0])
+    assert result.action.startswith("BTCUSDT:DE_RISK")
+    assert sold == Decimal("0.01250000")
+    assert remaining == Decimal("0.03750000")
