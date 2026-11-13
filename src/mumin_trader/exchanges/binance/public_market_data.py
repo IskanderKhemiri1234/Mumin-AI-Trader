@@ -141,8 +141,8 @@ class PublicMarketData:
             quote_volume_ratio=quote_volume_ratio,
             trade_count_ratio=trade_count_ratio,
             higher_timeframe_closes={
-                "5m": closed_closes(five_minute),
-                "15m": closed_closes(fifteen_minute),
+                "higher_1": closed_closes(five_minute),
+                "higher_2": closed_closes(fifteen_minute),
             },
             atr_percent=atr_percent,
         )
