@@ -348,7 +348,7 @@ footer{{padding:20px 5px;color:#839c8e;font-size:11px;text-align:center}}
 </div>
 <p class="subtitle">آخر تحديث: {updated} UTC</p>
 {halt}
-<div class="paper-warning"><b>وضع Paper تجريبي فقط.</b> جميع عمليات الشراء والبيع محاكاة داخل SQLite؛ لا تُرسل أوامر إلى Binance ولا تمثل أرباحاً قابلة للسحب. مستويات وقف الخسارة وجني الربح محاكاة وليست أوامر حماية في المنصة.</div>
+<div class="paper-warning"><b>Paper فقط — وضع تجريبي.</b> جميع عمليات الشراء والبيع محاكاة داخل SQLite؛ لا تُرسل أوامر إلى Binance ولا تمثل أرباحاً قابلة للسحب. مستويات وقف الخسارة وجني الربح محاكاة وليست أوامر حماية في المنصة.</div>
 </header>
 
 <nav aria-label="التنقل داخل التقرير">
