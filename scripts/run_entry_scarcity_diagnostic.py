@@ -11,7 +11,7 @@ from pathlib import Path
 import httpx
 
 from mumin_trader.risk.anti_loss_quantum_shield import AntiLossQuantumShield
-from mumin_trader.strategy.smart_sniper import SmartSniperStrategy, _ema
+from mumin_trader.strategy.smart_sniper import SmartSniperStrategy, _ema, _timeframe_bullish
 from run_binance_walk_forward import ALLOWED, HIGHER_TIMEFRAMES, fetch_history
 
 ZERO = Decimal(0)
@@ -99,6 +99,7 @@ def diagnose_series(
     primary_counts: Counter[str] = Counter()
     shield_market_counts: Counter[str] = Counter()
     shield_candidate_counts: Counter[str] = Counter()
+    mtf_component_counts: Counter[str] = Counter()
     records: list[dict] = []
     buy_candidates = final_entries = 0
 
@@ -112,6 +113,12 @@ def diagnose_series(
                 item["close"] for item in history[max(0, count - 45):count]
             ]
         atr = _atr_percent(rows, index)
+        higher_4h_bullish = _timeframe_bullish(aligned.get("higher_1", []))
+        higher_1d_bullish = _timeframe_bullish(aligned.get("higher_2", []))
+        mtf_component_counts["4h_bullish"] += int(higher_4h_bullish)
+        mtf_component_counts["1d_bullish"] += int(higher_1d_bullish)
+        mtf_component_counts["both_bullish"] += int(higher_4h_bullish and higher_1d_bullish)
+        mtf_component_counts["neither_bullish"] += int(not higher_4h_bullish and not higher_1d_bullish)
         assessment = strategy.assess(
             closes,
             spread_bps=spread_bps,
@@ -224,10 +231,13 @@ def diagnose_series(
             "rsi": str(assessment.rsi),
             "atr_percent": str(assessment.atr_percent),
             "mtf_confluence": assessment.mtf_confluence,
+            "higher_4h_bullish": higher_4h_bullish,
+            "higher_1d_bullish": higher_1d_bullish,
             "expected_move_bps": str(expected_move),
             "required_move_bps": str(required_move),
             "failed_gates_overlapping": failures,
             "primary_rejection_exclusive": primary if assessment.signal == "HOLD" else None,
+            "shield_mode": shield_result.mode,
             "shield_blocks_entry": shield_result.block_entries,
             "shield_reasons": list(shield_result.reasons),
             "final_entry_after_shield": is_buy and not shield_result.block_entries,
@@ -241,6 +251,7 @@ def diagnose_series(
         "evaluated_closed_candles": len(records),
         "signal_counts": dict(signal_counts),
         "hold_candles": holds,
+        "mtf_component_candle_counts": dict(mtf_component_counts),
         "strategy_gate_failures_overlapping": dict(gate_counts.most_common()),
         "strategy_primary_rejection_exclusive": dict(primary_counts.most_common()),
         "strategy_primary_rejection_percent_of_holds": {
