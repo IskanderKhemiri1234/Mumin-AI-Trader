@@ -9,20 +9,20 @@ from pathlib import Path
 
 import httpx
 
-from run_binance_walk_forward import ALLOWED, HIGHER_TIMEFRAMES, fetch_history
+from run_binance_walk_forward import HIGHER_TIMEFRAMES, fetch_history
 from mumin_trader.research.walk_forward import HistoricalCandle, run_backtest
 from mumin_trader.risk.anti_loss_quantum_shield import AntiLossQuantumShield
 from mumin_trader.strategy.smart_sniper import SmartSniperStrategy
 
-ZERO = Decimal("0")
-ONE_HUNDRED = Decimal("100")
-BPS = Decimal("10000")
-INITIAL_CASH = Decimal("70")
+ZERO = Decimal(0)
+ONE_HUNDRED = Decimal(100)
+BPS = Decimal(10000)
+INITIAL_CASH = Decimal(70)
 HISTORY_BARS = 9940
 DEVELOPMENT_BARS = 6958
 VALIDATION_BARS = 1491
 HOLDOUT_BARS = 1491
-SPREADS = (Decimal("5"), Decimal("10"), Decimal("20"), Decimal("30"))
+SPREADS = (Decimal(5), Decimal(10), Decimal(20), Decimal(30))
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "LINKUSDT")
 
 
@@ -254,13 +254,13 @@ def main() -> None:
                 "candidate": _metric_dict(candidate),
             }
             results[str(spread)].append(record)
-            if spread in (Decimal("5"), Decimal("10")):
+            if spread in (Decimal(5), Decimal(10)):
                 incremental_ledger.setdefault(str(spread), {})[symbol] = _incremental_signals(
                     base, higher, spread, holdout_start,
                 )
 
     acceptance: dict[str, dict] = {}
-    for spread in (Decimal("5"), Decimal("10")):
+    for spread in (Decimal(5), Decimal(10)):
         key = str(spread)
         rows = results[key]
         base_agg = _aggregate(rows, "baseline")
@@ -286,7 +286,7 @@ def main() -> None:
             "pass": all(checks.values()),
         }
 
-    for spread in (Decimal("20"), Decimal("30")):
+    for spread in (Decimal(20), Decimal(30)):
         key = str(spread)
         candidate_orders = sum(item["candidate"]["paper_entry_orders"] for item in results[key])
         baseline_orders = sum(item["baseline"]["paper_entry_orders"] for item in results[key])
