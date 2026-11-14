@@ -118,6 +118,8 @@ def diagnose_series(
         mtf_component_counts["4h_bullish"] += int(higher_4h_bullish)
         mtf_component_counts["1d_bullish"] += int(higher_1d_bullish)
         mtf_component_counts["both_bullish"] += int(higher_4h_bullish and higher_1d_bullish)
+        mtf_component_counts["only_4h_bullish"] += int(higher_4h_bullish and not higher_1d_bullish)
+        mtf_component_counts["only_1d_bullish"] += int(higher_1d_bullish and not higher_4h_bullish)
         mtf_component_counts["neither_bullish"] += int(not higher_4h_bullish and not higher_1d_bullish)
         assessment = strategy.assess(
             closes,
