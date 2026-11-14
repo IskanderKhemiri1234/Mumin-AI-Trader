@@ -99,7 +99,9 @@ def _incremental_ledger(
         candidate_result = candidate.assess(
             closes, spread_bps=spread, higher_timeframe_closes=aligned, atr_percent=atr
         )
-        expected_reason = "Expected move does not cover the asymmetric target plus all estimated costs."
+        expected_reason = (
+            "Expected move does not cover the asymmetric target plus all estimated costs."
+        )
         baseline_expected_failure = expected_reason in baseline_result.reasons
         candidate_expected_failure = expected_reason in candidate_result.reasons
         overlap_counts["baseline_expected_move_failures"] += int(baseline_expected_failure)
@@ -108,7 +110,8 @@ def _incremental_ledger(
             baseline_expected_failure and not baseline_result.mtf_confluence
         )
         overlap_counts["baseline_expected_move_and_atr_failures"] += int(
-            baseline_expected_failure and not Decimal("0.08") <= baseline_result.atr_percent <= Decimal("1.20")
+            baseline_expected_failure
+            and not Decimal("0.08") <= baseline_result.atr_percent <= Decimal("1.20")
         )
         overlap_counts["baseline_expected_move_and_spread_failures"] += int(
             baseline_expected_failure and spread > Decimal("12")
@@ -410,10 +413,18 @@ def run_research(client: httpx.Client) -> dict:
             ),
         },
         "candidate_definition": {
-            "baseline_final_expected_move_buffer": "expected_move_bps >= selected_target_bps + estimated_cost_bps + 10",
-            "candidate_final_expected_move_buffer": "expected_move_bps >= selected_target_bps + estimated_cost_bps + 5",
+            "baseline_final_expected_move_buffer": (
+                "expected_move_bps >= selected_target_bps + estimated_cost_bps + 10"
+            ),
+            "candidate_final_expected_move_buffer": (
+                "expected_move_bps >= selected_target_bps + estimated_cost_bps + 5"
+            ),
             "momentum_quality_bonus": (
-                "The +10 momentum quality bonus remains awarded only when momentum_3_bps > 5; the 10 bps minimum net edge for scoring and 3R selection is unchanged."
+                (
+                "The +10 momentum quality bonus remains awarded only when "
+                "momentum_3_bps > 5; the 10 bps minimum net edge for scoring "
+                "and 3R selection is unchanged."
+            )
             ),
             "recovery_branch": "unchanged",
             "all_other_gates": "unchanged",
