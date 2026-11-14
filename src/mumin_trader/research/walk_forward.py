@@ -98,7 +98,11 @@ def _evaluate_fold(
     enable_compounding: bool = True,
     momentum_3_floor_bps: Decimal = Decimal("5"),
 ) -> BacktestMetrics:
-    strategy = SmartSniperStrategy(momentum_3_floor_bps=momentum_3_floor_bps)
+    strategy = (
+        SmartSniperStrategy()
+        if Decimal(momentum_3_floor_bps) == Decimal("5")
+        else SmartSniperStrategy(momentum_3_floor_bps=momentum_3_floor_bps)
+    )
     shield = AntiLossQuantumShield()
     compounding = DynamicCompoundingMatrix()
     cash = Decimal(initial_cash)
