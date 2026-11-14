@@ -98,7 +98,11 @@ def _evaluate_fold(
     enable_compounding: bool = True,
     enforce_mtf_hard_gate: bool = True,
 ) -> BacktestMetrics:
-    strategy = SmartSniperStrategy(enforce_mtf_hard_gate=enforce_mtf_hard_gate)
+    strategy = (
+        SmartSniperStrategy()
+        if enforce_mtf_hard_gate
+        else SmartSniperStrategy(enforce_mtf_hard_gate=False)
+    )
     shield = AntiLossQuantumShield()
     compounding = DynamicCompoundingMatrix()
     cash = Decimal(initial_cash)
