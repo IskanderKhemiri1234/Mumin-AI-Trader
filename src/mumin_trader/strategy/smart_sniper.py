@@ -80,12 +80,14 @@ class SmartSniperStrategy:
         slippage_bps_per_side: Decimal = Decimal("2"),
         minimum_net_edge_bps: Decimal = Decimal("10"),
         minimum_score: Decimal = Decimal("75"),
+        enforce_mtf_hard_gate: bool = True,
     ) -> None:
         self.buy_fee_bps = Decimal(buy_fee_bps)
         self.sell_fee_bps = Decimal(sell_fee_bps)
         self.slippage_bps_per_side = Decimal(slippage_bps_per_side)
         self.minimum_net_edge_bps = Decimal(minimum_net_edge_bps)
         self.minimum_score = Decimal(minimum_score)
+        self.enforce_mtf_hard_gate = bool(enforce_mtf_hard_gate)
         if any(value < ZERO for value in (
             self.buy_fee_bps, self.sell_fee_bps, self.slippage_bps_per_side,
             self.minimum_net_edge_bps, self.minimum_score
@@ -242,7 +244,7 @@ class SmartSniperStrategy:
         if volatility < Decimal("0.08") or volatility > Decimal("1.20"):
             eligible = False
             reasons.append("Volatility is outside the accepted ATR band.")
-        if not mtf_confluence:
+        if self.enforce_mtf_hard_gate and not mtf_confluence:
             eligible = False
         if spread > Decimal("12"):
             eligible = False
