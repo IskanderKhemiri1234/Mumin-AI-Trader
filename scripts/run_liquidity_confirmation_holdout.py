@@ -196,7 +196,7 @@ def main() -> None:
                 for variant in VARIANTS:
                     candidate = variant == "relative_volume_candidate"
                     for segment_name, start, end in (
-                        ("development", 0, SPLIT_DEV_END),
+                        ("development", WARMUP_BARS, SPLIT_DEV_END),
                         ("validation", SPLIT_DEV_END, SPLIT_VALIDATION_END),
                         ("sealed_holdout", SPLIT_VALIDATION_END, SPLIT_HOLDOUT_END),
                     ):
