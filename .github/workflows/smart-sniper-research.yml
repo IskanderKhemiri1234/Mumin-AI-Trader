@@ -1,0 +1,70 @@
+name: Smart Sniper Historical Walk-Forward Research
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/mumin_trader/strategy/**"
+      - "src/mumin_trader/risk/**"
+      - "src/mumin_trader/research/**"
+      - "src/mumin_trader/exchanges/binance/public_market_data.py"
+      - "scripts/run_binance_walk_forward.py"
+      - "scripts/run_signal_bottleneck_audit.py"
+      - ".github/workflows/smart-sniper-research.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: smart-sniper-research-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  historical-research:
+    name: Public Binance data and spread-sensitivity walk-forward
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+      - name: Fetch closed public candles and run multi-timeframe out-of-sample folds
+        run: |
+          mkdir -p artifacts
+          for interval in 1m 5m 15m 1h 4h 1d; do
+            python scripts/run_binance_walk_forward.py \
+              --symbols BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,LINKUSDT \
+              --interval "$interval" \
+              --limit 10000 \
+              --warmup-bars 240 \
+              --test-bars 120 \
+              --step-bars 120 \
+              --spread-scenarios 5,10,20,30 \
+              --output "artifacts/smart-sniper-walk-forward-$interval.json"
+          done
+      - name: Attribute signal and shield rejection bottlenecks
+        run: |
+          for interval in 1m 5m 1d; do
+            python scripts/run_signal_bottleneck_audit.py \
+              --symbols BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,LINKUSDT \
+              --interval "$interval" \
+              --limit 10000 \
+              --spread-scenarios 5,10,20,30 \
+              --output "artifacts/signal-bottleneck-$interval.json"
+          done
+      - name: Upload research report
+        uses: actions/upload-artifact@v4
+        with:
+          name: smart-sniper-walk-forward-${{ github.run_number }}
+          path: artifacts/*.json
+          if-no-files-found: error
+          retention-days: 30

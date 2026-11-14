@@ -43,7 +43,8 @@ async def test_public_market_data_uses_unauthenticated_endpoints_and_closed_cand
     assert snapshot.last_closed_price == Decimal("2995")
     assert snapshot.candle_close_time_ms == 1_699_999_999_000
     assert snapshot.source == "BINANCE_PUBLIC_MARKET_DATA"
-    assert len(calls) == 3
+    assert len(calls) == 5
+    assert {request.url.params.get('interval') for request in calls if request.url.path.endswith('/klines')} == {'1m', '5m', '15m'}
     assert all("X-MBX-APIKEY" not in request.headers for request in calls)
     await feed.close()
     await client.aclose()
@@ -72,3 +73,40 @@ def test_paper_fill_uses_ask_for_buy_and_bid_for_sell_with_slippage():
 
 def test_allowlist_contains_only_the_three_approved_spot_pairs():
     assert ALLOWED_SYMBOLS == {"BTCUSDT", "ETHUSDT", "BNBUSDT"}
+
+
+@pytest.mark.asyncio
+async def test_public_market_data_calculates_volume_and_trade_count_anomaly_ratios():
+    server_time = 1_800_000_000_000
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/ticker/bookTicker"):
+            return httpx.Response(200, json={
+                "symbol": "BTCUSDT", "bidPrice": "60000", "askPrice": "60001"
+            })
+        if request.url.path.endswith("/klines"):
+            rows = []
+            for index in range(21):
+                close_time = server_time - 21_000 + index * 1_000
+                quote_volume = "200" if index == 20 else "100"
+                trade_count = "20" if index == 20 else "10"
+                rows.append([
+                    index, "60000", "60100", "59900", "60000",
+                    "1", close_time, quote_volume, trade_count,
+                ])
+            return httpx.Response(200, json=rows)
+        if request.url.path.endswith("/time"):
+            return httpx.Response(200, json={"serverTime": server_time})
+        return httpx.Response(404)
+
+    client = httpx.AsyncClient(
+        base_url=BASE_URL,
+        transport=httpx.MockTransport(handler),
+    )
+    feed = PublicMarketData(client=client)
+    snapshot = await feed.snapshot("BTCUSDT")
+
+    assert snapshot.quote_volume_ratio == Decimal("2")
+    assert snapshot.trade_count_ratio == Decimal("2")
+    await feed.close()
+    await client.aclose()
