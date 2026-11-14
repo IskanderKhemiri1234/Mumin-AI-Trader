@@ -96,8 +96,11 @@ def _evaluate_fold(
     initial_cash: Decimal = INITIAL_CASH,
     enable_shield: bool = True,
     enable_compounding: bool = True,
+    final_expected_move_buffer_bps: Decimal = Decimal("10"),
 ) -> BacktestMetrics:
-    strategy = SmartSniperStrategy()
+    strategy = SmartSniperStrategy(
+        final_expected_move_buffer_bps=final_expected_move_buffer_bps
+    )
     shield = AntiLossQuantumShield()
     compounding = DynamicCompoundingMatrix()
     cash = Decimal(initial_cash)
@@ -346,6 +349,7 @@ def run_backtest(
     enable_shield: bool = True,
     enable_compounding: bool = True,
     higher_timeframes: dict[str, Sequence[HistoricalCandle]] | None = None,
+    final_expected_move_buffer_bps: Decimal = Decimal("10"),
 ) -> BacktestMetrics:
     """Run one strictly out-of-sample test segment after an indicator warm-up."""
     if warmup_bars < 30 or len(candles) <= warmup_bars:
@@ -357,6 +361,7 @@ def run_backtest(
         candles, warmup_bars, len(candles), higher_timeframes=higher_timeframes,
         initial_cash=initial_cash, enable_shield=enable_shield,
         enable_compounding=enable_compounding,
+        final_expected_move_buffer_bps=final_expected_move_buffer_bps,
     )
 
 
@@ -370,6 +375,7 @@ def walk_forward(
     enable_shield: bool = True,
     enable_compounding: bool = True,
     higher_timeframes: dict[str, Sequence[HistoricalCandle]] | None = None,
+    final_expected_move_buffer_bps: Decimal = Decimal("10"),
 ) -> WalkForwardReport:
     """Evaluate consecutive unseen windows using only earlier bars as warm-up.
 
@@ -389,6 +395,7 @@ def walk_forward(
                 candles, start, start + test_bars, higher_timeframes=higher_timeframes,
                 initial_cash=initial_cash, enable_shield=enable_shield,
                 enable_compounding=enable_compounding,
+                final_expected_move_buffer_bps=final_expected_move_buffer_bps,
             )
         )
         start += step_bars
