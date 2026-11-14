@@ -153,7 +153,7 @@ def test_recovery_rsi_and_branch_are_unchanged_by_momentum_band(monkeypatch):
 
     monkeypatch.setattr(strategy_module, "_rsi", lambda values, period=14: Decimal("50"))
     closes = [Decimal("100")] * 42 + [
-        Decimal(value) for value in ("103", "102", "100", "98", "97", "96", "97",
+        Decimal(value) for value in ("102.8", "102", "100", "98", "97", "96", "97",
                                      "98", "99", "100", "101", "102", "103")
     ]
     higher = {"higher_1": [Decimal("100")] * 55, "higher_2": [Decimal("100")] * 55}
