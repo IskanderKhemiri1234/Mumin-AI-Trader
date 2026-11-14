@@ -200,12 +200,19 @@ def run_research(client: httpx.Client) -> dict:
                 "passed_all_six": all(flags.values()),
             }
         else:
+            spread_controls = [
+                row for row in negative_control_rows
+                if Decimal(row["spread_bps"]) == spread
+            ]
             aggregates[str(spread)] = {
                 "baseline": baseline_aggregate,
                 "candidate": candidate_aggregate,
-                "negative_controls_zero_entries": all(
-                    row["baseline_entries"] == 0 and row["candidate_entries"] == 0
-                    for row in selected
+                "negative_controls_zero_entries": (
+                    len(spread_controls) == len(SYMBOLS)
+                    and all(
+                        row["baseline_entries"] == 0 and row["candidate_entries"] == 0
+                        for row in spread_controls
+                    )
                 ),
             }
 
