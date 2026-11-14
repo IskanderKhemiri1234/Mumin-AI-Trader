@@ -25,7 +25,7 @@ WARMUP_BARS = 240
 SPLIT_DEV_END = 6958
 SPLIT_VALIDATION_END = 8449
 SPLIT_HOLDOUT_END = EXPECTED_BASE_CANDLES
-SPREADS_BPS = (Decimal("5"), Decimal("10"), Decimal("20"), Decimal("30"))
+SPREADS_BPS = (Decimal(5), Decimal(10), Decimal(20), Decimal(30))
 VARIANTS = ("baseline", "relative_volume_candidate")
 
 
@@ -75,27 +75,27 @@ def _metrics(metrics) -> dict:
 
 
 def _acceptance(holdout: list[dict]) -> dict:
-    primary = [row for row in holdout if Decimal(row["spread_bps"]) in (Decimal("5"), Decimal("10"))]
-    negative = [row for row in holdout if Decimal(row["spread_bps"]) in (Decimal("20"), Decimal("30"))]
+    primary = [row for row in holdout if Decimal(row["spread_bps"]) in (Decimal(5), Decimal(10))]
+    negative = [row for row in holdout if Decimal(row["spread_bps"]) in (Decimal(20), Decimal(30))]
     criteria: dict[str, dict] = {}
 
-    for spread in (Decimal("5"), Decimal("10")):
+    for spread in (Decimal(5), Decimal(10)):
         rows = [row for row in primary if Decimal(row["spread_bps"]) == spread]
         baseline = [row for row in rows if row["variant"] == "baseline"]
         candidate = [row for row in rows if row["variant"] == "relative_volume_candidate"]
-        baseline_pnl = sum((Decimal(row["metrics"]["net_pnl_usdt"]) for row in baseline), Decimal("0"))
-        candidate_pnl = sum((Decimal(row["metrics"]["net_pnl_usdt"]) for row in candidate), Decimal("0"))
-        baseline_dd = max((Decimal(row["metrics"]["max_drawdown_percent"]) for row in baseline), default=Decimal("0"))
-        candidate_dd = max((Decimal(row["metrics"]["max_drawdown_percent"]) for row in candidate), default=Decimal("0"))
+        baseline_pnl = sum((Decimal(row["metrics"]["net_pnl_usdt"]) for row in baseline), Decimal(0))
+        candidate_pnl = sum((Decimal(row["metrics"]["net_pnl_usdt"]) for row in candidate), Decimal(0))
+        baseline_dd = max((Decimal(row["metrics"]["max_drawdown_percent"]) for row in baseline), default=Decimal(0))
+        candidate_dd = max((Decimal(row["metrics"]["max_drawdown_percent"]) for row in candidate), default=Decimal(0))
         candidate_trades = sum(row["metrics"]["closed_trades"] for row in candidate)
         profitable_symbols = sum(
-            Decimal(row["metrics"]["net_pnl_usdt"]) > Decimal("0")
+            Decimal(row["metrics"]["net_pnl_usdt"]) > Decimal(0)
             for row in candidate
         )
         complete = len(baseline) == len(SYMBOLS) and len(candidate) == len(SYMBOLS)
         criteria[f"spread_{spread}_bps"] = {
             "candidate_positive_net_pnl": {
-                "pass": complete and candidate_pnl > Decimal("0"),
+                "pass": complete and candidate_pnl > Decimal(0),
                 "value_usdt": str(candidate_pnl),
             },
             "candidate_beats_paired_baseline": {
@@ -119,7 +119,7 @@ def _acceptance(holdout: list[dict]) -> dict:
         }
 
     negative_checks = []
-    for spread in (Decimal("20"), Decimal("30")):
+    for spread in (Decimal(20), Decimal(30)):
         rows = [row for row in negative if Decimal(row["spread_bps"]) == spread]
         zero = len(rows) == len(SYMBOLS) * len(VARIANTS) and all(
             row["metrics"]["entry_orders"] == 0 for row in rows
