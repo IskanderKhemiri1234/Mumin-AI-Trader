@@ -14,10 +14,10 @@ from mumin_trader.research.walk_forward import HistoricalCandle, _evaluate_fold
 from mumin_trader.strategy.smart_sniper import SmartSniperStrategy
 from run_binance_walk_forward import ALLOWED, HIGHER_TIMEFRAMES, fetch_history
 
-ZERO = Decimal("0")
-INITIAL_CASH = Decimal("70")
-ACTIVE_SPREADS = (Decimal("5"), Decimal("10"))
-STRESS_SPREADS = (Decimal("20"), Decimal("30"))
+ZERO = Decimal(0)
+INITIAL_CASH = Decimal(70)
+ACTIVE_SPREADS = (Decimal(5), Decimal(10))
+STRESS_SPREADS = (Decimal(20), Decimal(30))
 ROLLING_LOOKBACK = 240
 MIN_ROLLING_HISTORY = 60
 
@@ -110,7 +110,7 @@ def _atr_series(candles: list[HistoricalCandle]) -> list[Decimal]:
             values.append(ZERO)
             continue
         recent = true_ranges[-14:]
-        values.append(sum(recent, ZERO) / Decimal(len(recent)) / candle.close * Decimal("100"))
+        values.append(sum(recent, ZERO) / Decimal(len(recent)) / candle.close * Decimal(100))
     return values
 
 
