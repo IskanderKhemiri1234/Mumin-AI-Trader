@@ -80,7 +80,11 @@ class SmartSniperStrategy:
         slippage_bps_per_side: Decimal = Decimal("2"),
         minimum_net_edge_bps: Decimal = Decimal("10"),
         minimum_score: Decimal = Decimal("75"),
+        momentum_3_floor_bps: Decimal = Decimal("5"),
     ) -> None:
+        self.momentum_3_floor_bps = Decimal(momentum_3_floor_bps)
+        if not self.momentum_3_floor_bps.is_finite() or self.momentum_3_floor_bps < ZERO:
+            raise ValueError("momentum_3_floor_bps must be finite and non-negative.")
         self.buy_fee_bps = Decimal(buy_fee_bps)
         self.sell_fee_bps = Decimal(sell_fee_bps)
         self.slippage_bps_per_side = Decimal(slippage_bps_per_side)
@@ -213,7 +217,7 @@ class SmartSniperStrategy:
             chosen_score, chosen_strategy = momentum_score, "MOMENTUM"
             expected_move = momentum_12
             eligible = (
-                trend_up and momentum_3 > Decimal("5")
+                trend_up and momentum_3 > self.momentum_3_floor_bps
                 and Decimal("48") <= rsi <= Decimal("68")
             )
         else:
