@@ -4,15 +4,15 @@ import argparse
 import json
 from bisect import bisect_right
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
 import httpx
+from run_binance_walk_forward import ALLOWED, HIGHER_TIMEFRAMES, fetch_history
 
 from mumin_trader.risk.anti_loss_quantum_shield import AntiLossQuantumShield
 from mumin_trader.strategy.smart_sniper import SmartSniperStrategy, _ema, _timeframe_bullish
-from run_binance_walk_forward import ALLOWED, HIGHER_TIMEFRAMES, fetch_history
 
 ZERO = Decimal(0)
 ONE_HUNDRED = Decimal(100)
@@ -307,7 +307,7 @@ def main() -> None:
                 rejection_records.extend(records)
 
     payload = {
-        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_at_utc": datetime.now(UTC).isoformat(),
         "source": "BINANCE_PUBLIC_HISTORICAL_CLOSED_CANDLES",
         "research_only": True,
         "production_strategy_modified": False,
