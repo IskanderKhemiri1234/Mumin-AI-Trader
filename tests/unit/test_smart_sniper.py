@@ -102,3 +102,50 @@ def test_sideways_higher_timeframe_blocks_local_momentum():
     )
     assert result.signal == "HOLD"
     assert result.mtf_confluence is False
+
+
+
+def test_expected_move_buffer_ablation_changes_only_final_eligibility(monkeypatch):
+    import mumin_trader.strategy.smart_sniper as strategy_module
+
+    closes = [Decimal("100")]
+    for _ in range(51):
+        closes.append(closes[-1] * Decimal("1.001375"))
+
+    def controlled_ema(values, period):
+        if period == 21:
+            return Decimal("99")
+        return Decimal("101") if values[-1] == closes[-1] else Decimal("100")
+
+    monkeypatch.setattr(strategy_module, "_ema", controlled_ema)
+    monkeypatch.setattr(strategy_module, "_rsi", lambda values, period=14: Decimal("55"))
+    monkeypatch.setattr(strategy_module, "_timeframe_bullish", lambda values: True)
+
+    common = {
+        "spread_bps": Decimal("5"),
+        "higher_timeframe_closes": {"higher_1": closes, "higher_2": closes},
+        "atr_percent": Decimal("0.30"),
+    }
+    baseline = SmartSniperStrategy(final_expected_move_buffer_bps=Decimal("10")).assess(
+        closes, **common
+    )
+    candidate = SmartSniperStrategy(final_expected_move_buffer_bps=Decimal("5")).assess(
+        closes, **common
+    )
+
+    assert baseline.signal == "HOLD"
+    assert candidate.signal == "BUY"
+    assert baseline.score == candidate.score
+    assert baseline.strategy == candidate.strategy
+    assert baseline.risk_reward_ratio == candidate.risk_reward_ratio
+    assert baseline.target_percent == candidate.target_percent
+    assert baseline.momentum_3_bps == candidate.momentum_3_bps
+    assert baseline.momentum_12_bps == candidate.momentum_12_bps
+    assert baseline.rsi == candidate.rsi
+    assert baseline.mtf_confluence is candidate.mtf_confluence
+    assert baseline.estimated_cost_bps == candidate.estimated_cost_bps
+
+
+def test_expected_move_buffer_rejects_negative_configuration():
+    with pytest.raises(ValueError, match="non-negative"):
+        SmartSniperStrategy(final_expected_move_buffer_bps=Decimal("-0.01"))
