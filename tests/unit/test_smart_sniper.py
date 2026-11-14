@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+import pytest
+
 from mumin_trader.strategy.smart_sniper import SmartSniperStrategy
 
 
@@ -102,3 +104,48 @@ def test_sideways_higher_timeframe_blocks_local_momentum():
     )
     assert result.signal == "HOLD"
     assert result.mtf_confluence is False
+
+
+
+def test_three_candle_floor_ablation_changes_only_momentum_eligibility(monkeypatch):
+    import mumin_trader.strategy.smart_sniper as strategy_module
+
+    closes = [Decimal("100")]
+    for _ in range(42):
+        closes.append(closes[-1] * Decimal("1.001"))
+    for _ in range(9):
+        closes.append(closes[-1] * Decimal("1.002"))
+    for _ in range(3):
+        closes.append(closes[-1] * Decimal("1.0001"))
+
+    def controlled_ema(values, period):
+        if period == 21:
+            return Decimal("99")
+        return Decimal("101") if values[-1] == closes[-1] else Decimal("100")
+
+    monkeypatch.setattr(strategy_module, "_ema", controlled_ema)
+    monkeypatch.setattr(strategy_module, "_rsi", lambda values, period=14: Decimal("55"))
+    monkeypatch.setattr(strategy_module, "_timeframe_bullish", lambda values: True)
+
+    baseline = SmartSniperStrategy(momentum_3_floor_bps=Decimal("5")).assess(
+        closes, spread_bps=Decimal("5"),
+        higher_timeframe_closes={"higher_1": closes, "higher_2": closes},
+        atr_percent=Decimal("0.30"),
+    )
+    candidate = SmartSniperStrategy(momentum_3_floor_bps=Decimal("0")).assess(
+        closes, spread_bps=Decimal("5"),
+        higher_timeframe_closes={"higher_1": closes, "higher_2": closes},
+        atr_percent=Decimal("0.30"),
+    )
+
+    assert Decimal("0") < candidate.momentum_3_bps < Decimal("5")
+    assert baseline.signal == "HOLD"
+    assert candidate.signal == "BUY"
+    assert candidate.score == baseline.score
+    assert candidate.score == Decimal("90")
+    assert "Short-horizon momentum is positive." not in candidate.reasons
+
+
+def test_three_candle_floor_rejects_negative_configuration():
+    with pytest.raises(ValueError, match="momentum_3_floor_bps"):
+        SmartSniperStrategy(momentum_3_floor_bps=Decimal("-0.01"))
