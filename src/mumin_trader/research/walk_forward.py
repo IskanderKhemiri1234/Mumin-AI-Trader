@@ -98,9 +98,11 @@ def _evaluate_fold(
     enable_compounding: bool = True,
     final_expected_move_buffer_bps: Decimal = Decimal("10"),
 ) -> BacktestMetrics:
-    strategy = SmartSniperStrategy(
-        final_expected_move_buffer_bps=final_expected_move_buffer_bps
-    )
+    expected_move_buffer = Decimal(final_expected_move_buffer_bps)
+    if not expected_move_buffer.is_finite() or expected_move_buffer < ZERO:
+        raise ValueError("Expected-Move final buffer must be finite and non-negative.")
+    strategy = SmartSniperStrategy()
+    strategy.final_expected_move_buffer_bps = expected_move_buffer
     shield = AntiLossQuantumShield()
     compounding = DynamicCompoundingMatrix()
     cash = Decimal(initial_cash)
