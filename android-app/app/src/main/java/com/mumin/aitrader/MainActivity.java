@@ -22,10 +22,13 @@ import android.widget.Toast;
 public final class MainActivity extends Activity {
     private static final String REPORT_URL =
             "https://raw.githubusercontent.com/IskanderKhemiri1234/Mumin-AI-Trader/mumin-paper-ledger/latest-report.html";
+    private static final String RESEARCH_URL =
+            "https://raw.githubusercontent.com/IskanderKhemiri1234/Mumin-AI-Trader/mumin-paper-ledger/latest-research-summary.html";
 
     private WebView webView;
     private TextView statusView;
     private boolean showingOfflinePage;
+    private boolean showingResearchPage;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -53,11 +56,25 @@ public final class MainActivity extends Activity {
         brand.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         toolbar.addView(brand, new LinearLayout.LayoutParams(0, dp(42), 1));
 
+        Button research = new Button(this);
+        research.setText("البحث");
+        research.setTextColor(Color.rgb(245, 243, 233));
+        research.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(27, 59, 43)));
+        research.setOnClickListener(v -> loadResearchReport());
+        toolbar.addView(research, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(42)));
+
         Button refresh = new Button(this);
         refresh.setText("تحديث  ↻");
         refresh.setTextColor(Color.rgb(245, 243, 233));
         refresh.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(27, 59, 43)));
-        refresh.setOnClickListener(v -> loadLatestReport(true));
+        refresh.setOnClickListener(v -> {
+            if (showingResearchPage) {
+                loadResearchReport();
+            } else {
+                loadLatestReport(true);
+            }
+        });
         toolbar.addView(refresh, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, dp(42)));
 
@@ -96,14 +113,18 @@ public final class MainActivity extends Activity {
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 if (!showingOfflinePage) {
-                    statusView.setText("جارٍ جلب أحدث نسخة من فرع بيانات Paper…");
+                    statusView.setText(showingResearchPage
+                            ? "جارٍ جلب ملخص البحث التاريخي من فرع Paper…"
+                            : "جارٍ جلب أحدث نسخة من تقرير Paper…");
                 }
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
                 if (!showingOfflinePage) {
-                    statusView.setText("لوحة Paper · للقراءة فقط");
+                    statusView.setText(showingResearchPage
+                            ? "ملخص البحث التاريخي · للقراءة فقط"
+                            : "لوحة Paper · للقراءة فقط");
                 }
             }
 
@@ -131,12 +152,21 @@ public final class MainActivity extends Activity {
 
     private void loadLatestReport(boolean forceRefresh) {
         showingOfflinePage = false;
+        showingResearchPage = false;
         statusView.setText("جارٍ جلب أحدث تقرير Paper…");
         if (forceRefresh) {
             webView.clearCache(false);
             Toast.makeText(this, "جارٍ تحديث بيانات Paper", Toast.LENGTH_SHORT).show();
         }
         webView.loadUrl(REPORT_URL);
+    }
+
+    private void loadResearchReport() {
+        showingOfflinePage = false;
+        showingResearchPage = true;
+        statusView.setText("جارٍ جلب ملخص البحث التاريخي…");
+        webView.clearCache(false);
+        webView.loadUrl(RESEARCH_URL);
     }
 
     private void showOfflinePage() {

@@ -117,12 +117,24 @@ jobs:
           cp mumin-paper-ledger/mumin_public_paper.db "$RUNNER_TEMP/mumin-paper-state/"
           cp mumin-paper-ledger/latest-report.md "$RUNNER_TEMP/mumin-paper-state/"
           cp mumin-paper-ledger/latest-report.html "$RUNNER_TEMP/mumin-paper-state/"
+          if [ -f mumin-paper-ledger/latest-research-summary.json ]; then
+            cp mumin-paper-ledger/latest-research-summary.json "$RUNNER_TEMP/mumin-paper-state/"
+          fi
+          if [ -f mumin-paper-ledger/latest-research-summary.html ]; then
+            cp mumin-paper-ledger/latest-research-summary.html "$RUNNER_TEMP/mumin-paper-state/"
+          fi
           git -C mumin-paper-ledger config user.name "github-actions[bot]"
           git -C mumin-paper-ledger config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git -C mumin-paper-ledger switch --discard-changes --orphan paper-ledger-snapshot
           git -C mumin-paper-ledger clean -fdx
           cp "$RUNNER_TEMP/mumin-paper-state/"* mumin-paper-ledger/
           git -C mumin-paper-ledger add mumin_public_paper.db latest-report.md latest-report.html
+          if [ -f mumin-paper-ledger/latest-research-summary.json ]; then
+            git -C mumin-paper-ledger add latest-research-summary.json
+          fi
+          if [ -f mumin-paper-ledger/latest-research-summary.html ]; then
+            git -C mumin-paper-ledger add latest-research-summary.html
+          fi
           git -C mumin-paper-ledger commit -m "Refresh latest Paper ledger snapshot"
           git -C mumin-paper-ledger push --force origin HEAD:mumin-paper-ledger
 
@@ -134,7 +146,9 @@ jobs:
           path: |
             mumin-paper-ledger/latest-report.html
             mumin-paper-ledger/latest-report.md
-          if-no-files-found: error
+            mumin-paper-ledger/latest-research-summary.html
+            mumin-paper-ledger/latest-research-summary.json
+          if-no-files-found: warn
           retention-days: 30
 
       - name: Publish mobile report in Job Summary
@@ -150,6 +164,10 @@ jobs:
             echo "**التقرير الدائم:** [فتح أحدث ملخص Paper على GitHub]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/mumin-paper-ledger/latest-report.md)"
             echo
             echo "**لوحة HTML لهذه الدورة:** [تنزيل لوحة Paper]($REPORT_URL)"
+            if [ -f mumin-paper-ledger/latest-research-summary.html ]; then
+              echo
+              echo "**ملخص البحث التاريخي:** [$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/mumin-paper-ledger/latest-research-summary.html]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/mumin-paper-ledger/latest-research-summary.html)"
+            fi
             echo
             echo "الجدولة كل 5 دقائق هي أفضل جهد من GitHub وليست ضماناً للوقت أو التشغيل المتصل 24/7."
           } >> "$GITHUB_STEP_SUMMARY"

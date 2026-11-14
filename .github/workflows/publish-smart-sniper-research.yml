@@ -1,0 +1,155 @@
+name: Publish Smart Sniper research to Paper ledger
+
+on:
+  workflow_run:
+    workflows:
+      - Smart Sniper Historical Walk-Forward Research
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Successful research workflow run ID
+        required: true
+        type: string
+      source_run_number:
+        description: Successful research workflow run number
+        required: true
+        type: string
+      source_commit:
+        description: Exact research commit SHA
+        required: true
+        type: string
+      source_branch:
+        description: Research branch name
+        required: true
+        type: string
+      source_run_url:
+        description: GitHub Actions run URL
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: publish-smart-sniper-research
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'feature/smart-sniper-validation-final')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Resolve source run
+        id: source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+          EVENT_RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+          EVENT_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          EVENT_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          EVENT_RUN_URL: ${{ github.event.workflow_run.html_url }}
+          INPUT_RUN_ID: ${{ inputs.source_run_id }}
+          INPUT_RUN_NUMBER: ${{ inputs.source_run_number }}
+          INPUT_HEAD_SHA: ${{ inputs.source_commit }}
+          INPUT_HEAD_BRANCH: ${{ inputs.source_branch }}
+          INPUT_RUN_URL: ${{ inputs.source_run_url }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            RUN_ID="$EVENT_RUN_ID"
+            RUN_NUMBER="$EVENT_RUN_NUMBER"
+            HEAD_SHA="$EVENT_HEAD_SHA"
+            HEAD_BRANCH="$EVENT_HEAD_BRANCH"
+            RUN_URL="$EVENT_RUN_URL"
+          else
+            RUN_ID="$INPUT_RUN_ID"
+            RUN_NUMBER="$INPUT_RUN_NUMBER"
+            HEAD_SHA="$INPUT_HEAD_SHA"
+            HEAD_BRANCH="$INPUT_HEAD_BRANCH"
+            RUN_URL="$INPUT_RUN_URL"
+          fi
+          [[ "$HEAD_BRANCH" == "feature/smart-sniper-validation-final" ]]
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RUN_ID" =~ ^[0-9]+$ && "$RUN_NUMBER" =~ ^[0-9]+$ ]]
+          [[ "$RUN_URL" == https://github.com/IskanderKhemiri1234/Mumin-AI-Trader/actions/runs/* ]]
+          {
+            echo "run_id=$RUN_ID"
+            echo "run_number=$RUN_NUMBER"
+            echo "head_sha=$HEAD_SHA"
+            echo "head_branch=$HEAD_BRANCH"
+            echo "run_url=$RUN_URL"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout publisher code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download exact research artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: smart-sniper-walk-forward-${{ steps.source.outputs.run_number }}
+          run-id: ${{ steps.source.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: artifacts
+
+      - name: Validate matrix and build read-only reports
+        run: |
+          python scripts/build_research_summary.py \
+            --input-dir artifacts \
+            --output-json latest-research-summary.json \
+            --output-html latest-research-summary.html \
+            --source-run-id "${{ steps.source.outputs.run_id }}" \
+            --source-run-number "${{ steps.source.outputs.run_number }}" \
+            --source-run-url "${{ steps.source.outputs.run_url }}" \
+            --source-commit "${{ steps.source.outputs.head_sha }}" \
+            --source-branch "${{ steps.source.outputs.head_branch }}"
+
+      - name: Checkout persistent Paper ledger
+        uses: actions/checkout@v4
+        with:
+          ref: mumin-paper-ledger
+          path: ledger
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Publish summary to the read-only ledger branch
+        run: |
+          set -euo pipefail
+          cp latest-research-summary.json ledger/latest-research-summary.json
+          cp latest-research-summary.html ledger/latest-research-summary.html
+          git -C ledger config user.name "github-actions[bot]"
+          git -C ledger config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C ledger add latest-research-summary.json latest-research-summary.html
+          if git -C ledger diff --cached --quiet; then
+            echo "Research summary is unchanged; no ledger commit required."
+          else
+            git -C ledger commit -m "Publish validated Smart Sniper research summary"
+            git -C ledger push origin HEAD:mumin-paper-ledger
+          fi
+
+      - name: Publish links
+        run: |
+          {
+            echo "## Smart Sniper research published"
+            echo
+            echo "Source run: ${{ steps.source.outputs.run_url }}"
+            echo
+            echo "HTML: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/mumin-paper-ledger/latest-research-summary.html"
+            echo
+            echo "JSON: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/mumin-paper-ledger/latest-research-summary.json"
+            echo
+            echo "Paper-only; no exchange credentials or order permissions are used."
+          } >> "$GITHUB_STEP_SUMMARY"
