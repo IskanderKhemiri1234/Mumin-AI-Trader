@@ -420,11 +420,9 @@ def run_research(client: httpx.Client) -> dict:
                 "expected_move_bps >= selected_target_bps + estimated_cost_bps + 5"
             ),
             "momentum_quality_bonus": (
-                (
                 "The +10 momentum quality bonus remains awarded only when "
                 "momentum_3_bps > 5; the 10 bps minimum net edge for scoring "
                 "and 3R selection is unchanged."
-            )
             ),
             "recovery_branch": "unchanged",
             "all_other_gates": "unchanged",
