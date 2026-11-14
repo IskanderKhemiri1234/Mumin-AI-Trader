@@ -1,0 +1,48 @@
+name: Smart Sniper ATR Second Independent Holdout (1h)
+
+on:
+  push:
+    branches:
+      - research/atr-second-holdout-1h
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smart-sniper-atr-second-holdout-1h
+  cancel-in-progress: true
+
+jobs:
+  second-holdout:
+    name: Frozen 1h ATR band second out-of-sample stress test
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout isolated research branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project and research dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install . pytest pytest-asyncio ruff
+      - name: Compile and run regression checks
+        run: |
+          python -m compileall -q src scripts
+          pytest -q
+          ruff check scripts/run_atr_calibration.py scripts/run_atr_second_holdout.py
+      - name: Run the pre-registered second historical holdout
+        run: |
+          mkdir -p artifacts
+          python scripts/run_atr_second_holdout.py
+      - name: Upload second holdout report
+        uses: actions/upload-artifact@v4
+        with:
+          name: smart-sniper-atr-second-holdout-${{ github.run_number }}
+          path: artifacts/smart-sniper-atr-second-holdout-1h.json
+          if-no-files-found: error
+          retention-days: 30
