@@ -70,6 +70,7 @@ def _series_metrics(item: dict[str, Any]) -> dict[str, Any]:
         "mean_net_return_percent": decimal_text(
             sum(returns, ZERO) / Decimal(len(returns))
         ),
+        "sum_net_return_percent": sum(returns, ZERO),
         "closed_trades": sum(int(fold.get("closed_trades", 0)) for fold in folds),
         "wins": sum(int(fold.get("wins", 0)) for fold in folds),
         "losses": sum(int(fold.get("losses", 0)) for fold in folds),
@@ -157,6 +158,9 @@ def build_summary(input_dir: str | Path, metadata: dict[str, Any]) -> dict[str, 
                 for item in series
             ]
             fold_count = sum(item["fold_count"] for item in series)
+            fold_return_sum = sum(
+                (item["sum_net_return_percent"] for item in series), ZERO
+            )
             pf_values = [value for item in series for value in item["profit_factors"]]
             ordinary_pf = [
                 value for value in pf_values if ZERO < value < NO_LOSS_SENTINEL
@@ -176,7 +180,7 @@ def build_summary(input_dir: str | Path, metadata: dict[str, Any]) -> dict[str, 
                 "negative_folds": sum(item["negative_folds"] for item in series),
                 "zero_folds": sum(item["zero_folds"] for item in series),
                 "mean_net_return_percent": decimal_text(
-                    sum(returns, ZERO) / Decimal(len(returns))
+                    fold_return_sum / Decimal(fold_count)
                 ),
                 "closed_trades": sum(item["closed_trades"] for item in series),
                 "wins": sum(item["wins"] for item in series),

@@ -29,6 +29,7 @@ public final class MainActivity extends Activity {
     private TextView statusView;
     private boolean showingOfflinePage;
     private boolean showingResearchPage;
+    private Button researchButton;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -57,10 +58,17 @@ public final class MainActivity extends Activity {
         toolbar.addView(brand, new LinearLayout.LayoutParams(0, dp(42), 1));
 
         Button research = new Button(this);
+        researchButton = research;
         research.setText("البحث");
         research.setTextColor(Color.rgb(245, 243, 233));
         research.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(27, 59, 43)));
-        research.setOnClickListener(v -> loadResearchReport());
+        research.setOnClickListener(v -> {
+            if (showingResearchPage) {
+                loadLatestReport(true);
+            } else {
+                loadResearchReport();
+            }
+        });
         toolbar.addView(research, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, dp(42)));
 
@@ -153,6 +161,9 @@ public final class MainActivity extends Activity {
     private void loadLatestReport(boolean forceRefresh) {
         showingOfflinePage = false;
         showingResearchPage = false;
+        if (researchButton != null) {
+            researchButton.setText("البحث");
+        }
         statusView.setText("جارٍ جلب أحدث تقرير Paper…");
         if (forceRefresh) {
             webView.clearCache(false);
@@ -164,6 +175,9 @@ public final class MainActivity extends Activity {
     private void loadResearchReport() {
         showingOfflinePage = false;
         showingResearchPage = true;
+        if (researchButton != null) {
+            researchButton.setText("Paper");
+        }
         statusView.setText("جارٍ جلب ملخص البحث التاريخي…");
         webView.clearCache(false);
         webView.loadUrl(RESEARCH_URL);
