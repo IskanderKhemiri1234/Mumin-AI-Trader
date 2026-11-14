@@ -8,7 +8,8 @@ on:
       - "src/mumin_trader/risk/**"
       - "src/mumin_trader/research/**"
       - "src/mumin_trader/exchanges/binance/public_market_data.py"
-      - "scripts/run_binance_walk_forward.py"\n      - "scripts/run_signal_bottleneck_audit.py"
+      - "scripts/run_binance_walk_forward.py"
+      - "scripts/run_signal_bottleneck_audit.py"
       - ".github/workflows/smart-sniper-research.yml"
   workflow_dispatch:
 
@@ -50,7 +51,17 @@ jobs:
               --spread-scenarios 5,10,20,30 \
               --output "artifacts/smart-sniper-walk-forward-$interval.json"
           done
-      - name: Attribute signal and shield rejection bottlenecks\n        run: |\n          for interval in 1m 5m 1d; do\n            python scripts/run_signal_bottleneck_audit.py \\\n              --symbols BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,LINKUSDT \\\n              --interval "$interval" \\\n              --limit 10000 \\\n              --spread-scenarios 5,10,20,30 \\\n              --output "artifacts/signal-bottleneck-$interval.json"\n          done\n      - name: Upload research report
+      - name: Attribute signal and shield rejection bottlenecks
+        run: |
+          for interval in 1m 5m 1d; do
+            python scripts/run_signal_bottleneck_audit.py \
+              --symbols BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,LINKUSDT \
+              --interval "$interval" \
+              --limit 10000 \
+              --spread-scenarios 5,10,20,30 \
+              --output "artifacts/signal-bottleneck-$interval.json"
+          done
+      - name: Upload research report
         uses: actions/upload-artifact@v4
         with:
           name: smart-sniper-walk-forward-${{ github.run_number }}
