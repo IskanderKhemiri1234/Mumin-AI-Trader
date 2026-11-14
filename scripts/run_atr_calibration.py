@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -377,7 +377,7 @@ def main() -> None:
         for interval in HIGHER_TIMEFRAMES
     ]
     payload = {
-        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_at_utc": datetime.now(UTC).isoformat(),
         "source": "BINANCE_PUBLIC_CLOSED_CANDLES",
         "research_only": True,
         "production_strategy_modified": False,
