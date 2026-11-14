@@ -56,7 +56,8 @@ def audit_series(
     }
     rejection_conditions: Counter[str] = Counter()
     primary_rejections: Counter[str] = Counter()
-    shield_rejections: Counter[str] = Counter()
+    shield_market_conditions: Counter[str] = Counter()
+    shield_candidate_rejections: Counter[str] = Counter()
     modes: Counter[str] = Counter()
     signal_counts: Counter[str] = Counter()
     buy_candidates = 0
@@ -134,9 +135,23 @@ def audit_series(
         modes[shield_result.mode] += 1
         if shield_result.block_entries:
             for reason in shield_result.reasons:
-                shield_rejections[reason] += 1
-        if assessment.signal == "BUY" and not shield_result.block_entries:
-            final_entries += 1
+                shield_market_conditions[reason] += 1
+        if assessment.signal == "BUY":
+            if shield_result.block_entries:
+                for reason in shield_result.reasons:
+                    shield_candidate_rejections[reason] += 1
+            else:
+                final_entries += 1
+
+    hold_count = signal_counts["HOLD"]
+    rejection_condition_percent = {
+        key: str((Decimal(count) / Decimal(hold_count) * Decimal("100")).quantize(Decimal("0.01")))
+        for key, count in rejection_conditions.items()
+    } if hold_count else {}
+    primary_rejection_percent = {
+        key: str((Decimal(count) / Decimal(hold_count) * Decimal("100")).quantize(Decimal("0.01")))
+        for key, count in primary_rejections.items()
+    } if hold_count else {}
 
     return {
         "spread_bps": str(spread_bps),
@@ -145,9 +160,12 @@ def audit_series(
         "final_entries_after_shield": final_entries,
         "signal_counts": dict(signal_counts.most_common()),
         "strategy_rejection_conditions_overlapping": dict(rejection_conditions.most_common()),
+        "strategy_rejection_condition_percent_of_holds_overlapping": rejection_condition_percent,
         "strategy_primary_rejection_exclusive_priority": dict(primary_rejections.most_common()),
+        "strategy_primary_rejection_percent_of_holds_exclusive": primary_rejection_percent,
         "shield_modes": dict(modes),
-        "shield_rejection_reasons": dict(shield_rejections.most_common()),
+        "shield_market_condition_counts_all_candles": dict(shield_market_conditions.most_common()),
+        "shield_candidate_rejection_counts_buy_candidates_only": dict(shield_candidate_rejections.most_common()),
     }
 
 
@@ -193,7 +211,8 @@ def main() -> None:
         "results": output,
         "limitations": [
             "Spread is a fixed scenario, not archived historical order-book data.",
-            "Strategy rejection conditions are overlapping; the separate primary-rejection field assigns one first-failure category per HOLD using a documented fixed priority.",
+            "Strategy rejection conditions and their percentages are overlapping per HOLD; the separate primary-rejection field assigns one first-failure category per HOLD using a documented fixed priority.",
+            "Shield market-condition counts cover all evaluated candles; shield candidate-rejection counts cover BUY candidates only.",
             "Expected-move and score gates use the strategy assessment outputs and the current 10 bps minimum edge buffer.",
             "This audit attributes current-rule rejections; it does not prove a relaxed rule is profitable.",
             "No production thresholds or Paper execution risk limits are changed.",
