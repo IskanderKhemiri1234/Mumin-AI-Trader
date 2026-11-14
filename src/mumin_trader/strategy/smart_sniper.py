@@ -80,12 +80,22 @@ class SmartSniperStrategy:
         slippage_bps_per_side: Decimal = Decimal("2"),
         minimum_net_edge_bps: Decimal = Decimal("10"),
         minimum_score: Decimal = Decimal("75"),
+        final_momentum_rsi_min: Decimal = Decimal("48"),
+        final_momentum_rsi_max: Decimal = Decimal("68"),
     ) -> None:
         self.buy_fee_bps = Decimal(buy_fee_bps)
         self.sell_fee_bps = Decimal(sell_fee_bps)
         self.slippage_bps_per_side = Decimal(slippage_bps_per_side)
         self.minimum_net_edge_bps = Decimal(minimum_net_edge_bps)
         self.minimum_score = Decimal(minimum_score)
+        self.final_momentum_rsi_min = Decimal(final_momentum_rsi_min)
+        self.final_momentum_rsi_max = Decimal(final_momentum_rsi_max)
+        if any(not value.is_finite() for value in (
+            self.final_momentum_rsi_min, self.final_momentum_rsi_max
+        )) or not (
+            ZERO <= self.final_momentum_rsi_min <= self.final_momentum_rsi_max <= Decimal("100")
+        ):
+            raise ValueError("Final Momentum RSI eligibility band must be within 0..100.")
         if any(value < ZERO for value in (
             self.buy_fee_bps, self.sell_fee_bps, self.slippage_bps_per_side,
             self.minimum_net_edge_bps, self.minimum_score
@@ -214,12 +224,17 @@ class SmartSniperStrategy:
             expected_move = momentum_12
             eligible = (
                 trend_up and momentum_3 > Decimal("5")
-                and Decimal("48") <= rsi <= Decimal("68")
+                and self.final_momentum_rsi_min <= rsi <= self.final_momentum_rsi_max
             )
         else:
             chosen_score, chosen_strategy = recovery_score, "RECOVERY"
             expected_move = min(rebound, momentum_12)
             eligible = recovery_setup and fast > prior_fast and prices[-1] > fast
+
+        if chosen_strategy == "MOMENTUM" and not (
+            self.final_momentum_rsi_min <= rsi <= self.final_momentum_rsi_max
+        ):
+            reasons.append("Momentum RSI is outside the final eligibility band.")
 
         # Stop remains the existing 0.50% risk limit. Target is selected at
         # 2.5R or 3R; higher score selects 3R. The existing account-level
