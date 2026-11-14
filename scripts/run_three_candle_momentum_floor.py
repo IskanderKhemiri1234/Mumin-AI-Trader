@@ -194,12 +194,23 @@ def _aggregate(rows: list[dict], variant: str) -> dict:
 
 def _acceptance(baseline: dict, candidate: dict, negative_controls: dict) -> dict:
     return {
-        "candidate_aggregate_holdout_net_return_positive": Decimal(candidate["net_pnl_usdt"]) > ZERO,
-        "candidate_beats_baseline_net_return": Decimal(candidate["net_pnl_usdt"]) > Decimal(baseline["net_pnl_usdt"]),
-        "candidate_max_drawdown_not_above_baseline": Decimal(candidate["max_symbol_drawdown_percent"]) <= Decimal(baseline["max_symbol_drawdown_percent"]),
+        "candidate_aggregate_holdout_net_return_positive": (
+            Decimal(candidate["net_pnl_usdt"]) > ZERO
+        ),
+        "candidate_beats_baseline_net_return": (
+            Decimal(candidate["net_pnl_usdt"]) > Decimal(baseline["net_pnl_usdt"])
+        ),
+        "candidate_max_drawdown_not_above_baseline": (
+            Decimal(candidate["max_symbol_drawdown_percent"])
+            <= Decimal(baseline["max_symbol_drawdown_percent"])
+        ),
         "candidate_has_at_least_30_closed_trades": candidate["closed_trades"] >= 30,
-        "candidate_has_at_least_5_of_8_profitable_symbol_series": candidate["profitable_symbol_series"] >= 5,
-        "20_and_30_bps_negative_controls_zero_entries_both_variants": negative_controls["passed"],
+        "candidate_has_at_least_5_of_8_profitable_symbol_series": (
+            candidate["profitable_symbol_series"] >= 5
+        ),
+        "20_and_30_bps_negative_controls_zero_entries_both_variants": (
+            negative_controls["passed"]
+        ),
     }
 
 
@@ -212,22 +223,28 @@ def run_research(client: httpx.Client) -> dict:
     for symbol in SYMBOLS:
         base = fetch_history(client, symbol, BASE_INTERVAL, 10000)[-CANDLE_COUNT:]
         if len(base) != CANDLE_COUNT:
-            raise RuntimeError(f"{symbol}: expected exactly {CANDLE_COUNT} closed 1h candles, got {len(base)}.")
+            raise RuntimeError(
+                f"{symbol}: expected {CANDLE_COUNT} closed 1h candles, got {len(base)}."
+            )
         higher_rows = {
             slot: fetch_history(client, symbol, interval, 10000)
             for slot, interval in zip(("higher_1", "higher_2"), HIGHER_INTERVALS)
         }
+        def candle_time(index: int) -> str:
+            timestamp_ms = base[index]["timestamp_ms"]
+            return datetime.fromtimestamp(timestamp_ms / 1000, UTC).isoformat()
+
         split_metadata[symbol] = {
             "closed_1h_candles": len(base),
             "development_count": DEVELOPMENT_BARS,
             "validation_count": VALIDATION_BARS,
             "untouched_holdout_count": HOLDOUT_BARS,
-            "development_start_utc": datetime.fromtimestamp(base[0]["timestamp_ms"] / 1000, UTC).isoformat(),
-            "development_end_utc": datetime.fromtimestamp(base[DEVELOPMENT_BARS - 1]["timestamp_ms"] / 1000, UTC).isoformat(),
-            "validation_start_utc": datetime.fromtimestamp(base[DEVELOPMENT_BARS]["timestamp_ms"] / 1000, UTC).isoformat(),
-            "validation_end_utc": datetime.fromtimestamp(base[HOLDOUT_START - 1]["timestamp_ms"] / 1000, UTC).isoformat(),
-            "holdout_start_utc": datetime.fromtimestamp(base[HOLDOUT_START]["timestamp_ms"] / 1000, UTC).isoformat(),
-            "holdout_end_utc": datetime.fromtimestamp(base[-1]["timestamp_ms"] / 1000, UTC).isoformat(),
+            "development_start_utc": candle_time(0),
+            "development_end_utc": candle_time(DEVELOPMENT_BARS - 1),
+            "validation_start_utc": candle_time(DEVELOPMENT_BARS),
+            "validation_end_utc": candle_time(HOLDOUT_START - 1),
+            "holdout_start_utc": candle_time(HOLDOUT_START),
+            "holdout_end_utc": candle_time(-1),
         }
 
         for spread in SPREADS:
@@ -267,7 +284,11 @@ def run_research(client: httpx.Client) -> dict:
                 all_incremental.append({
                     "symbol": symbol,
                     "spread_bps": str(spread),
-                    **{key: value for key, value in ledger.items() if key != "incremental_signal_ledger"},
+                    **{
+                        key: value
+                        for key, value in ledger.items()
+                        if key != "incremental_signal_ledger"
+                    },
                 })
                 row["incremental_signal_ledger"] = ledger["incremental_signal_ledger"]
             if spread in (Decimal("20"), Decimal("30")):
@@ -344,12 +365,17 @@ def run_research(client: httpx.Client) -> dict:
             "validation": VALIDATION_BARS,
             "untouched_holdout": HOLDOUT_BARS,
             "holdout_start_index": HOLDOUT_START,
-            "policy": "Only the final 1491 candles are evaluated. Earlier development and validation bars are warm-up/history only; no thresholds are tuned.",
+            "policy": (
+                "Only the final 1491 candles are evaluated. Earlier development and "
+                "validation bars are warm-up/history only; no thresholds are tuned."
+            ),
         },
         "candidate_definition": {
             "baseline_momentum_3_eligibility": "momentum_3_bps > 5",
             "candidate_momentum_3_eligibility": "momentum_3_bps > 0",
-            "momentum_quality_bonus": "The +10 score bonus remains awarded only when momentum_3_bps > 5.",
+            "momentum_quality_bonus": (
+                "The +10 score bonus remains awarded only when momentum_3_bps > 5."
+            ),
             "recovery_branch": "unchanged",
             "all_other_gates": "unchanged",
         },
@@ -361,18 +387,33 @@ def run_research(client: httpx.Client) -> dict:
         "negative_controls_pass": negative_controls_pass,
         "limitations": [
             "Spread scenarios are fixed assumptions, not archived historical order-book spreads.",
-            "The 1h bars are closed Binance public market data; 4h and 1d confirmation uses only higher-timeframe close timestamps not later than each 1h close.",
+            (
+                "The 1h bars are closed Binance public market data; 4h and 1d confirmation "
+                "uses only higher-timeframe close timestamps not later than each 1h close."
+            ),
             "The final holdout is evaluated once and is not used for threshold selection.",
-            "Paper fills, fees and slippage are simulated; this is not live execution or a profitability guarantee.",
-            "The backtester evaluates stop/target exits on candle-close returns and does not reconstruct intrabar order paths.",
-            "Incremental signal ledger is a paired per-candle strategy assessment; Paper entry-order deltas can differ because positions and execution state evolve.",
+            (
+                "Paper fills, fees and slippage are simulated; this is not live execution "
+                "or a profitability guarantee."
+            ),
+            (
+                "The backtester evaluates stop/target exits on candle-close returns and "
+                "does not reconstruct intrabar order paths."
+            ),
+            (
+                "Incremental signal ledger is a paired per-candle strategy assessment; "
+                "Paper entry-order deltas can differ because positions and execution state evolve."
+            ),
         ],
     }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Paired Paper-only OOS ablation of the Smart Sniper three-candle momentum floor."
+        description=(
+            "Paired Paper-only OOS ablation of the Smart Sniper "
+            "three-candle momentum floor."
+        ),
     )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
