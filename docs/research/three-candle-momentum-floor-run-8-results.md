@@ -55,7 +55,7 @@ Candidate PnL improvement was only +0.003915 USDT at 5 bps and +0.003403 USDT at
 
 ## Incremental signal analysis
 
-At both 5 and 10 bps, only two incremental candidate BUY assessments appeared across the eight symbols: one BNBUSDT signal at 2.4869 bps three-candle momentum and one SOLUSDT signal at 4.4976 bps. Both passed the Shield. The BNBUSDT additional trade worsened that symbol's PnL; the SOLUSDT additional trade improved that symbol's PnL. No other symbol produced an incremental BUY. This explains the small aggregate improvement without a broader improvement in profitable symbol coverage.
+At both 5 and 10 bps, only two incremental candidate BUY assessments appeared across the eight symbols: one BNBUSDT signal at 2.4869 bps three-candle momentum and one SOLUSDT signal at 4.4976 bps. Both passed the Shield. On BNBUSDT, the incremental signal became an additional closed trade and worsened that symbol's PnL. On SOLUSDT, the incremental signal did not increase the closed-trade count (four remained), although the symbol's aggregate PnL improved. No other symbol produced an incremental BUY. This explains the small aggregate improvement without a broader improvement in profitable symbol coverage.
 
 At 20 and 30 bps, both variants produced zero Paper entry orders for all eight symbols.
 
