@@ -96,8 +96,9 @@ def _evaluate_fold(
     initial_cash: Decimal = INITIAL_CASH,
     enable_shield: bool = True,
     enable_compounding: bool = True,
+    enforce_mtf_hard_gate: bool = True,
 ) -> BacktestMetrics:
-    strategy = SmartSniperStrategy()
+    strategy = SmartSniperStrategy(enforce_mtf_hard_gate=enforce_mtf_hard_gate)
     shield = AntiLossQuantumShield()
     compounding = DynamicCompoundingMatrix()
     cash = Decimal(initial_cash)
@@ -345,6 +346,7 @@ def run_backtest(
     initial_cash: Decimal = INITIAL_CASH,
     enable_shield: bool = True,
     enable_compounding: bool = True,
+    enforce_mtf_hard_gate: bool = True,
     higher_timeframes: dict[str, Sequence[HistoricalCandle]] | None = None,
 ) -> BacktestMetrics:
     """Run one strictly out-of-sample test segment after an indicator warm-up."""
@@ -357,6 +359,7 @@ def run_backtest(
         candles, warmup_bars, len(candles), higher_timeframes=higher_timeframes,
         initial_cash=initial_cash, enable_shield=enable_shield,
         enable_compounding=enable_compounding,
+        enforce_mtf_hard_gate=enforce_mtf_hard_gate,
     )
 
 
@@ -369,6 +372,7 @@ def walk_forward(
     initial_cash: Decimal = INITIAL_CASH,
     enable_shield: bool = True,
     enable_compounding: bool = True,
+    enforce_mtf_hard_gate: bool = True,
     higher_timeframes: dict[str, Sequence[HistoricalCandle]] | None = None,
 ) -> WalkForwardReport:
     """Evaluate consecutive unseen windows using only earlier bars as warm-up.
@@ -389,6 +393,7 @@ def walk_forward(
                 candles, start, start + test_bars, higher_timeframes=higher_timeframes,
                 initial_cash=initial_cash, enable_shield=enable_shield,
                 enable_compounding=enable_compounding,
+                enforce_mtf_hard_gate=enforce_mtf_hard_gate,
             )
         )
         start += step_bars
