@@ -82,6 +82,7 @@ class SmartSniperStrategy:
         minimum_score: Decimal = Decimal("75"),
         final_momentum_rsi_min: Decimal = Decimal("48"),
         final_momentum_rsi_max: Decimal = Decimal("68"),
+        require_mtf_confluence: bool = True,
     ) -> None:
         self.buy_fee_bps = Decimal(buy_fee_bps)
         self.sell_fee_bps = Decimal(sell_fee_bps)
@@ -90,6 +91,7 @@ class SmartSniperStrategy:
         self.minimum_score = Decimal(minimum_score)
         self.final_momentum_rsi_min = Decimal(final_momentum_rsi_min)
         self.final_momentum_rsi_max = Decimal(final_momentum_rsi_max)
+        self.require_mtf_confluence = bool(require_mtf_confluence)
         if any(not value.is_finite() for value in (
             self.final_momentum_rsi_min, self.final_momentum_rsi_max
         )) or not (
@@ -257,7 +259,7 @@ class SmartSniperStrategy:
         if volatility < Decimal("0.08") or volatility > Decimal("1.20"):
             eligible = False
             reasons.append("Volatility is outside the accepted ATR band.")
-        if not mtf_confluence:
+        if self.require_mtf_confluence and not mtf_confluence:
             eligible = False
         if spread > Decimal("12"):
             eligible = False
