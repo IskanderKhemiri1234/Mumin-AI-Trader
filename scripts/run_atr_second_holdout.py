@@ -25,7 +25,7 @@ INTERVALS = ("1h", "4h", "1d")
 INITIAL_CASH = Decimal("70")
 # Frozen in advance: this period ends more than eight months before the
 # first calibration holdout began (2026-09-12 UTC).
-WARMUP_START = "2025-09-25T00:00:00+00:00"
+WARMUP_START = "2025-08-01T00:00:00+00:00"
 TEST_START = "2025-10-01T00:00:00+00:00"
 TEST_END = "2026-01-01T00:00:00+00:00"
 BASELINE = AtrBand("baseline_0.08_1.20", Decimal("0.08"), Decimal("1.20"))
