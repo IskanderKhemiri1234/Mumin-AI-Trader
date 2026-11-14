@@ -1,0 +1,51 @@
+name: Smart Sniper ATR Calibration (Research Only)
+
+on:
+  push:
+    branches:
+      - research/atr-calibration-oos
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smart-sniper-atr-calibration
+  cancel-in-progress: true
+
+jobs:
+  atr-calibration:
+    name: Isolated ATR calibration and sealed out-of-sample holdout
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout research branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project and research dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install . pytest ruff
+      - name: Compile research code and run regression tests
+        run: |
+          python -m compileall -q src scripts
+          pytest -q
+          ruff check src scripts
+      - name: Run isolated ATR calibration
+        run: |
+          mkdir -p artifacts
+          python scripts/run_atr_calibration.py \
+            --symbols BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,LINKUSDT \
+            --limit 10000 \
+            --output artifacts/smart-sniper-atr-calibration.json
+      - name: Upload sealed holdout report
+        uses: actions/upload-artifact@v4
+        with:
+          name: smart-sniper-atr-calibration-${{ github.run_number }}
+          path: artifacts/smart-sniper-atr-calibration.json
+          if-no-files-found: error
+          retention-days: 30
