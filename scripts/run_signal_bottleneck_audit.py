@@ -54,9 +54,11 @@ def audit_series(
         key: ([item["timestamp_ms"] for item in values], values)
         for key, values in higher_rows.items()
     }
-    strategy_rejections: Counter[str] = Counter()
+    rejection_conditions: Counter[str] = Counter()
+    primary_rejections: Counter[str] = Counter()
     shield_rejections: Counter[str] = Counter()
     modes: Counter[str] = Counter()
+    signal_counts: Counter[str] = Counter()
     buy_candidates = 0
     final_entries = 0
     evaluated = 0
@@ -77,11 +79,37 @@ def audit_series(
             atr_percent=_atr_percent(rows, index),
         )
         evaluated += 1
+        signal_counts[assessment.signal] += 1
         if assessment.signal == "BUY":
             buy_candidates += 1
-        else:
-            for reason in assessment.reasons:
-                strategy_rejections[reason] += 1
+        elif assessment.signal == "HOLD":
+            # Count actual failed gates independently. assessment.reasons also
+            # contains positive score explanations, so it is not a rejection ledger.
+            expected_move = (
+                assessment.momentum_12_bps
+                if assessment.strategy == "MOMENTUM"
+                else min(assessment.rebound_bps, assessment.momentum_12_bps)
+            )
+            failed = []
+            if spread_bps > Decimal("12"):
+                failed.append("spread_above_12_bps")
+            if not Decimal("0.08") <= assessment.atr_percent <= Decimal("1.20"):
+                failed.append("atr_outside_0.08_to_1.20_percent")
+            if not assessment.mtf_confluence:
+                failed.append("higher_timeframe_confluence_missing")
+            required_move = (
+                assessment.target_percent * Decimal("100")
+                + assessment.estimated_cost_bps + Decimal("10")
+            )
+            if expected_move < required_move:
+                failed.append("expected_move_below_target_plus_costs_and_buffer")
+            if assessment.score < Decimal("75"):
+                failed.append("quality_score_below_75")
+            if not failed:
+                failed.append("other_or_unclassified_hold")
+            for reason in failed:
+                rejection_conditions[reason] += 1
+            primary_rejections[failed[0]] += 1
 
         prior = rows[max(0, index - 20):index]
         volume_median = _median([item["quote_volume"] for item in prior])
@@ -115,7 +143,9 @@ def audit_series(
         "evaluated_closed_candles": evaluated,
         "strategy_buy_candidates_before_shield": buy_candidates,
         "final_entries_after_shield": final_entries,
-        "strategy_rejection_reasons": dict(strategy_rejections.most_common()),
+        "signal_counts": dict(signal_counts.most_common()),
+        "strategy_rejection_conditions_overlapping": dict(rejection_conditions.most_common()),
+        "strategy_primary_rejection_exclusive_priority": dict(primary_rejections.most_common()),
         "shield_modes": dict(modes),
         "shield_rejection_reasons": dict(shield_rejections.most_common()),
     }
@@ -163,6 +193,8 @@ def main() -> None:
         "results": output,
         "limitations": [
             "Spread is a fixed scenario, not archived historical order-book data.",
+            "Strategy rejection conditions are overlapping; the separate primary-rejection field assigns one first-failure category per HOLD using a documented fixed priority.",
+            "Expected-move and score gates use the strategy assessment outputs and the current 10 bps minimum edge buffer.",
             "This audit attributes current-rule rejections; it does not prove a relaxed rule is profitable.",
             "No production thresholds or Paper execution risk limits are changed.",
         ],
