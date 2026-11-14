@@ -433,7 +433,9 @@ def main() -> None:
                 "baseline_net_pnl_usdt": values["baseline"]["net_pnl_usdt"],
                 "candidate_net_pnl_usdt": values["candidate"]["net_pnl_usdt"],
                 "candidate_closed_trades": values["candidate"]["closed_trades"],
-                "candidate_profitable_symbol_series": values["candidate"]["profitable_symbol_series"],
+                "candidate_profitable_symbol_series": (
+                    values["candidate"]["profitable_symbol_series"]
+                ),
             }
             for spread, values in payload["aggregate_by_spread"].items()
         },
