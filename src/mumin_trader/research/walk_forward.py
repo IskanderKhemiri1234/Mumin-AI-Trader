@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from bisect import bisect_right
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_DOWN
-from bisect import bisect_right
-from typing import Sequence
 
 from mumin_trader.risk.anti_loss_quantum_shield import AntiLossQuantumShield, ShieldAssessment
 from mumin_trader.strategy.compounding import DynamicCompoundingMatrix
