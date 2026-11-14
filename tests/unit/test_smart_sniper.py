@@ -181,3 +181,66 @@ def test_invalid_final_momentum_rsi_band_is_rejected():
             final_momentum_rsi_min=Decimal("70"),
             final_momentum_rsi_max=Decimal("45"),
         )
+
+def test_research_mtf_switch_bypasses_only_final_veto_and_keeps_momentum_bonus():
+    closes = stronger_rising_series()
+    no_confluence = {
+        "higher_1": [Decimal("100")] * 55,
+        "higher_2": [Decimal("100")] * 55,
+    }
+    baseline = SmartSniperStrategy().assess(
+        closes, spread_bps=Decimal("2"), higher_timeframe_closes=no_confluence,
+    )
+    candidate = SmartSniperStrategy(require_mtf_confluence=False).assess(
+        closes, spread_bps=Decimal("2"), higher_timeframe_closes=no_confluence,
+    )
+    assert baseline.mtf_confluence is candidate.mtf_confluence is False
+    assert baseline.strategy == candidate.strategy == "MOMENTUM"
+    assert baseline.score == candidate.score
+    assert baseline.signal == "HOLD"
+    assert candidate.signal == "BUY"
+    assert "Missing or non-confluent 5m/15m trend confirmation." in candidate.reasons
+
+
+def test_mtf_momentum_quality_bonus_remains_25_points():
+    closes = stronger_rising_series()
+    missing = {
+        "higher_1": [Decimal("100")] * 55,
+        "higher_2": [Decimal("100")] * 55,
+    }
+    confirmed = stronger_bullish_timeframes()
+    without_bonus = SmartSniperStrategy(require_mtf_confluence=False).assess(
+        closes, spread_bps=Decimal("2"), higher_timeframe_closes=missing,
+    )
+    with_bonus = SmartSniperStrategy(require_mtf_confluence=False).assess(
+        closes, spread_bps=Decimal("2"), higher_timeframe_closes=confirmed,
+    )
+    assert with_bonus.score - without_bonus.score == Decimal("25")
+
+
+def test_research_mtf_switch_does_not_change_recovery_scoring(monkeypatch):
+    import mumin_trader.strategy.smart_sniper as strategy_module
+
+    monkeypatch.setattr(strategy_module, "_rsi", lambda values, period=14: Decimal("50"))
+    closes = [Decimal("100")] * 42 + [
+        Decimal(value) for value in ("102.8", "102", "100", "98", "97", "96", "97",
+                                     "98", "99", "100", "101", "102", "103")
+    ]
+    no_confluence = {
+        "higher_1": [Decimal("100")] * 55,
+        "higher_2": [Decimal("100")] * 55,
+    }
+    baseline = SmartSniperStrategy().assess(
+        closes, spread_bps=Decimal("2"), higher_timeframe_closes=no_confluence,
+    )
+    candidate = SmartSniperStrategy(require_mtf_confluence=False).assess(
+        closes, spread_bps=Decimal("2"), higher_timeframe_closes=no_confluence,
+    )
+    assert baseline.strategy == candidate.strategy == "RECOVERY"
+    assert baseline.score == candidate.score
+    assert baseline.rsi == candidate.rsi == Decimal("50")
+    assert "Recovery RSI is constructive." in candidate.reasons
+
+
+def test_mtf_veto_is_enabled_by_default():
+    assert SmartSniperStrategy().require_mtf_confluence is True
