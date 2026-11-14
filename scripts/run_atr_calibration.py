@@ -8,11 +8,11 @@ from decimal import Decimal
 from pathlib import Path
 
 import httpx
+from run_binance_walk_forward import ALLOWED, HIGHER_TIMEFRAMES, fetch_history
 
 import mumin_trader.research.walk_forward as walk_forward_engine
 from mumin_trader.research.walk_forward import HistoricalCandle, _evaluate_fold
 from mumin_trader.strategy.smart_sniper import SmartSniperStrategy
-from run_binance_walk_forward import ALLOWED, HIGHER_TIMEFRAMES, fetch_history
 
 ZERO = Decimal(0)
 INITIAL_CASH = Decimal(70)
