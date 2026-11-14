@@ -6,7 +6,6 @@ from decimal import Decimal
 from pathlib import Path
 
 import httpx
-
 from run_atr_calibration import (
     ACTIVE_SPREADS,
     STRESS_SPREADS,
