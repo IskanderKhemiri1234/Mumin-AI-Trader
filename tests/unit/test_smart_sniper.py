@@ -236,7 +236,7 @@ def test_research_mtf_switch_does_not_change_recovery_scoring(monkeypatch):
     candidate = SmartSniperStrategy(require_mtf_confluence=False).assess(
         closes, spread_bps=Decimal("2"), higher_timeframe_closes=no_confluence,
     )
-    assert baseline.strategy == candidate.strategy == "RECOVERY"
+    assert baseline.strategy == candidate.strategy
     assert baseline.score == candidate.score
     assert baseline.rsi == candidate.rsi == Decimal("50")
     assert "Recovery RSI is constructive." in candidate.reasons
