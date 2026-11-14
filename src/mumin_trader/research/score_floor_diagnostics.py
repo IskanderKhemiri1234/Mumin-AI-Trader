@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from mumin_trader.strategy.smart_sniper import StrategyAssessment
 
 
