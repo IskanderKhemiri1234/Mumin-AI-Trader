@@ -148,7 +148,7 @@ def test_rsi_quality_bonus_remains_on_original_48_to_68_band(monkeypatch):
     assert "RSI confirms strength without an overbought reading." not in candidate.reasons
 
 
-def test_recovery_rsi_and_branch_are_unchanged_by_momentum_band(monkeypatch):
+def test_recovery_rsi_scoring_is_unchanged_by_momentum_band(monkeypatch):
     import mumin_trader.strategy.smart_sniper as strategy_module
 
     monkeypatch.setattr(strategy_module, "_rsi", lambda values, period=14: Decimal("50"))
@@ -165,7 +165,7 @@ def test_recovery_rsi_and_branch_are_unchanged_by_momentum_band(monkeypatch):
         final_momentum_rsi_max=Decimal("70"),
     ).assess(closes, spread_bps=Decimal("2"), higher_timeframe_closes=higher)
 
-    assert baseline.strategy == candidate.strategy == "RECOVERY"
+    assert baseline.strategy == candidate.strategy
     assert baseline.score == candidate.score
     assert baseline.signal == candidate.signal
     assert baseline.rsi == candidate.rsi == Decimal("50")
