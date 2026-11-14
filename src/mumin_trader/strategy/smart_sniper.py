@@ -264,7 +264,9 @@ class SmartSniperStrategy:
             reasons.append("Spread exceeds the hard execution-quality ceiling.")
         if expected_move < target_bps + estimated_cost + self.minimum_net_edge_bps:
             eligible = False
-            reasons.append("Expected move does not cover the asymmetric target plus all estimated costs.")
+            reasons.append(
+                "Expected move does not cover the asymmetric target plus all estimated costs."
+            )
         if chosen_score < self.minimum_score:
             eligible = False
             reasons.append("Quality score is below the configured acceptance threshold.")
