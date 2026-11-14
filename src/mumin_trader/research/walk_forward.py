@@ -3,7 +3,7 @@ from __future__ import annotations
 from bisect import bisect_right
 from collections.abc import Sequence
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_DOWN
+from decimal import ROUND_DOWN, Decimal
 
 from mumin_trader.risk.anti_loss_quantum_shield import AntiLossQuantumShield, ShieldAssessment
 from mumin_trader.strategy.compounding import DynamicCompoundingMatrix
@@ -273,8 +273,10 @@ def _evaluate_fold(
                     trend_clear=assessment.mtf_confluence and assessment.regime == "BULL",
                     liquidity_high=(
                         bar.spread_bps <= Decimal("8")
-                        and volume_ratio is not None and Decimal("0.80") <= volume_ratio <= Decimal("2.50")
-                        and trade_ratio is not None and Decimal("0.80") <= trade_ratio <= Decimal("2.50")
+                        and volume_ratio is not None
+                        and Decimal("0.80") <= volume_ratio <= Decimal("2.50")
+                        and trade_ratio is not None
+                        and Decimal("0.80") <= trade_ratio <= Decimal("2.50")
                     ),
                 )
                 if enable_compounding else None
