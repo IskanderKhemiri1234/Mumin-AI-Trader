@@ -1,4 +1,5 @@
 name: Smart Sniper RSI Final Entry-Band OOS Ablation
+# CI gate re-triggered after isolated Recovery fixture correction.
 
 on:
   push:
