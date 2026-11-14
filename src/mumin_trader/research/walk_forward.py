@@ -10,14 +10,14 @@ from mumin_trader.research.liquidity_confirmation import liquidity_confirmation_
 from mumin_trader.strategy.compounding import DynamicCompoundingMatrix
 from mumin_trader.strategy.smart_sniper import SmartSniperStrategy
 
-ZERO = Decimal("0")
-BPS = Decimal("10000")
+ZERO = Decimal(0)
+BPS = Decimal(10000)
 FEE_RATE = Decimal("0.001")
-SLIPPAGE_BPS = Decimal("2")
-INITIAL_CASH = Decimal("70")
-RESERVE_CASH = Decimal("14")
+SLIPPAGE_BPS = Decimal(2)
+INITIAL_CASH = Decimal(70)
+RESERVE_CASH = Decimal(14)
 BASE_TICKET = Decimal("1.02")
-MAX_TICKET = Decimal("5")
+MAX_TICKET = Decimal(5)
 STOP_LOSS_PERCENT = Decimal("0.50")
 TAKE_PROFIT_PERCENT = Decimal("1.25")
 
@@ -86,7 +86,7 @@ def _median(values: list[Decimal]) -> Decimal | None:
     middle = len(ordered) // 2
     if len(ordered) % 2:
         return ordered[middle]
-    return (ordered[middle - 1] + ordered[middle]) / Decimal("2")
+    return (ordered[middle - 1] + ordered[middle]) / Decimal(2)
 
 
 def _evaluate_fold(
@@ -123,15 +123,15 @@ def _evaluate_fold(
     for index in range(start, end):
         bar = candles[index]
         if pending_entry is not None:
-            half_spread = bar.spread_bps / (BPS * Decimal("2"))
-            entry_fill = bar.open * (Decimal("1") + half_spread)
-            entry_fill *= Decimal("1") + SLIPPAGE_BPS / BPS
+            half_spread = bar.spread_bps / (BPS * Decimal(2))
+            entry_fill = bar.open * (Decimal(1) + half_spread)
+            entry_fill *= Decimal(1) + SLIPPAGE_BPS / BPS
             allocation = min(
                 pending_entry["allocation"],
                 max(ZERO, cash - RESERVE_CASH),
             )
             quantity = (
-                allocation / (entry_fill * (Decimal("1") + FEE_RATE))
+                allocation / (entry_fill * (Decimal(1) + FEE_RATE))
             ).quantize(Decimal("0.00000001"), rounding=ROUND_DOWN)
             entry_gross = quantity * entry_fill
             entry_fee = (entry_gross * FEE_RATE).quantize(Decimal("0.00000001"))
@@ -166,7 +166,7 @@ def _evaluate_fold(
             ))
         atr_percent = (
             sum(true_ranges[-14:], ZERO) / Decimal(len(true_ranges[-14:]))
-            / bar.close * Decimal("100")
+            / bar.close * Decimal(100)
             if true_ranges else ZERO
         )
         assessment = strategy.assess(
@@ -175,7 +175,7 @@ def _evaluate_fold(
             atr_percent=atr_percent,
         )
         prior = candles[index - 1].close if index > 0 else bar.close
-        price_change_bps = (bar.close / prior - Decimal("1")) * BPS
+        price_change_bps = (bar.close / prior - Decimal(1)) * BPS
         prior_window = candles[max(0, index - 20):index]
         median_volume = _median([item.quote_volume for item in prior_window])
         median_trades = _median([item.trade_count for item in prior_window])
@@ -212,23 +212,23 @@ def _evaluate_fold(
                 liquidity_confirmation_blocks += 1
 
         if position is not None:
-            half_spread = bar.spread_bps / (BPS * Decimal("2"))
-            exit_fill = bar.close * (Decimal("1") - half_spread)
-            exit_fill *= Decimal("1") - SLIPPAGE_BPS / BPS
+            half_spread = bar.spread_bps / (BPS * Decimal(2))
+            exit_fill = bar.close * (Decimal(1) - half_spread)
+            exit_fill *= Decimal(1) - SLIPPAGE_BPS / BPS
             quantity = position["quantity"]
             exit_gross = quantity * exit_fill
             exit_fee = (exit_gross * FEE_RATE).quantize(Decimal("0.00000001"))
             entry_cost = position["entry_gross"] + position["entry_fee"]
             net_return_percent = (
-                (exit_gross - exit_fee - entry_cost) / entry_cost * Decimal("100")
-                if entry_cost > ZERO else Decimal("-100")
+                (exit_gross - exit_fee - entry_cost) / entry_cost * Decimal(100)
+                if entry_cost > ZERO else Decimal(-100)
             )
             hard_exit = (
                 net_return_percent <= -STOP_LOSS_PERCENT
                 or net_return_percent >= position["target_percent"]
                 or assessment.signal == "SELL"
             )
-            exit_fraction = Decimal("1") if hard_exit else shield_decision.exit_fraction
+            exit_fraction = Decimal(1) if hard_exit else shield_decision.exit_fraction
             quantity_sold = (
                 quantity * exit_fraction
             ).quantize(Decimal("0.00000001"), rounding=ROUND_DOWN)
@@ -264,7 +264,7 @@ def _evaluate_fold(
             and (not enable_liquidity_confirmation or liquidity_pass)
         ):
             drawdown_percent = (
-                max(ZERO, (high_water - cash) / high_water * Decimal("100"))
+                max(ZERO, (high_water - cash) / high_water * Decimal(100))
                 if high_water > ZERO else ZERO
             )
             matrix = (
@@ -275,7 +275,7 @@ def _evaluate_fold(
                     atr_percent=assessment.atr_percent,
                     trend_clear=assessment.mtf_confluence and assessment.regime == "BULL",
                     liquidity_high=(
-                        bar.spread_bps <= Decimal("8")
+                        bar.spread_bps <= Decimal(8)
                         and volume_ratio is not None and Decimal("0.80") <= volume_ratio <= Decimal("2.50")
                         and trade_ratio is not None and Decimal("0.80") <= trade_ratio <= Decimal("2.50")
                     ),
@@ -287,7 +287,7 @@ def _evaluate_fold(
             reinvestment_budget = matrix.reinvestment_budget if matrix else ZERO
             allocation = min(MAX_TICKET, BASE_TICKET + reinvestment_budget)
             allocation = min(allocation, max(ZERO, cash - RESERVE_CASH))
-            if allocation >= Decimal("1"):
+            if allocation >= Decimal(1):
                 pending_entry = {
                     "allocation": allocation,
                     "target_percent": (
@@ -304,16 +304,16 @@ def _evaluate_fold(
         if high_water > ZERO:
             max_drawdown = max(
                 max_drawdown,
-                (high_water - marked_equity) / high_water * Decimal("100"),
+                (high_water - marked_equity) / high_water * Decimal(100),
             )
 
     # Liquidate any remaining Paper position at the final test close so every
     # fold reports realized, fee-adjusted out-of-sample equity.
     if position is not None:
         last = candles[end - 1]
-        half_spread = last.spread_bps / (BPS * Decimal("2"))
-        exit_fill = last.close * (Decimal("1") - half_spread)
-        exit_fill *= Decimal("1") - SLIPPAGE_BPS / BPS
+        half_spread = last.spread_bps / (BPS * Decimal(2))
+        exit_fill = last.close * (Decimal(1) - half_spread)
+        exit_fill *= Decimal(1) - SLIPPAGE_BPS / BPS
         gross = position["quantity"] * exit_fill
         fee = (gross * FEE_RATE).quantize(Decimal("0.00000001"))
         net_trade = gross - fee - position["entry_gross"] - position["entry_fee"]
@@ -330,16 +330,16 @@ def _evaluate_fold(
             gross_losses += abs(total_trade_net)
 
     win_rate = (
-        Decimal(wins) / Decimal(closed_trades) * Decimal("100")
+        Decimal(wins) / Decimal(closed_trades) * Decimal(100)
         if closed_trades else ZERO
     )
     profit_factor = (
         gross_wins / gross_losses if gross_losses > ZERO
-        else (None if gross_wins == ZERO else Decimal("999999"))
+        else (None if gross_wins == ZERO else Decimal(999999))
     )
     return BacktestMetrics(
         start, end, cash,
-        (cash / Decimal(initial_cash) - Decimal("1")) * Decimal("100"),
+        (cash / Decimal(initial_cash) - Decimal(1)) * Decimal(100),
         max_drawdown, closed_trades, wins, losses, win_rate,
         profit_factor, fees_paid, shield_blocks, buy_candidates,
         blocked_buy_candidates, entry_orders, liquidity_confirmation_blocks,
