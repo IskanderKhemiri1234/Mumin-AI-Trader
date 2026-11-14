@@ -260,7 +260,10 @@ def run_research(client: httpx.Client) -> dict:
             "Spread scenarios are fixed assumptions, not archived historical order-book spreads.",
             "Only fully closed higher-timeframe candles at or before each 1h close are aligned.",
             "Paper fills, fees and slippage are simulated, not live execution.",
-            "The backtester evaluates exits on candle-close returns and does not reconstruct intrabar order paths.",
+            (
+                "The backtester evaluates exits on candle-close returns and does not "
+                "reconstruct intrabar order paths."
+            ),
             "The final holdout is evaluated once and is not used for threshold selection.",
         ],
     }
@@ -287,7 +290,9 @@ def main() -> None:
                 "baseline_net_pnl_usdt": result["baseline"]["net_pnl_usdt"],
                 "candidate_net_pnl_usdt": result["candidate"]["net_pnl_usdt"],
                 "candidate_closed_trades": result["candidate"]["closed_trades"],
-                "candidate_profitable_symbol_series": result["candidate"]["profitable_symbol_series"],
+                "candidate_profitable_symbol_series": (
+                    result["candidate"]["profitable_symbol_series"]
+                ),
             }
             for spread, result in payload["aggregate_by_spread"].items()
         },
