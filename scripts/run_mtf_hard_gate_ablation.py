@@ -8,8 +8,8 @@ from decimal import Decimal
 from pathlib import Path
 
 import httpx
-
 from run_binance_walk_forward import HIGHER_TIMEFRAMES, fetch_history
+
 from mumin_trader.research.walk_forward import HistoricalCandle, run_backtest
 from mumin_trader.risk.anti_loss_quantum_shield import AntiLossQuantumShield
 from mumin_trader.strategy.smart_sniper import SmartSniperStrategy
@@ -49,7 +49,7 @@ def _median(values: list[Decimal]) -> Decimal | None:
     if len(values) != 20:
         return None
     ordered = sorted(values)
-    return (ordered[9] + ordered[10]) / Decimal("2")
+    return (ordered[9] + ordered[10]) / Decimal(2)
 
 
 def _incremental_signals(
@@ -97,7 +97,7 @@ def _incremental_signals(
             if median_trades is not None and median_trades > ZERO else None
         )
         previous_close = rows[index - 1]["close"]
-        move_bps = (bar["close"] / previous_close - Decimal("1")) * BPS
+        move_bps = (bar["close"] / previous_close - Decimal(1)) * BPS
         shield_result = shield.assess(
             spread_bps=spread,
             quote_volume_ratio=volume_ratio,
