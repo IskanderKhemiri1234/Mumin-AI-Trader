@@ -36,7 +36,7 @@
 | 10 bps | Baseline | +0.031880 USDT | 20 | 4/8 | 0.04508% | 0.040832 USDT |
 | 10 bps | Candidate | +0.052057 USDT | 14 | 4/8 | 0.02913% | 0.028612 USDT |
 
-The candidate blocked 7 otherwise eligible BUY candidates at the additional liquidity gate across the two primary spread runs per symbol/variant aggregation. The candidate reduced fees and drawdown and recorded higher aggregate holdout net PnL, but this does not override the mandatory breadth and sample-size requirements.
+The candidate blocked 7 otherwise eligible BUY candidates at the additional liquidity gate in each primary spread scenario (14 combined across the 5 and 10 bps scenarios). The candidate reduced fees and drawdown and recorded higher aggregate holdout net PnL, but this does not override the mandatory breadth and sample-size requirements.
 
 ## Six mandatory acceptance criteria
 
