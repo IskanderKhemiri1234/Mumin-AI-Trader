@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -9,6 +10,7 @@ from scripts.build_research_summary import (
     SPREADS,
     SYMBOLS,
     build_summary,
+    render_html,
 )
 
 
@@ -94,3 +96,18 @@ def test_build_summary_rejects_incomplete_matrix(tmp_path):
 
     with pytest.raises(ValueError, match="Incomplete research matrix"):
         build_summary(tmp_path, _metadata())
+
+
+def test_render_html_hides_stale_performance_metrics(tmp_path):
+    _write_complete_matrix(tmp_path)
+    summary = build_summary(tmp_path, _metadata())
+    summary["generated_at_utc"] = (
+        datetime.now(timezone.utc) - timedelta(days=8)
+    ).isoformat()
+
+    page = render_html(summary)
+
+    assert "تقرير البحث التاريخي قديم" in page
+    assert "أُخفيت جميع أرقام الأداء" in page
+    assert "0.014285" not in page
+    assert "متوسط صافي العائد/نافذة" not in page

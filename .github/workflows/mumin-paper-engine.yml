@@ -110,6 +110,16 @@ jobs:
             --db mumin-paper-ledger/mumin_public_paper.db \
             --markdown mumin-paper-ledger/latest-report.md \
             --html mumin-paper-ledger/latest-report.html
+          if [ -f mumin-paper-ledger/latest-research-summary.json ]; then
+            if ! python scripts/build_research_summary.py \
+              --refresh-html-from-json mumin-paper-ledger/latest-research-summary.json \
+              --output-html mumin-paper-ledger/latest-research-summary.html; then
+              rm -f mumin-paper-ledger/latest-research-summary.html mumin-paper-ledger/latest-research-summary.json
+              echo "::warning::Invalid research summary removed from the Android dashboard."
+            fi
+          else
+            rm -f mumin-paper-ledger/latest-research-summary.html
+          fi
 
       - name: Commit durable ledger and latest report
         run: |

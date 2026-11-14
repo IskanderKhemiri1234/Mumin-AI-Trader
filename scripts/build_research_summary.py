@@ -4,7 +4,7 @@ import argparse
 import html
 import json
 import statistics
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -314,6 +314,31 @@ def build_summary(input_dir: str | Path, metadata: dict[str, Any]) -> dict[str, 
 
 
 def render_html(summary: dict[str, Any]) -> str:
+    generated_at = datetime.fromisoformat(
+        str(summary["generated_at_utc"]).replace("Z", "+00:00")
+    ).astimezone(timezone.utc)
+    age = datetime.now(timezone.utc) - generated_at
+    if age < timedelta(0) or age > timedelta(days=7):
+        return f"""<!doctype html>
+<html lang="ar" dir="rtl">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#071713"><title>Mumin AI Trader | تقرير بحث قديم</title>
+<style>
+*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;padding:20px;background:#071713;color:#f5f3e9;font:15px/1.8 system-ui,sans-serif}}
+main{{max-width:760px;margin:5vh auto;padding:22px;border:1px solid #927b49;border-radius:20px;background:linear-gradient(145deg,#153629,#0b2119)}}
+h1{{color:#e5c982}}.warning{{padding:14px;border:1px solid #927b49;border-radius:12px;background:#302a1c;color:#f2dfad}}
+a{{color:#e5c982}}
+</style></head><body><main>
+<p style="color:#e5c982;font-weight:800">MUMIN · SMART SNIPER · PAPER ONLY</p>
+<h1>تقرير البحث التاريخي قديم</h1>
+<p class="warning">تجاوز تاريخ توليد البيانات نافذة الصلاحية البالغة 7 أيام أو أن التاريخ غير صالح. أُخفيت جميع أرقام الأداء والتغطية والصفقات والرسوم؛ لا تعتمد على نتائج قديمة كأنها حديثة.</p>
+<p>وقت توليد البيانات: {html.escape(str(summary["generated_at_utc"]))} UTC</p>
+<p>وقت النشر: {html.escape(str(summary["published_at_utc"]))} UTC</p>
+<p><a href="{html.escape(str(summary["source_run_url"]), quote=True)}">فتح تشغيل GitHub Actions المصدر</a></p>
+<p><a href="https://raw.githubusercontent.com/IskanderKhemiri1234/Mumin-AI-Trader/mumin-paper-ledger/latest-research-summary.json">فتح JSON التاريخي الكامل</a></p>
+<p>Paper فقط. لا توجد أوامر حقيقية أو أرباح مضمونة.</p>
+</main></body></html>"""
+
     def esc(value: Any) -> str:
         return html.escape(str(value), quote=True)
 
@@ -402,7 +427,7 @@ ul{{padding-inline-start:22px}}li{{margin:5px 0}}footer{{text-align:center;color
 وقت النشر: {esc(summary['published_at_utc'])} UTC<br>
 الفرع: {esc(summary['source_branch'])} · Commit: <a href="{commit_url}">{esc(summary['source_commit'][:12])}</a></p>
 <p><a href="{run_url}">فتح تشغيل GitHub Actions المصدر</a> · <a href="{json_url}">فتح ملف JSON الكامل</a></p>
-<div class="warning"><b>Paper فقط — لا توجد أوامر تداول حقيقية.</b> هذه نتائج تاريخية افتراضية وليست أرباحاً قابلة للسحب أو ضماناً للمستقبل. لا تُستخدم كإشارة شراء مباشرة.</div>
+<div class="warning"><b>Paper فقط — لا توجد أوامر تداول حقيقية.</b> هذه نتائج تاريخية افتراضية وليست أرباحاً قابلة للسحب أو ضماناً للمستقبل. لا تُستخدم كإشارة شراء مباشرة. تُخفى مؤشرات الأداء تلقائياً بعد 7 أيام من تاريخ توليد البيانات.</div>
 </header>
 <section class="panel">
 <h2>التغطية والمنهجية</h2>
@@ -436,17 +461,52 @@ ul{{padding-inline-start:22px}}li{{margin:5px 0}}footer{{text-align:center;color
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Validate and publish a read-only Smart Sniper walk-forward summary."
+        description="Validate, publish or refresh a read-only Smart Sniper research summary."
     )
-    parser.add_argument("--input-dir", required=True)
-    parser.add_argument("--output-json", required=True)
-    parser.add_argument("--output-html", required=True)
-    parser.add_argument("--source-run-id", required=True)
-    parser.add_argument("--source-run-number", required=True, type=int)
-    parser.add_argument("--source-run-url", required=True)
-    parser.add_argument("--source-commit", required=True)
-    parser.add_argument("--source-branch", required=True)
+    parser.add_argument("--input-dir")
+    parser.add_argument("--output-json")
+    parser.add_argument("--output-html")
+    parser.add_argument("--refresh-html-from-json")
+    parser.add_argument("--source-run-id")
+    parser.add_argument("--source-run-number", type=int)
+    parser.add_argument("--source-run-url")
+    parser.add_argument("--source-commit")
+    parser.add_argument("--source-branch")
     args = parser.parse_args()
+
+    if args.refresh_html_from_json:
+        if not args.output_html:
+            parser.error("--output-html is required with --refresh-html-from-json")
+        summary = json.loads(
+            Path(args.refresh_html_from_json).read_text(encoding="utf-8")
+        )
+        if (
+            summary.get("schema_version") != 1
+            or summary.get("status") != "completed"
+            or summary.get("coverage", {}).get("observed_series") != 768
+            or len(summary.get("summary_rows", [])) != 16
+        ):
+            raise ValueError("Published research summary failed schema/coverage validation.")
+        html_path = Path(args.output_html)
+        html_path.parent.mkdir(parents=True, exist_ok=True)
+        html_path.write_text(render_html(summary), encoding="utf-8")
+        print("Research HTML refreshed; stale metrics are hidden after seven days.")
+        return
+
+    required = (
+        args.input_dir,
+        args.output_json,
+        args.output_html,
+        args.source_run_id,
+        args.source_run_number,
+        args.source_run_url,
+        args.source_commit,
+        args.source_branch,
+    )
+    if any(value is None for value in required):
+        parser.error(
+            "Build mode requires --input-dir, --output-json, --output-html and all source-run metadata."
+        )
 
     summary = build_summary(args.input_dir, {
         "source_run_id": args.source_run_id,

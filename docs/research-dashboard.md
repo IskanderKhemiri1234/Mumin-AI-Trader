@@ -12,9 +12,12 @@ and publishes the derived HTML/JSON to the ledger branch. It never executes
 artifact code, reads exchange credentials, or sends orders.
 
 The Paper engine preserves both research files when it refreshes its SQLite
-snapshot. If the research artifact is missing, incomplete, or the publisher
-fails, the previous published report is left untouched; the Android app shows
-its offline/unavailable state rather than inventing data.
+snapshot and re-renders the HTML freshness state on every Paper cycle. Once
+the source data is older than seven days, all performance and coverage metrics
+are hidden while the source run and generation timestamp remain visible. If
+the JSON is missing or invalid, the HTML page is removed so Android shows its
+unavailable state rather than inventing data. A failed publisher never replaces
+a valid ledger report.
 
 The published table reports averages across independent symbol/timeframe
 series. Counts and fees are descriptive totals, not one combined account.
