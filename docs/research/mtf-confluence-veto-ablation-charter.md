@@ -73,3 +73,8 @@ A missing metric, insufficient sample, or failed criterion is a rejection, not a
 - No execution allowlist expansion or production threshold changes.
 - PR #25 remains Draft, open, and unmerged; `main` is not modified.
 - A passing research holdout is evidence for review only, not authorization to promote a candidate.
+
+
+## Final disposition — Run 7 (2026-11-14)
+
+**Status: REJECTED / FROZEN.** The sealed final holdout failed 4 of the 6 mandatory acceptance criteria at both 5 bps and 10 bps. The candidate had negative aggregate net PnL, underperformed baseline, exceeded baseline drawdown, and produced only 2/8 profitable symbol series. Only the minimum trade-count criterion and the 20/30 bps zero-entry negative controls passed. The hypothesis is closed; no further tuning or reruns are permitted. Keep the final MTF confluence veto mandatory. See [Run 7 final decision](mtf-confluence-veto-ablation-run-7-final-decision.md) and its linked immutable Actions artifact. Production default remains `require_mtf_confluence=True`; Paper-only / 70 USDT / no live orders. PR #25 remains Draft, open, and unmerged.
