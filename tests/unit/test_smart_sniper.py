@@ -244,3 +244,44 @@ def test_research_mtf_switch_does_not_change_recovery_scoring(monkeypatch):
 
 def test_mtf_veto_is_enabled_by_default():
     assert SmartSniperStrategy().require_mtf_confluence is True
+
+
+def test_mtf_recovery_quality_bonus_remains_20_points(monkeypatch):
+    import mumin_trader.strategy.smart_sniper as strategy_module
+
+    closes = [Decimal("100")] * 42 + [
+        Decimal(value) for value in ("102.8", "102", "100", "98", "97", "96", "97",
+                                     "98", "99", "100", "101", "102", "103")
+    ]
+    monkeypatch.setattr(strategy_module, "_rsi", lambda values, period=14: Decimal("50"))
+    monkeypatch.setattr(
+        strategy_module,
+        "_ema",
+        lambda values, period: (
+            Decimal("101") if period == 9 and values[-1] == closes[-1]
+            else Decimal("100") if period == 9
+            else Decimal("102")
+        ),
+    )
+    monkeypatch.setattr(
+        strategy_module,
+        "_timeframe_bullish",
+        lambda values: bool(values) and values[-1] > Decimal("150"),
+    )
+    missing = {
+        "higher_1": [Decimal("100")] * 55,
+        "higher_2": [Decimal("100")] * 55,
+    }
+    confirmed = {
+        "higher_1": [Decimal("200")] * 55,
+        "higher_2": [Decimal("200")] * 55,
+    }
+    strategy = SmartSniperStrategy(require_mtf_confluence=False)
+    without_mtf_bonus = strategy.assess(
+        closes, spread_bps=Decimal("2"), higher_timeframe_closes=missing,
+    )
+    with_mtf_bonus = strategy.assess(
+        closes, spread_bps=Decimal("2"), higher_timeframe_closes=confirmed,
+    )
+    assert without_mtf_bonus.strategy == with_mtf_bonus.strategy == "RECOVERY"
+    assert with_mtf_bonus.score - without_mtf_bonus.score == Decimal("20")
