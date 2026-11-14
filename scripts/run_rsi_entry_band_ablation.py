@@ -75,8 +75,14 @@ def _incremental_ledger(
         slot: [item["timestamp_ms"] for item in history]
         for slot, history in higher_rows.items()
     }
-    baseline = SmartSniperStrategy(final_momentum_rsi_min=BASELINE_RSI_MIN, final_momentum_rsi_max=BASELINE_RSI_MAX)
-    candidate = SmartSniperStrategy(final_momentum_rsi_min=CANDIDATE_RSI_MIN, final_momentum_rsi_max=CANDIDATE_RSI_MAX)
+    baseline = SmartSniperStrategy(
+        final_momentum_rsi_min=BASELINE_RSI_MIN,
+        final_momentum_rsi_max=BASELINE_RSI_MAX,
+    )
+    candidate = SmartSniperStrategy(
+        final_momentum_rsi_min=CANDIDATE_RSI_MIN,
+        final_momentum_rsi_max=CANDIDATE_RSI_MAX,
+    )
     shield = AntiLossQuantumShield()
     incremental: list[dict] = []
     shield_blocked = 0
@@ -181,8 +187,12 @@ def _incremental_ledger(
                 ),
                 "selected_target_bps": str(candidate_result.target_percent * Decimal("100")),
                 "estimated_cost_bps": str(candidate_result.estimated_cost_bps),
-                "baseline_rsi_eligible": BASELINE_RSI_MIN <= baseline_result.rsi <= BASELINE_RSI_MAX,
-                "candidate_rsi_eligible": CANDIDATE_RSI_MIN <= candidate_result.rsi <= CANDIDATE_RSI_MAX,
+                "baseline_rsi_eligible": (
+                    BASELINE_RSI_MIN <= baseline_result.rsi <= BASELINE_RSI_MAX
+                ),
+                "candidate_rsi_eligible": (
+                    CANDIDATE_RSI_MIN <= candidate_result.rsi <= CANDIDATE_RSI_MAX
+                ),
                 "baseline_rsi_band": ["48", "68"],
                 "candidate_rsi_band": ["45", "70"],
                 "baseline_signal": baseline_result.signal,
