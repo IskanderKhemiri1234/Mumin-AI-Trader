@@ -54,10 +54,10 @@ def test_liquidity_confirmation_is_disabled_by_default_and_only_blocks_candidate
     import mumin_trader.research.walk_forward as research
 
     class AlwaysBuy:
-        def assess(self, closes, spread_bps=Decimal("0"), **kwargs):
+        def assess(self, closes, spread_bps=Decimal(0), **kwargs):
             return SimpleNamespace(
                 signal="BUY",
-                score=Decimal("95"),
+                score=Decimal(95),
                 regime="BULL",
                 mtf_confluence=True,
                 atr_percent=Decimal("0.30"),
@@ -66,11 +66,11 @@ def test_liquidity_confirmation_is_disabled_by_default_and_only_blocks_candidate
 
     monkeypatch.setattr(research, "SmartSniperStrategy", AlwaysBuy)
     series = []
-    price = Decimal("100")
+    price = Decimal(100)
     for index in range(110):
         price *= Decimal("1.002")
-        volume = Decimal("700") if index == 60 else Decimal("1000")
-        trades = Decimal("700") if index == 60 else Decimal("1000")
+        volume = Decimal(700) if index == 60 else Decimal(1000)
+        trades = Decimal(700) if index == 60 else Decimal(1000)
         series.append(research.HistoricalCandle(
             timestamp_ms=1_800_000_000_000 + index * 60_000,
             open=price * Decimal("0.999"),
@@ -79,7 +79,7 @@ def test_liquidity_confirmation_is_disabled_by_default_and_only_blocks_candidate
             close=price,
             quote_volume=volume,
             trade_count=trades,
-            spread_bps=Decimal("2"),
+            spread_bps=Decimal(2),
         ))
 
     baseline = research.run_backtest(series, warmup_bars=60)
