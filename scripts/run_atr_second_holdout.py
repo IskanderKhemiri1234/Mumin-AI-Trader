@@ -17,12 +17,13 @@ from run_atr_calibration import (
     _metrics_payload,
 )
 from run_binance_walk_forward import ALLOWED
+
 from mumin_trader.research.walk_forward import HistoricalCandle
 
 BASE_URL = "https://data-api.binance.vision"
 SYMBOLS = tuple(sorted(ALLOWED))
 INTERVALS = ("1h", "4h", "1d")
-INITIAL_CASH = Decimal("70")
+INITIAL_CASH = Decimal(70)
 # Frozen in advance: this period ends more than eight months before the
 # first calibration holdout began (2026-09-12 UTC).
 WARMUP_START = "2025-08-01T00:00:00+00:00"
@@ -130,7 +131,7 @@ def main() -> None:
             raise RuntimeError(f"Historical 1h data ends early for {symbol}.")
 
         atr_values = _atr_series([
-            HistoricalCandle(**row, spread_bps=Decimal("5")) for row in raw
+            HistoricalCandle(**row, spread_bps=Decimal(5)) for row in raw
         ])
         for spread in (*ACTIVE_SPREADS, *STRESS_SPREADS):
             candles = [
