@@ -14,14 +14,14 @@ from mumin_trader.risk.anti_loss_quantum_shield import AntiLossQuantumShield
 from mumin_trader.strategy.smart_sniper import SmartSniperStrategy, _ema
 from run_binance_walk_forward import ALLOWED, HIGHER_TIMEFRAMES, fetch_history
 
-ZERO = Decimal("0")
-ONE_HUNDRED = Decimal("100")
-BPS = Decimal("10000")
+ZERO = Decimal(0)
+ONE_HUNDRED = Decimal(100)
+BPS = Decimal(10000)
 ATR_MIN = Decimal("0.08")
 ATR_MAX = Decimal("1.20")
-SPREAD_MAX = Decimal("12")
-MINIMUM_SCORE = Decimal("75")
-MINIMUM_NET_EDGE_BPS = Decimal("10")
+SPREAD_MAX = Decimal(12)
+MINIMUM_SCORE = Decimal(75)
+MINIMUM_NET_EDGE_BPS = Decimal(10)
 
 
 def _atr_percent(rows: list[dict], index: int) -> Decimal:
@@ -65,14 +65,14 @@ def _local_setup_failures(
     if assessment.strategy == "MOMENTUM":
         if assessment.regime != "BULL":
             failures.append("momentum_local_trend_not_bullish")
-        if assessment.momentum_3_bps <= Decimal("5"):
+        if assessment.momentum_3_bps <= Decimal(5):
             failures.append("momentum_3_bps_not_above_5")
-        if not Decimal("48") <= assessment.rsi <= Decimal("68"):
+        if not Decimal(48) <= assessment.rsi <= Decimal(68):
             failures.append("momentum_rsi_outside_48_68")
     elif assessment.strategy == "RECOVERY":
         if not (
-            assessment.drawdown_12_bps <= Decimal("-150")
-            and assessment.rebound_bps >= Decimal("60")
+            assessment.drawdown_12_bps <= Decimal(-150)
+            and assessment.rebound_bps >= Decimal(60)
         ):
             failures.append("recovery_pullback_rebound_setup_missing")
         if not (fast > prior_fast and closes[-1] > fast):
@@ -173,7 +173,7 @@ def diagnose_series(
             middle = len(values) // 2
             return (
                 values[middle] if len(values) % 2
-                else (values[middle - 1] + values[middle]) / Decimal("2")
+                else (values[middle - 1] + values[middle]) / Decimal(2)
             )
 
         volume_median = median(volume_values)
@@ -187,7 +187,7 @@ def diagnose_series(
             if trades_median is not None and trades_median > ZERO else None
         )
         previous_close = rows[index - 1]["close"]
-        move_bps = (bar["close"] / previous_close - Decimal("1")) * BPS
+        move_bps = (bar["close"] / previous_close - Decimal(1)) * BPS
         shield_result = shield.assess(
             spread_bps=spread_bps,
             quote_volume_ratio=volume_ratio,
