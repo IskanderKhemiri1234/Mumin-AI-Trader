@@ -8,13 +8,13 @@ from decimal import Decimal
 from pathlib import Path
 
 import httpx
+from run_binance_walk_forward import ALLOWED, fetch_history
 
 from mumin_trader.research.walk_forward import (
     INITIAL_CASH,
     HistoricalCandle,
     run_backtest,
 )
-from run_binance_walk_forward import ALLOWED, fetch_history
 
 SYMBOLS = (
     "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
