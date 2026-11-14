@@ -49,3 +49,37 @@ jobs:
           src/mumin_trader/research/walk_forward.py
           tests/unit/test_liquidity_confirmation.py
           scripts/run_liquidity_confirmation_holdout.py
+
+  paired-sealed-holdout:
+    name: Paired 70/15/15 Paper holdout
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout the exact quality-gated commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+      - name: Run paired development, validation, and one sealed holdout evaluation
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          python scripts/run_liquidity_confirmation_holdout.py \
+            --output artifacts/liquidity-confirmation-holdout.json
+      - name: Upload immutable research ledger
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: liquidity-confirmation-holdout-${{ github.sha }}
+          path: artifacts/liquidity-confirmation-holdout.json
+          if-no-files-found: warn
+          retention-days: 90
