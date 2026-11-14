@@ -10,6 +10,7 @@ on:
       - "scripts/**"
       - "pyproject.toml"
       - ".github/workflows/liquidity-confirmation-quality.yml"
+      - ".github/workflows/liquidity-confirmation-holdout.yml"
   workflow_dispatch:
 
 permissions:
