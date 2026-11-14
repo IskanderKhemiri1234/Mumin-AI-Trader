@@ -250,8 +250,8 @@ def test_mtf_recovery_quality_bonus_remains_20_points(monkeypatch):
     import mumin_trader.strategy.smart_sniper as strategy_module
 
     closes = [Decimal("100")] * 42 + [
-        Decimal(value) for value in ("102.8", "102", "100", "98", "97", "96", "97",
-                                     "98", "99", "100", "101", "102", "103")
+        Decimal(value) for value in ("90", "102.8", "102", "100", "98", "97", "96",
+                                     "97", "98", "99", "100", "101", "102.5")
     ]
     monkeypatch.setattr(strategy_module, "_rsi", lambda values, period=14: Decimal("50"))
     monkeypatch.setattr(
