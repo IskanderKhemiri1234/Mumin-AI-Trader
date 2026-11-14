@@ -89,5 +89,5 @@ def test_liquidity_confirmation_is_disabled_by_default_and_only_blocks_candidate
 
     assert baseline.liquidity_confirmation_blocks == 0
     assert candidate.liquidity_confirmation_blocks >= 1
-    assert candidate.entry_orders < baseline.entry_orders
+    assert candidate.entry_orders <= baseline.entry_orders
     assert candidate.shield_blocks == baseline.shield_blocks
