@@ -1,0 +1,46 @@
+name: Liquidity Confirmation - Quality Gates
+
+on:
+  push:
+    branches:
+      - research/liquidity-confirmation-ablation
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - ".github/workflows/liquidity-confirmation-quality.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: liquidity-confirmation-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Compile, full Pytest, and Ruff
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout isolated research branch
+        uses: actions/checkout@v4
+        with:
+          ref: research/liquidity-confirmation-ablation
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project and development tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Compile all source and research scripts
+        run: python -m compileall -q src scripts
+      - name: Run complete Pytest suite
+        run: pytest -q
+      - name: Run Ruff across source, tests, and scripts
+        run: ruff check src tests scripts
