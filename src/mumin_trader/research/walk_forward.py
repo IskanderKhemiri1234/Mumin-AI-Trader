@@ -6,6 +6,7 @@ from bisect import bisect_right
 from typing import Sequence
 
 from mumin_trader.risk.anti_loss_quantum_shield import AntiLossQuantumShield, ShieldAssessment
+from mumin_trader.research.liquidity_confirmation import liquidity_confirmation_passes
 from mumin_trader.strategy.compounding import DynamicCompoundingMatrix
 from mumin_trader.strategy.smart_sniper import SmartSniperStrategy
 
@@ -66,6 +67,7 @@ class BacktestMetrics:
     buy_candidates: int
     blocked_buy_candidates: int
     entry_orders: int
+    liquidity_confirmation_blocks: int
     compounding_reinvested: Decimal
 
 
@@ -96,6 +98,7 @@ def _evaluate_fold(
     initial_cash: Decimal = INITIAL_CASH,
     enable_shield: bool = True,
     enable_compounding: bool = True,
+    enable_liquidity_confirmation: bool = False,
 ) -> BacktestMetrics:
     strategy = SmartSniperStrategy()
     shield = AntiLossQuantumShield()
@@ -107,6 +110,7 @@ def _evaluate_fold(
     max_drawdown = ZERO
     closed_trades = wins = losses = shield_blocks = 0
     buy_candidates = blocked_buy_candidates = entry_orders = 0
+    liquidity_confirmation_blocks = 0
     gross_wins = gross_losses = ZERO
     compounding_reinvested = ZERO
     position: dict[str, Decimal] | None = None
@@ -199,10 +203,13 @@ def _evaluate_fold(
 
         if shield_decision.block_entries:
             shield_blocks += 1
+        liquidity_pass = liquidity_confirmation_passes(volume_ratio, trade_ratio)
         if assessment.signal == "BUY":
             buy_candidates += 1
             if shield_decision.block_entries:
                 blocked_buy_candidates += 1
+            elif enable_liquidity_confirmation and not liquidity_pass:
+                liquidity_confirmation_blocks += 1
 
         if position is not None:
             half_spread = bar.spread_bps / (BPS * Decimal("2"))
@@ -254,6 +261,7 @@ def _evaluate_fold(
         if (
             position is None and pending_entry is None
             and assessment.signal == "BUY" and not shield_decision.block_entries
+            and (not enable_liquidity_confirmation or liquidity_pass)
         ):
             drawdown_percent = (
                 max(ZERO, (high_water - cash) / high_water * Decimal("100"))
@@ -334,7 +342,8 @@ def _evaluate_fold(
         (cash / Decimal(initial_cash) - Decimal("1")) * Decimal("100"),
         max_drawdown, closed_trades, wins, losses, win_rate,
         profit_factor, fees_paid, shield_blocks, buy_candidates,
-        blocked_buy_candidates, entry_orders, compounding_reinvested,
+        blocked_buy_candidates, entry_orders, liquidity_confirmation_blocks,
+        compounding_reinvested,
     )
 
 
@@ -345,6 +354,7 @@ def run_backtest(
     initial_cash: Decimal = INITIAL_CASH,
     enable_shield: bool = True,
     enable_compounding: bool = True,
+    enable_liquidity_confirmation: bool = False,
     higher_timeframes: dict[str, Sequence[HistoricalCandle]] | None = None,
 ) -> BacktestMetrics:
     """Run one strictly out-of-sample test segment after an indicator warm-up."""
@@ -357,6 +367,7 @@ def run_backtest(
         candles, warmup_bars, len(candles), higher_timeframes=higher_timeframes,
         initial_cash=initial_cash, enable_shield=enable_shield,
         enable_compounding=enable_compounding,
+        enable_liquidity_confirmation=enable_liquidity_confirmation,
     )
 
 
@@ -369,6 +380,7 @@ def walk_forward(
     initial_cash: Decimal = INITIAL_CASH,
     enable_shield: bool = True,
     enable_compounding: bool = True,
+    enable_liquidity_confirmation: bool = False,
     higher_timeframes: dict[str, Sequence[HistoricalCandle]] | None = None,
 ) -> WalkForwardReport:
     """Evaluate consecutive unseen windows using only earlier bars as warm-up.
@@ -389,6 +401,7 @@ def walk_forward(
                 candles, start, start + test_bars, higher_timeframes=higher_timeframes,
                 initial_cash=initial_cash, enable_shield=enable_shield,
                 enable_compounding=enable_compounding,
+                enable_liquidity_confirmation=enable_liquidity_confirmation,
             )
         )
         start += step_bars
