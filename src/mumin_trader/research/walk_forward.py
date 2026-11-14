@@ -96,8 +96,13 @@ def _evaluate_fold(
     initial_cash: Decimal = INITIAL_CASH,
     enable_shield: bool = True,
     enable_compounding: bool = True,
+    final_momentum_rsi_min: Decimal = Decimal("48"),
+    final_momentum_rsi_max: Decimal = Decimal("68"),
 ) -> BacktestMetrics:
-    strategy = SmartSniperStrategy()
+    strategy = SmartSniperStrategy(
+        final_momentum_rsi_min=final_momentum_rsi_min,
+        final_momentum_rsi_max=final_momentum_rsi_max,
+    )
     shield = AntiLossQuantumShield()
     compounding = DynamicCompoundingMatrix()
     cash = Decimal(initial_cash)
@@ -346,6 +351,8 @@ def run_backtest(
     enable_shield: bool = True,
     enable_compounding: bool = True,
     higher_timeframes: dict[str, Sequence[HistoricalCandle]] | None = None,
+    final_momentum_rsi_min: Decimal = Decimal("48"),
+    final_momentum_rsi_max: Decimal = Decimal("68"),
 ) -> BacktestMetrics:
     """Run one strictly out-of-sample test segment after an indicator warm-up."""
     if warmup_bars < 30 or len(candles) <= warmup_bars:
@@ -357,6 +364,8 @@ def run_backtest(
         candles, warmup_bars, len(candles), higher_timeframes=higher_timeframes,
         initial_cash=initial_cash, enable_shield=enable_shield,
         enable_compounding=enable_compounding,
+        final_momentum_rsi_min=final_momentum_rsi_min,
+        final_momentum_rsi_max=final_momentum_rsi_max,
     )
 
 
