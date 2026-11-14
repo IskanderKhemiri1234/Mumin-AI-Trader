@@ -334,6 +334,7 @@ a{{color:#e5c982}}
 <p class="warning">تجاوز تاريخ توليد البيانات نافذة الصلاحية البالغة 7 أيام أو أن التاريخ غير صالح. أُخفيت جميع أرقام الأداء والتغطية والصفقات والرسوم؛ لا تعتمد على نتائج قديمة كأنها حديثة.</p>
 <p>وقت توليد البيانات: {html.escape(str(summary["generated_at_utc"]))} UTC</p>
 <p>وقت النشر: {html.escape(str(summary["published_at_utc"]))} UTC</p>
+<p>مصدر البيانات: {html.escape(str(summary["source"]))}</p>
 <p><a href="{html.escape(str(summary["source_run_url"]), quote=True)}">فتح تشغيل GitHub Actions المصدر</a></p>
 <p><a href="https://raw.githubusercontent.com/IskanderKhemiri1234/Mumin-AI-Trader/mumin-paper-ledger/latest-research-summary.json">فتح JSON التاريخي الكامل</a></p>
 <p>Paper فقط. لا توجد أوامر حقيقية أو أرباح مضمونة.</p>
@@ -425,6 +426,7 @@ ul{{padding-inline-start:22px}}li{{margin:5px 0}}footer{{text-align:center;color
 </div>
 <p class="muted">وقت توليد البيانات: {esc(summary['generated_at_utc'])} UTC<br>
 وقت النشر: {esc(summary['published_at_utc'])} UTC<br>
+مصدر البيانات: {esc(summary['source'])}<br>
 الفرع: {esc(summary['source_branch'])} · Commit: <a href="{commit_url}">{esc(summary['source_commit'][:12])}</a></p>
 <p><a href="{run_url}">فتح تشغيل GitHub Actions المصدر</a> · <a href="{json_url}">فتح ملف JSON الكامل</a></p>
 <div class="warning"><b>Paper فقط — لا توجد أوامر تداول حقيقية.</b> هذه نتائج تاريخية افتراضية وليست أرباحاً قابلة للسحب أو ضماناً للمستقبل. لا تُستخدم كإشارة شراء مباشرة. تُخفى مؤشرات الأداء تلقائياً بعد 7 أيام من تاريخ توليد البيانات.</div>
