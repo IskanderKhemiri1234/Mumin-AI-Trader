@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from decimal import Decimal, ROUND_DOWN
 from bisect import bisect_right
 from collections.abc import Sequence
+from dataclasses import dataclass
+from decimal import ROUND_DOWN, Decimal
 
-from mumin_trader.risk.anti_loss_quantum_shield import AntiLossQuantumShield, ShieldAssessment
 from mumin_trader.research.liquidity_confirmation import liquidity_confirmation_passes
+from mumin_trader.risk.anti_loss_quantum_shield import AntiLossQuantumShield, ShieldAssessment
 from mumin_trader.strategy.compounding import DynamicCompoundingMatrix
 from mumin_trader.strategy.smart_sniper import SmartSniperStrategy
 
