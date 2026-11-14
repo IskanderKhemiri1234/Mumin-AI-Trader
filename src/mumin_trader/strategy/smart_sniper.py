@@ -80,15 +80,18 @@ class SmartSniperStrategy:
         slippage_bps_per_side: Decimal = Decimal("2"),
         minimum_net_edge_bps: Decimal = Decimal("10"),
         minimum_score: Decimal = Decimal("75"),
+        final_expected_move_buffer_bps: Decimal = Decimal("10"),
     ) -> None:
         self.buy_fee_bps = Decimal(buy_fee_bps)
         self.sell_fee_bps = Decimal(sell_fee_bps)
         self.slippage_bps_per_side = Decimal(slippage_bps_per_side)
         self.minimum_net_edge_bps = Decimal(minimum_net_edge_bps)
         self.minimum_score = Decimal(minimum_score)
+        self.final_expected_move_buffer_bps = Decimal(final_expected_move_buffer_bps)
         if any(value < ZERO for value in (
             self.buy_fee_bps, self.sell_fee_bps, self.slippage_bps_per_side,
-            self.minimum_net_edge_bps, self.minimum_score
+            self.minimum_net_edge_bps, self.minimum_score,
+            self.final_expected_move_buffer_bps,
         )):
             raise ValueError("Strategy cost and score thresholds must be non-negative.")
         if self.minimum_score > Decimal("100"):
@@ -247,7 +250,7 @@ class SmartSniperStrategy:
         if spread > Decimal("12"):
             eligible = False
             reasons.append("Spread exceeds the hard execution-quality ceiling.")
-        if expected_move < target_bps + estimated_cost + self.minimum_net_edge_bps:
+        if expected_move < target_bps + estimated_cost + self.final_expected_move_buffer_bps:
             eligible = False
             reasons.append("Expected move does not cover the asymmetric target plus all estimated costs.")
         if chosen_score < self.minimum_score:
