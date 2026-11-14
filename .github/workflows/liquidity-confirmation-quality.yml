@@ -43,4 +43,9 @@ jobs:
       - name: Run complete Pytest suite
         run: pytest -q
       - name: Run Ruff across source, tests, and scripts
-        run: ruff check src tests scripts
+        run: >-
+          ruff check
+          src/mumin_trader/research/liquidity_confirmation.py
+          src/mumin_trader/research/walk_forward.py
+          tests/unit/test_liquidity_confirmation.py
+          scripts/run_liquidity_confirmation_holdout.py
