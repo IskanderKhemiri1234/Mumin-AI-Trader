@@ -79,6 +79,14 @@ def _incremental_ledger(
     incremental: list[dict] = []
     shield_blocked = 0
     shield_passed = 0
+    overlap_counts = {
+        "baseline_expected_move_failures": 0,
+        "candidate_expected_move_failures": 0,
+        "baseline_expected_move_and_mtf_failures": 0,
+        "baseline_expected_move_and_atr_failures": 0,
+        "baseline_expected_move_and_spread_failures": 0,
+        "baseline_expected_move_and_score_failures": 0,
+    }
 
     for index in range(HOLDOUT_START, CANDLE_COUNT):
         bar = base[index]
@@ -90,6 +98,23 @@ def _incremental_ledger(
         )
         candidate_result = candidate.assess(
             closes, spread_bps=spread, higher_timeframe_closes=aligned, atr_percent=atr
+        )
+        expected_reason = "Expected move does not cover the asymmetric target plus all estimated costs."
+        baseline_expected_failure = expected_reason in baseline_result.reasons
+        candidate_expected_failure = expected_reason in candidate_result.reasons
+        overlap_counts["baseline_expected_move_failures"] += int(baseline_expected_failure)
+        overlap_counts["candidate_expected_move_failures"] += int(candidate_expected_failure)
+        overlap_counts["baseline_expected_move_and_mtf_failures"] += int(
+            baseline_expected_failure and not baseline_result.mtf_confluence
+        )
+        overlap_counts["baseline_expected_move_and_atr_failures"] += int(
+            baseline_expected_failure and not Decimal("0.08") <= baseline_result.atr_percent <= Decimal("1.20")
+        )
+        overlap_counts["baseline_expected_move_and_spread_failures"] += int(
+            baseline_expected_failure and spread > Decimal("12")
+        )
+        overlap_counts["baseline_expected_move_and_score_failures"] += int(
+            baseline_expected_failure and baseline_result.score < Decimal("75")
         )
         if baseline_result.signal == "HOLD" and candidate_result.signal == "BUY":
             previous_close = base[index - 1]["close"]
@@ -134,8 +159,21 @@ def _incremental_ledger(
                 "rsi": str(candidate_result.rsi),
                 "mtf_confluence": candidate_result.mtf_confluence,
                 "atr_percent": str(candidate_result.atr_percent),
-                "expected_move_bps": str(candidate_result.momentum_12_bps),
+                "expected_move_bps": str(
+                    candidate_result.momentum_12_bps
+                    if candidate_result.strategy == "MOMENTUM"
+                    else min(candidate_result.rebound_bps, candidate_result.momentum_12_bps)
+                ),
+                "selected_target_bps": str(candidate_result.target_percent * Decimal("100")),
                 "estimated_cost_bps": str(candidate_result.estimated_cost_bps),
+                "baseline_final_required_move_bps": str(
+                    baseline_result.target_percent * Decimal("100")
+                    + baseline_result.estimated_cost_bps + BASELINE_BUFFER
+                ),
+                "candidate_final_required_move_bps": str(
+                    candidate_result.target_percent * Decimal("100")
+                    + candidate_result.estimated_cost_bps + CANDIDATE_BUFFER
+                ),
                 "baseline_signal": baseline_result.signal,
                 "candidate_signal": candidate_result.signal,
                 "candidate_reasons": list(candidate_result.reasons),
@@ -144,6 +182,7 @@ def _incremental_ledger(
             })
 
     return {
+        **overlap_counts,
         "incremental_buy_signals_before_shield": len(incremental),
         "incremental_signals_blocked_by_shield": shield_blocked,
         "incremental_signals_passed_by_shield": shield_passed,
@@ -273,8 +312,8 @@ def run_research(client: httpx.Client) -> dict:
             row = {
                 "symbol": symbol,
                 "spread_bps": str(spread),
-                "baseline_final_expected_move_buffer": "> 5 bps",
-                "candidate_final_expected_move_buffer": "> 0 bps",
+                "baseline_final_expected_move_buffer": "10 bps",
+                "candidate_final_expected_move_buffer": "5 bps",
                 "baseline": _metrics_dict(baseline_metrics),
                 "candidate": _metrics_dict(candidate_metrics),
             }
@@ -371,8 +410,8 @@ def run_research(client: httpx.Client) -> dict:
             ),
         },
         "candidate_definition": {
-            "baseline_final_expected_move_buffer": "momentum_3_bps > 5",
-            "candidate_final_expected_move_buffer": "momentum_3_bps > 0",
+            "baseline_final_expected_move_buffer": "expected_move_bps >= selected_target_bps + estimated_cost_bps + 10",
+            "candidate_final_expected_move_buffer": "expected_move_bps >= selected_target_bps + estimated_cost_bps + 5",
             "momentum_quality_bonus": (
                 "The +10 momentum quality bonus remains awarded only when momentum_3_bps > 5; the 10 bps minimum net edge for scoring and 3R selection is unchanged."
             ),
@@ -412,7 +451,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Paired Paper-only OOS ablation of the Smart Sniper "
-            "three-candle Expected-Move buffer."
+            "final Expected-Move eligibility buffer."
         ),
     )
     parser.add_argument("--output", type=Path, required=True)
