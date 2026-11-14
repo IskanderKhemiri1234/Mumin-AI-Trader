@@ -81,6 +81,9 @@ def test_research_engine_executes_seed_ticket_and_reinvests_only_realized_profit
     import mumin_trader.research.walk_forward as research
 
     class AlwaysBuy:
+        def __init__(self, **kwargs):
+            pass
+
         def assess(self, closes, spread_bps=Decimal("0"), **kwargs):
             return SimpleNamespace(
                 signal="BUY", score=Decimal("95"), regime="BULL",
@@ -115,6 +118,9 @@ def test_walk_forward_ablation_measures_shield_and_compounding_effects(monkeypat
     import mumin_trader.research.walk_forward as research
 
     class AlwaysBuy:
+        def __init__(self, **kwargs):
+            pass
+
         def assess(self, closes, spread_bps=Decimal("0"), **kwargs):
             return SimpleNamespace(
                 signal="BUY", score=Decimal("95"), regime="BULL",
