@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -217,7 +217,7 @@ def main() -> None:
 
     holdout = [row for row in results if row["segment"] == "sealed_holdout"]
     payload = {
-        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_at_utc": datetime.now(UTC).isoformat(),
         "source_commit_sha": __import__("os").environ.get("GITHUB_SHA", "local-unpinned"),
         "research_only": True,
         "paper_only": True,
