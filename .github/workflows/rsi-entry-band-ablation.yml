@@ -1,5 +1,5 @@
 name: Smart Sniper RSI Final Entry-Band OOS Ablation
-# CI gate re-triggered after Recovery score assertion correction.
+# Final quality-gate rerun after Ruff import-order correction.
 
 on:
   push:
