@@ -9,8 +9,8 @@ from decimal import Decimal
 from pathlib import Path
 
 import httpx
+from run_binance_walk_forward import fetch_history
 
-from run_binance_walk_forward import ALLOWED, fetch_history
 from mumin_trader.research.walk_forward import HistoricalCandle, run_backtest
 from mumin_trader.risk.anti_loss_quantum_shield import AntiLossQuantumShield
 from mumin_trader.strategy.smart_sniper import SmartSniperStrategy
