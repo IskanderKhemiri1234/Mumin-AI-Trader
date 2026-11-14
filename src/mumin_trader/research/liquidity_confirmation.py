@@ -22,8 +22,8 @@ def liquidity_confirmation_passes(
     if (
         not volume.is_finite()
         or not trades.is_finite()
-        or volume <= Decimal("0")
-        or trades <= Decimal("0")
+        or volume <= Decimal(0)
+        or trades <= Decimal(0)
     ):
         return False
     return (
