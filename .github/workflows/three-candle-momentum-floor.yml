@@ -45,7 +45,7 @@ jobs:
         run: pytest -q
       - name: Ruff lint
         run: |
-          ruff check scripts/run_three_candle_momentum_floor.py src/mumin_trader/strategy/smart_sniper.py src/mumin_trader/research/walk_forward.py tests/unit/test_smart_sniper.py
+          ruff check --select E,F,I,UP scripts/run_three_candle_momentum_floor.py src/mumin_trader/strategy/smart_sniper.py src/mumin_trader/research/walk_forward.py tests/unit/test_smart_sniper.py
       - name: Run frozen paired OOS holdout
         run: |
           mkdir -p artifacts
