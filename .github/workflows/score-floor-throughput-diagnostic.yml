@@ -1,0 +1,84 @@
+name: Score-Floor Throughput - Diagnostic Gates
+
+on:
+  push:
+    branches:
+      - research/score-floor-throughput-ablation
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - ".github/workflows/score-floor-throughput-diagnostic.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: score-floor-throughput-diagnostic-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Compile, full Pytest, and Ruff
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout isolated research branch
+        uses: actions/checkout@v4
+        with:
+          ref: research/score-floor-throughput-ablation
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project and development tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Compile source and scripts
+        run: python -m compileall -q src scripts
+      - name: Run complete Pytest suite
+        run: pytest -q
+      - name: Run Ruff on changed research files
+        run: >-
+          ruff check
+          src/mumin_trader/research/score_floor_diagnostics.py
+          tests/unit/test_score_floor_diagnostics.py
+          scripts/run_score_floor_diagnostic.py
+
+  development-validation-diagnostic:
+    name: Development and validation diagnostics only — no Holdout
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout exact quality-gated commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+      - name: Evaluate development and validation only
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          python scripts/run_score_floor_diagnostic.py \
+            --output artifacts/score-floor-throughput-diagnostic.json
+      - name: Upload diagnostic report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: score-floor-diagnostic-${{ github.sha }}
+          path: artifacts/score-floor-throughput-diagnostic.json
+          if-no-files-found: warn
+          retention-days: 90
