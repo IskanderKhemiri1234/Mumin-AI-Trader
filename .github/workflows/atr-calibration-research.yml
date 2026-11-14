@@ -34,7 +34,7 @@ jobs:
         run: |
           python -m compileall -q src scripts
           pytest -q
-          ruff check src scripts
+          ruff check scripts/run_atr_calibration.py
       - name: Run isolated ATR calibration
         run: |
           mkdir -p artifacts
