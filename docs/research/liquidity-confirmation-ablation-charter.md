@@ -1,6 +1,6 @@
 # Relative-Volume Liquidity Confirmation Ablation — Research Charter
 
-**Status: CHARTERED / RESEARCH ONLY. No production promotion is authorized.**
+**Status: REJECTED / FROZEN after sealed holdout. No production promotion is authorized.**
 
 ## Purpose and hypothesis
 
@@ -76,3 +76,10 @@ Quote volume and trade count are candle-level activity proxies, not order-book d
 ## Safety disposition
 
 No live execution, no real-money test, no production threshold changes, no risk-limit relaxation, no allowlist expansion, and no merge to `main` are authorized by this charter. PR #25 remains Draft, open, and unmerged.
+
+
+## Final decision
+
+The paired sealed holdout completed on source commit `53c124aa3a0018066a28798e4b27fe512091458b`. The candidate passed positive PnL, baseline outperformance, drawdown, and negative-control requirements, but failed the minimum 30-trade requirement (14 trades) and the minimum 5-of-8 profitable-symbol requirement (4 of 8) at both 5 bps and 10 bps. The final policy result is 4 of 6 criteria passed; the candidate is **REJECTED / FROZEN**.
+
+See the [final decision report](liquidity-confirmation-ablation-run-final-decision.md) and immutable [GitHub Actions holdout artifact](https://github.com/IskanderKhemiri1234/Mumin-AI-Trader/actions/runs/43637375279/artifacts/14131285383). Do not retune the candidate against this sealed holdout. Preserve this branch as an audit record.
