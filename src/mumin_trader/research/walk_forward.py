@@ -99,10 +99,9 @@ def _evaluate_fold(
     final_momentum_rsi_min: Decimal = Decimal("48"),
     final_momentum_rsi_max: Decimal = Decimal("68"),
 ) -> BacktestMetrics:
-    strategy = SmartSniperStrategy(
-        final_momentum_rsi_min=final_momentum_rsi_min,
-        final_momentum_rsi_max=final_momentum_rsi_max,
-    )
+    strategy = SmartSniperStrategy()
+    strategy.final_momentum_rsi_min = Decimal(final_momentum_rsi_min)
+    strategy.final_momentum_rsi_max = Decimal(final_momentum_rsi_max)
     shield = AntiLossQuantumShield()
     compounding = DynamicCompoundingMatrix()
     cash = Decimal(initial_cash)
