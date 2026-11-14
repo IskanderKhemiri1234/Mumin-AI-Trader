@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_DOWN
 from bisect import bisect_right
-from typing import Sequence
+from collections.abc import Sequence
 
 from mumin_trader.risk.anti_loss_quantum_shield import AntiLossQuantumShield, ShieldAssessment
 from mumin_trader.research.liquidity_confirmation import liquidity_confirmation_passes
