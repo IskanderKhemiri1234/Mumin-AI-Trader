@@ -1,0 +1,60 @@
+name: Smart Sniper Three-Candle Momentum Floor OOS Ablation
+
+on:
+  push:
+    branches:
+      - research/three-candle-momentum-floor
+    paths:
+      - "scripts/run_three_candle_momentum_floor.py"
+      - "scripts/run_binance_walk_forward.py"
+      - "src/mumin_trader/strategy/smart_sniper.py"
+      - "src/mumin_trader/research/walk_forward.py"
+      - "tests/unit/test_smart_sniper.py"
+      - "tests/unit/test_walk_forward.py"
+      - ".github/workflows/three-candle-momentum-floor.yml"
+      - "pyproject.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: three-candle-momentum-floor-oos
+  cancel-in-progress: false
+
+jobs:
+  paired-oos-ablation:
+    name: Paired Paper OOS holdout (8 symbols, 4 spreads)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout isolated research branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project and research checks
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Compile source and scripts
+        run: python -m compileall -q src scripts
+      - name: Run full test suite
+        run: pytest -q
+      - name: Ruff lint
+        run: |
+          ruff check scripts/run_three_candle_momentum_floor.py src/mumin_trader/strategy/smart_sniper.py src/mumin_trader/research/walk_forward.py tests/unit/test_smart_sniper.py
+      - name: Run frozen paired OOS holdout
+        run: |
+          mkdir -p artifacts
+          python scripts/run_three_candle_momentum_floor.py \
+            --output artifacts/three-candle-momentum-floor-oos.json
+      - name: Upload paired OOS ledger and report data
+        uses: actions/upload-artifact@v4
+        with:
+          name: three-candle-momentum-floor-oos-${{ github.run_number }}
+          path: artifacts/three-candle-momentum-floor-oos.json
+          if-no-files-found: error
+          retention-days: 30
