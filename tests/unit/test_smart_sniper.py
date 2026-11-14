@@ -1,3 +1,4 @@
+import pytest
 from decimal import Decimal
 
 from mumin_trader.strategy.smart_sniper import SmartSniperStrategy
