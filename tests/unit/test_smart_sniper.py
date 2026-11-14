@@ -156,7 +156,7 @@ def test_recovery_rsi_and_branch_are_unchanged_by_momentum_band(monkeypatch):
         Decimal(value) for value in ("103", "102", "100", "98", "97", "96", "97",
                                      "98", "99", "100", "101", "102", "103")
     ]
-    higher = stronger_bullish_timeframes()
+    higher = {"higher_1": [Decimal("100")] * 55, "higher_2": [Decimal("100")] * 55}
     baseline = SmartSniperStrategy().assess(
         closes, spread_bps=Decimal("2"), higher_timeframe_closes=higher
     )
@@ -169,6 +169,8 @@ def test_recovery_rsi_and_branch_are_unchanged_by_momentum_band(monkeypatch):
     assert baseline.score == candidate.score
     assert baseline.signal == candidate.signal
     assert baseline.rsi == candidate.rsi == Decimal("50")
+    assert "Recovery RSI is constructive." in baseline.reasons
+    assert "Recovery RSI is constructive." in candidate.reasons
 
 
 def test_invalid_final_momentum_rsi_band_is_rejected():
