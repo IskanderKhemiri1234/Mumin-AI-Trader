@@ -1,0 +1,59 @@
+name: Smart Sniper RSI Final Entry-Band OOS Ablation
+
+on:
+  push:
+    branches:
+      - research/rsi-entry-band-ablation
+    paths:
+      - "scripts/run_rsi_entry_band_ablation.py"
+      - "scripts/run_binance_walk_forward.py"
+      - "src/mumin_trader/strategy/smart_sniper.py"
+      - "src/mumin_trader/research/walk_forward.py"
+      - "tests/unit/test_smart_sniper.py"
+      - "tests/unit/test_walk_forward.py"
+      - ".github/workflows/rsi-entry-band-ablation.yml"
+      - "pyproject.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rsi-entry-band-ablation-oos
+  cancel-in-progress: false
+
+jobs:
+  paired-oos-ablation:
+    name: CI gates then paired Paper OOS holdout
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout isolated research branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project and research checks
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Compile source and scripts
+        run: python -m compileall -q src scripts
+      - name: Run full test suite
+        run: pytest -q
+      - name: Ruff lint
+        run: |
+          ruff check --select E,F,I,UP scripts/run_rsi_entry_band_ablation.py src/mumin_trader/strategy/smart_sniper.py src/mumin_trader/research/walk_forward.py tests/unit/test_smart_sniper.py tests/unit/test_walk_forward.py
+      - name: Run frozen paired RSI OOS holdout
+        run: |
+          mkdir -p artifacts
+          python scripts/run_rsi_entry_band_ablation.py --output artifacts/rsi-entry-band-oos.json
+      - name: Upload paired OOS ledger and report data
+        uses: actions/upload-artifact@v4
+        with:
+          name: rsi-entry-band-oos-${{ github.run_number }}
+          path: artifacts/rsi-entry-band-oos.json
+          if-no-files-found: error
+          retention-days: 30
