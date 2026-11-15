@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from mumin_trader.ai_engine.strategy_engine import CORE_SYMBOLS, StrategyEngine\nfrom mumin_trader.exchanges.binance.rest_client import BinanceSpotRESTClient
+from mumin_trader.ai_engine.strategy_engine import CORE_SYMBOLS, StrategyEngine
+from mumin_trader.exchanges.binance.rest_client import BinanceSpotRESTClient
 
 ZERO = Decimal("0")
 BPS = Decimal("10000")
@@ -32,6 +33,9 @@ class MarketCandidate:
     ema_fast: Decimal | None = None
     ema_slow: Decimal | None = None
     expected_move_bps: Decimal = ZERO
+    strategy_score: int = 0
+    stop_loss_price: Decimal | None = None
+    take_profit_price: Decimal | None = None
 
 
 def screen_tickers(
