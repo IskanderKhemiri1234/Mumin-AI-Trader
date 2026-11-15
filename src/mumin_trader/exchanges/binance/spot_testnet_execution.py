@@ -168,7 +168,7 @@ class BinanceSpotTestnetExecution:
 
         fee_buffer = Decimal("0.002")
         reserve = self.settings.MAX_CAPITAL_ALLOCATION_USD * self.settings.CAPITAL_RESERVE_PERCENT / Decimal("100")
-        if free_quote - reserve < notional * (Decimal("1") + fee_buffer):
+        if side == "BUY" and free_quote - reserve < notional * (Decimal("1") + fee_buffer):
             raise SpotExecutionError("BUY would consume the configured quote reserve or exceed free USDT.")
 
         exposure = Decimal("0")
