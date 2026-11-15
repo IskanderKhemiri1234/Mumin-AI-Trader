@@ -291,6 +291,8 @@ class BinanceSpotTestnetExecution:
         halted, halt_reason = self.store.is_halted()
         if halted and not (side.strip().upper() == "SELL" and halt_reason in {"MAX_DAILY_LOSS", "MAX_DRAWDOWN"}):
             raise SpotExecutionError("Execution halt is active; new orders are blocked.")
+        if not self.store.has_risk_state():
+            raise SpotExecutionError("A successful account/trade reconciliation is required before the first order.")
         try:
             params = await self._validator.validate_limit_order(
                 symbol=symbol, side=side, quantity=quantity, price=price,
