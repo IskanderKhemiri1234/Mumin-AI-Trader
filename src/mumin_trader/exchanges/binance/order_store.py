@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -34,8 +35,22 @@ class SQLiteOrderStore:
             connection.execute("PRAGMA synchronous=FULL")
         return connection
 
+    @contextmanager
+    def _connection(self):
+        db = self._connect()
+        try:
+            yield db
+            if db.in_transaction:
+                db.commit()
+        except Exception:
+            if db.in_transaction:
+                db.rollback()
+            raise
+        finally:
+            db.close()
+
     def _initialize(self) -> None:
-        with self._connect() as db:
+        with self._connection() as db:
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS spot_order_intents (
@@ -80,7 +95,7 @@ class SQLiteOrderStore:
         return datetime.now(timezone.utc).isoformat()
 
     def is_halted(self) -> tuple[bool, str]:
-        with self._connect() as db:
+        with self._connection() as db:
             row = db.execute(
                 "SELECT halted, halt_reason FROM spot_execution_control WHERE id=1"
             ).fetchone()
