@@ -12,7 +12,7 @@ from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 
 from mumin_trader.strategy_swarm import PaperSwarm, compound_allocation
-from mumin_trader.strategy_micro_alpha import PaperMicroAlphaSwarm, atr_adaptive_targets
+from mumin_trader.strategy_micro_alpha import PaperMicroAlphaSwarm
 from mumin_trader.exchanges.binance.public_market_data import (
     ALLOWED_SYMBOLS,
     PublicMarketData,
