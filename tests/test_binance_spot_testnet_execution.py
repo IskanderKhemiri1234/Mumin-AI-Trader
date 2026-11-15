@@ -80,7 +80,7 @@ def order_response(status: str = "NEW") -> dict[str, object]:
     }
 
 
-def handler_for(seen: list[httpx.Request], *, timeout_submit: bool = False):
+def handler_for(seen: list[httpx.Request], *, timeout_submit: bool = False, missing_query: bool = False):
     async def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
         assert str(request.url).startswith(TESTNET_REST_BASE_URL)
@@ -98,6 +98,8 @@ def handler_for(seen: list[httpx.Request], *, timeout_submit: bool = False):
                 raise httpx.ReadTimeout("simulated timeout", request=request)
             return httpx.Response(200, json=order_response())
         if path == "/api/v3/order" and request.method == "GET":
+            if missing_query:
+                return httpx.Response(400, json={"code": -2013, "msg": "Order does not exist."})
             return httpx.Response(200, json=order_response())
         if path == "/api/v3/order" and request.method == "DELETE":
             return httpx.Response(200, json=order_response("CANCELED"))
@@ -114,9 +116,8 @@ async def test_execution_gate_is_disabled_by_default(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_execution_refuses_mainnet_or_live_configuration(tmp_path) -> None:
-    cfg = settings(ALLOW_MAINNET=True)
-    with pytest.raises(SpotExecutionError, match="Mainnet/live"):
-        BinanceSpotTestnetExecution(cfg, SQLiteOrderStore(str(tmp_path / "orders.db")))
+    with pytest.raises(ValueError, match="Live|Mainnet"):
+        settings(ALLOW_MAINNET=True)
 
 
 @pytest.mark.asyncio
@@ -167,7 +168,7 @@ async def test_timeout_marks_unknown_and_never_resubmits(tmp_path) -> None:
     seen: list[httpx.Request] = []
     client = BinanceSpotTestnetExecution(
         settings(), SQLiteOrderStore(str(tmp_path / "orders.db")),
-        transport=httpx.MockTransport(handler_for(seen, timeout_submit=True)),
+        transport=httpx.MockTransport(handler_for(seen, timeout_submit=True, missing_query=True)),
     )
     try:
         with pytest.raises(SpotOrderOutcomeUnknown):
