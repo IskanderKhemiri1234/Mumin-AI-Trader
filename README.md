@@ -69,7 +69,7 @@ pytest -q
 
 ## Current engine capabilities
 
-- Binance Spot public WebSocket market streams with reconnect and heartbeat.
+- Binance Spot REST market snapshots (book ticker, closed candles, depth and server time); the continuous Paper runner skips the entire cycle when any of the eight required symbols is missing or stale.
 - Liquidity and spread screening; candidates are observations, not trade signals.
 - Continuous SQLite-backed Paper portfolio for BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT, ADAUSDT, AVAXUSDT and LINKUSDT, with shared cash, per-symbol positions and portfolio-level exposure limits.
 - Public Binance market snapshots (closed 1-minute candles plus bid/ask) with stale-data rejection; no API key is used for public market data.
