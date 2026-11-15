@@ -18,7 +18,10 @@ from mumin_trader.exchanges.binance.public_market_data import (
 )
 
 QUOTE = "USDT"
-SYMBOLS = ("BTCUSDT", "ETHUSDT", "BNBUSDT")
+SYMBOLS = (
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
+    "XRPUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT",
+)
 INITIAL_CASH = Decimal(os.getenv("INITIAL_CAPITAL_USD", "70.00"))
 MAX_TRADE = Decimal(os.getenv("MAX_TRADE_ALLOCATION_USD", "5.00"))
 RESERVE_PERCENT = Decimal(os.getenv("CAPITAL_RESERVE_PERCENT", "20"))
@@ -28,7 +31,8 @@ MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "2"))
 FEE_RATE = Decimal("0.001")
 SLIPPAGE_BPS = Decimal("2")
 STOP_LOSS_PERCENT = Decimal(os.getenv("SIMULATED_STOP_LOSS_PERCENT", "0.50"))
-TAKE_PROFIT_PERCENT = Decimal(os.getenv("SIMULATED_TAKE_PROFIT_PERCENT", "1.00"))
+TAKE_PROFIT_PERCENT = Decimal(os.getenv("SIMULATED_TAKE_PROFIT_PERCENT", "1.25"))
+MAX_SPREAD_BPS = Decimal(os.getenv("MAX_SPREAD_BPS", "12.00"))
 MAX_DAILY_LOSS_PERCENT = Decimal(os.getenv("MAX_DAILY_LOSS_PERCENT", "2.00"))
 MAX_DRAWDOWN_PERCENT = Decimal(os.getenv("MAX_DRAWDOWN_PERCENT", "5.00"))
 
@@ -39,8 +43,10 @@ if INITIAL_CASH != Decimal("70.00"):
     raise RuntimeError("Paper engine requires the configured 70.00 USDT starting capital.")
 if STOP_LOSS_PERCENT != Decimal("0.50"):
     raise RuntimeError("Paper stop-loss is fixed at 0.50%.")
-if TAKE_PROFIT_PERCENT != Decimal("1.00"):
-    raise RuntimeError("Paper take-profit is fixed at 1.00%.")
+if TAKE_PROFIT_PERCENT != Decimal("1.25"):
+    raise RuntimeError("Paper take-profit is fixed at 1.25%.")
+if MAX_SPREAD_BPS != Decimal("12.00"):
+    raise RuntimeError("Paper liquidity shield is fixed at a 12.00 bps maximum spread.")
 if MAX_DAILY_LOSS_PERCENT != Decimal("2.00"):
     raise RuntimeError("Paper daily loss limit is fixed at 2.00%.")
 
@@ -48,9 +54,10 @@ REPORT_SECONDS = 3600
 SYNTHETIC_SOURCE = "MOCK_SYNTHETIC"
 PUBLIC_SOURCE = "BINANCE_PUBLIC_MARKET_DATA"
 BASE_PRICES = {
-    "BTCUSDT": Decimal("60000"),
-    "ETHUSDT": Decimal("3000"),
-    "BNBUSDT": Decimal("600"),
+    "BTCUSDT": Decimal("60000"), "ETHUSDT": Decimal("3000"),
+    "BNBUSDT": Decimal("600"), "SOLUSDT": Decimal("150"),
+    "XRPUSDT": Decimal("0.60"), "ADAUSDT": Decimal("0.45"),
+    "AVAXUSDT": Decimal("35"), "LINKUSDT": Decimal("15"),
 }
 
 
@@ -198,7 +205,11 @@ class ContinuousPaperBot:
     def synthetic_price_for(symbol: str, tick: int) -> Decimal:
         if symbol not in BASE_PRICES:
             raise ValueError(f"Unsupported synthetic symbol: {symbol}")
-        phase = {"BTCUSDT": 0.0, "ETHUSDT": 1.3, "BNBUSDT": 2.1}[symbol]
+        phase = {
+            "BTCUSDT": 0.0, "ETHUSDT": 1.3, "BNBUSDT": 2.1,
+            "SOLUSDT": 2.8, "XRPUSDT": 3.6, "ADAUSDT": 4.2,
+            "AVAXUSDT": 5.1, "LINKUSDT": 5.9,
+        }[symbol]
         wave = 0.0022 * math.sin(tick / 5.0 + phase)
         slow_wave = 0.0010 * math.sin(tick / 17.0 + phase)
         micro = 0.00035 * math.sin(tick / 1.7 + phase)
@@ -353,10 +364,18 @@ class ContinuousPaperBot:
                 signal_name = "BUY" if momentum >= Decimal("8") else (
                     "SELL" if momentum <= Decimal("-8") else "HOLD"
                 )
-                signals.append(f"{symbol}:{signal_name}")
                 position = open_positions.get(symbol)
                 action = "NONE"
                 bid, ask = quotes.get(symbol, (price, price))
+                spread_mid = (bid + ask) / Decimal("2")
+                spread_bps = (
+                    (ask - bid) / spread_mid * Decimal("10000")
+                    if spread_mid > 0 else Decimal("Infinity")
+                )
+                spread_blocked = spread_bps > MAX_SPREAD_BPS
+                signals.append(
+                    f"{symbol}:{signal_name}" + (":SPREAD_BLOCK" if spread_blocked else "")
+                )
                 if position is not None:
                     # Trigger exits on estimated NET return after both entry and
                     # exit fees plus conservative executable-side slippage.
@@ -407,6 +426,7 @@ class ContinuousPaperBot:
                 # Entries are considered only after exits, and share one cash/risk budget.
                 if (
                     action == "NONE" and position is None and signal_name == "BUY"
+                    and not spread_blocked
                     and not halted and len(open_positions) < MAX_OPEN_POSITIONS
                 ):
                     reserve_cash = self.initial_cash * RESERVE_PERCENT / Decimal("100")
@@ -587,8 +607,17 @@ async def run_bot(
                 snapshots, errors = await feed.snapshots(SYMBOLS)
                 for symbol, error in errors.items():
                     print(f"MARKET DATA UNAVAILABLE {symbol}: {error}", flush=True)
-                if not snapshots:
-                    print("No fresh public quotes; skipping this cycle without synthetic fallback.", flush=True)
+                if set(snapshots) != set(SYMBOLS):
+                    missing = sorted(set(SYMBOLS) - set(snapshots))
+                    print(
+                        "INCOMPLETE EIGHT-ASSET SNAPSHOT; skipping entire cycle "
+                        f"without synthetic fallback. Missing: {missing}",
+                        flush=True,
+                    )
+                    if cycles is not None:
+                        raise RuntimeError(
+                            f"Paper cycle requires all eight fresh assets; missing: {missing}"
+                        )
                     if loop.time() - last_report >= REPORT_SECONDS:
                         report = bot.save_hourly_report()
                         print(
