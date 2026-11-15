@@ -130,6 +130,11 @@ class SQLiteOrderStore:
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat()
 
+    def has_risk_state(self) -> bool:
+        with self._connection() as db:
+            row = db.execute("SELECT 1 FROM spot_risk_state WHERE id=1").fetchone()
+            return row is not None
+
     def is_halted(self) -> tuple[bool, str]:
         with self._connection() as db:
             row = db.execute(
