@@ -172,3 +172,45 @@ def test_daily_loss_halts_entries_before_another_symbol_can_open(tmp_path):
         ).fetchone()[0]
     assert account == (1, "MAX_DAILY_LOSS")
     assert eth_buys == 0
+
+
+def test_public_micro_alpha_entry_persists_atr_adaptive_position_targets(tmp_path):
+    database = tmp_path / "micro-alpha.sqlite3"
+    bot = ContinuousPaperBot(str(database), initial_cash=Decimal("70.00"))
+    for candle in range(14):
+        bot.step(
+            {"BTCUSDT": Decimal("100")},
+            source="BINANCE_PUBLIC_MARKET_DATA",
+            quotes={"BTCUSDT": (Decimal("100.0"), Decimal("100.1"))},
+            candle_close_times={"BTCUSDT": candle + 1},
+            received_at_ms=1_800_000_000_100 + candle,
+            market_features={"BTCUSDT": {
+                "open": Decimal("100"), "high": Decimal("100.2"),
+                "low": Decimal("99.8"), "volume": Decimal("10"),
+                "bid_depth_qty": Decimal("50"), "ask_depth_qty": Decimal("50"),
+            }},
+        )
+
+    result = bot.step(
+        {"BTCUSDT": Decimal("100.2")},
+        source="BINANCE_PUBLIC_MARKET_DATA",
+        quotes={"BTCUSDT": (Decimal("100.1"), Decimal("100.2"))},
+        candle_close_times={"BTCUSDT": 15},
+        received_at_ms=1_800_000_000_115,
+        market_features={"BTCUSDT": {
+            "open": Decimal("99.5"), "high": Decimal("100.3"),
+            "low": Decimal("99.0"), "volume": Decimal("15"),
+            "bid_depth_qty": Decimal("80"), "ask_depth_qty": Decimal("20"),
+        }},
+    )
+
+    with sqlite3.connect(database) as db:
+        position = db.execute(
+            "SELECT stop_loss_pct, take_profit_pct FROM bot_positions WHERE symbol='BTCUSDT'"
+        ).fetchone()
+    assert result.signal.startswith("BTCUSDT:BUY")
+    assert position is not None
+    stop, target = map(Decimal, position)
+    assert Decimal("0.20") <= stop <= Decimal("0.50")
+    assert Decimal("0.40") <= target <= Decimal("1.25")
+    assert stop != Decimal("0.50") or target != Decimal("1.25")

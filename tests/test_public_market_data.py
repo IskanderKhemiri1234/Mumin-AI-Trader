@@ -26,6 +26,10 @@ async def test_public_market_data_uses_unauthenticated_endpoints_and_closed_cand
                 [1, "2990", "3010", "2980", "2995", "10", 1_699_999_999_000],
                 [2, "2995", "3020", "2990", "3010", "12", 1_700_000_001_000],
             ])
+        if request.url.path.endswith("/depth"):
+            return httpx.Response(200, json={
+                "bids": [["2999.9", "4.0"]], "asks": [["3000.1", "2.0"]]
+            })
         if request.url.path.endswith("/time"):
             return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
         return httpx.Response(404)
@@ -42,8 +46,14 @@ async def test_public_market_data_uses_unauthenticated_endpoints_and_closed_cand
     assert snapshot.ask == Decimal("3000.1")
     assert snapshot.last_closed_price == Decimal("2995")
     assert snapshot.candle_close_time_ms == 1_699_999_999_000
+    assert snapshot.candle_open == Decimal("2990")
+    assert snapshot.candle_high == Decimal("3010")
+    assert snapshot.candle_low == Decimal("2980")
+    assert snapshot.candle_volume == Decimal("10")
+    assert snapshot.bid_depth_qty == Decimal("4.0")
+    assert snapshot.ask_depth_qty == Decimal("2.0")
     assert snapshot.source == "BINANCE_PUBLIC_MARKET_DATA"
-    assert len(calls) == 3
+    assert len(calls) == 4
     assert all("X-MBX-APIKEY" not in request.headers for request in calls)
     await feed.close()
     await client.aclose()
