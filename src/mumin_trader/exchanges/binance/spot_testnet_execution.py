@@ -301,19 +301,20 @@ class BinanceSpotTestnetExecution:
 
         intent, created = self.store.register_intent(params)
         if not created:
-            if intent["state"] in {"NEW", "PARTIALLY_FILLED", "FILLED", "CANCELED", "REJECTED", "EXPIRED"}:
+            if intent["state"] in {"FILLED", "CANCELED", "REJECTED", "EXPIRED"}:
                 return intent
-            if intent["state"] in {"SUBMITTING", "UNKNOWN", "CANCEL_PENDING"}:
+            if intent["state"] in {"NEW", "PARTIALLY_FILLED", "SUBMITTING", "UNKNOWN", "CANCEL_PENDING"}:
                 observed = await self._query_by_client_id(params["symbol"], client_order_id)
                 if observed is not None:
                     self.store.update_order(client_order_id, state=self._status(observed), response=observed)
+                    await self._sync_fills_if_needed(observed)
                     return observed
                 self.store.update_order(
                     client_order_id, state="UNKNOWN",
-                    error="Previous submission outcome is unresolved; automatic resubmission is forbidden.",
+                    error="Previously submitted order is absent from exchange query; automatic resubmission is forbidden.",
                 )
                 raise SpotOrderOutcomeUnknown(
-                    "Previous submission may have reached Binance. Reconcile manually; this clientOrderId will not be resubmitted."
+                    "Existing clientOrderId has an unresolved exchange outcome; it will not be resubmitted."
                 )
 
         if not self.store.claim_submission(client_order_id):
