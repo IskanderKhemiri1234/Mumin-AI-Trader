@@ -88,7 +88,7 @@ class MainActivity : Activity() {
             setTypeface(null, android.graphics.Typeface.BOLD)
         })
         header.addView(TextView(this).apply {
-            text = "LIVE PAPER SNAPSHOT  •  AUTO-REFRESH 60S"
+            text = "PAPER REPORT  •  AUTO-REFRESH 60S"
             setTextColor(Color.rgb(190, 205, 197))
             textSize = 11f
             letterSpacing = 0.08f
