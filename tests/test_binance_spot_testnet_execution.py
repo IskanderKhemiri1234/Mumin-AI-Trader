@@ -357,6 +357,14 @@ async def test_partial_fill_status_and_quantities_are_persisted(tmp_path) -> Non
                 "cummulativeQuoteQty": "2.00",
             }
             return httpx.Response(200, json=partial)
+        if request.url.path == "/api/v3/myTrades":
+            trade = {
+                "id": 1, "orderId": 12345, "price": "50000.00",
+                "qty": "0.00004", "quoteQty": "2.00",
+                "commission": "0.002", "commissionAsset": "USDT",
+                "isBuyer": True, "time": 1_700_000_000_000,
+            }
+            return httpx.Response(200, json=[trade] if request.url.params.get("fromId") == "0" else [])
         return httpx.Response(404, json={"code": -2013, "msg": "Order does not exist."})
 
     store = SQLiteOrderStore(str(tmp_path / "orders.db"))
