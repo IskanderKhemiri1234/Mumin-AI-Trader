@@ -136,7 +136,7 @@ async def test_submit_is_testnet_only_and_persists_idempotent_order(tmp_path) ->
             symbol="BTCUSDT", side="BUY", quantity="0.00010",
             price="50000.00", client_order_id="mumin-test-1001",
         )
-        assert duplicate["state"] == "NEW"
+        assert duplicate["status"] == "NEW"
         assert sum(req.method == "POST" and req.url.path == "/api/v3/order" for req in seen) == 1
         assert store.get_order("mumin-test-1001")["state"] == "NEW"
         assert all(str(req.url).startswith(TESTNET_REST_BASE_URL) for req in seen)
