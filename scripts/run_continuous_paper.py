@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 
-from mumin_trader.strategy_swarm import PaperSwarm, compound_allocation
+from mumin_trader.strategy_swarm import PaperSwarm, compound_allocation, compoundable_equity
 from mumin_trader.strategy_micro_alpha import PaperMicroAlphaSwarm
 from mumin_trader.exchanges.binance.public_market_data import (
     ALLOWED_SYMBOLS,
@@ -481,8 +481,11 @@ class ContinuousPaperBot:
                          for pos_symbol, pos in open_positions.items()),
                         Decimal("0"),
                     )
+                    compounding_equity = compoundable_equity(
+                        marked_equity, realized, initial_capital=self.initial_cash,
+                    )
                     allocation = compound_allocation(
-                        marked_equity, cash, reserve_cash,
+                        compounding_equity, cash, reserve_cash,
                         initial_capital=self.initial_cash, max_trade=MAX_TRADE,
                     )
                     if exposure + allocation <= MAX_TOTAL_EXPOSURE and allocation > 0:
