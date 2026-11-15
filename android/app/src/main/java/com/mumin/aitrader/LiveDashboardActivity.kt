@@ -51,6 +51,7 @@ h1{font-size:19px;color:var(--gold);margin:0 0 5px}h2{font-size:15px;color:var(-
 <div class="metric"><small>الربح المحقق</small><b id="realized">—</b></div><div class="metric"><small>العائد الكلي</small><b id="returns">—</b></div>
 <div class="metric"><small>الصفقات المغلقة</small><b id="trades">—</b></div><div class="metric"><small>المراكز المفتوحة</small><b id="positionsCount">—</b></div></div><p id="paperUpdated" class="muted">بانتظار لقطة Paper موثقة…</p></section>
 <section class="card"><h2>مؤشر الأصول الحي · Public Market</h2><div id="assets" class="grid"></div></section>
+<section class="card"><h2>قرارات الوكلاء وحارس SMA20 · ثمانية أصول</h2><p class="muted">التصويت والسبريد وSMA20 والتخصيص الفعلي مأخوذة من أحدث سجل SQLite لكل أصل؛ غياب القرار يظهر كغير متاح ولا يُستبدل بقيم تقديرية.</p><div id="agentDecisions" class="rows">بانتظار عقد البيانات الموحد…</div><p id="compounderBudget" class="muted"></p></section>
 <section class="card"><h2>المراكز المفتوحة · Paper Ledger</h2><div id="positions" class="rows">تحميل…</div></section>
 <section class="card"><h2>آخر الصفقات المسجلة</h2><div id="fills" class="rows">تحميل…</div></section>
 <section class="card warning"><h2>حواجز السلامة</h2><div class="metrics"><div class="metric"><small>وقف الخسارة المحاكى</small><b>0.50%</b></div><div class="metric"><small>جني الربح المحاكى</small><b>1.25%</b></div><div class="metric"><small>حد الصفقة</small><b>5 USDT</b></div><div class="metric"><small>درع السبريد</small><b>8 bps</b></div></div><p class="muted">بيانات السوق عامة للعرض فقط. الرصيد والصفقات من سجل Paper فقط. GitHub Actions ليس خادماً دائماً؛ لذلك تحديث دفتر Paper مرتبط بنجاح الدورة المجدولة، وليس لحظياً.</p></section>
@@ -72,7 +73,17 @@ function connectMarket(){
  marketSocket.onclose=()=>{document.getElementById('marketStatus').textContent='انقطع بث السوق · إعادة الاتصال تلقائياً';if(reconnectTimer)clearTimeout(reconnectTimer);reconnectTimer=setTimeout(connectMarket,reconnectDelay);reconnectDelay=Math.min(reconnectDelay*2,30000);};
 }
 function table(rows,heads,render){if(!rows||!rows.length)return '<p class="muted">لا توجد سجلات حالياً</p>';return '<table><thead><tr>'+heads.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.map(render).join('')+'</tbody></table>'}
-async function paper(){try{const r=await fetch('latest-state.json?ts='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const root=await r.json();if(root.mode!=='PAPER_ONLY'||root.initial_capital_usdt!=='70.00')throw Error('Paper safety schema mismatch');const s=root.snapshot;if(Number(s.tick)<lastPaperTick)return;lastPaperTick=Number(s.tick);
+function renderAgentAssets(assets,compounder){
+ const rows=Array.isArray(assets)?assets:[];
+ document.getElementById('agentDecisions').innerHTML=table(rows,['الأصل','Sweep','Depth','Micro-Alpha','السبريد','SMA20','الميل','الحارس','التخصيص الفعلي'],a=>{
+  const d=a.agent_decision;
+  if(!d)return '<tr><td>'+esc(a.symbol)+'</td><td colspan="8" class="muted">لا يوجد قرار موثق بعد</td></tr>';
+  const vote=x=>x&&x.vote?esc(x.vote):'—';
+  return '<tr><td>'+esc(a.symbol)+'</td><td>'+vote(d.liquidity_sweep)+'</td><td>'+vote(d.depth_imbalance)+'</td><td>'+vote(d.micro_alpha_filter)+'</td><td>'+fmt(d.spread_bps,3)+' bps · '+(d.spread_under_8_bps?'PASS':'BLOCK')+'</td><td>'+fmt(d.macro_sma20,8)+'</td><td>'+fmt(d.macro_sma20_slope,8)+'</td><td>'+esc(d.macro_trend_reason)+'</td><td>'+fmt(a.compounder_actual_allocation_pct,3)+'%</td></tr>';
+ }).replace(/<table>/,'<table style="min-width:1050px">');
+ document.getElementById('compounderBudget').textContent='ميزانية الدخول التالية للمحرك ككل: '+fmt(compounder.next_entry_budget_usdt,4)+' USDT · احتياطي: '+fmt(compounder.reserve_cash_usdt,2)+' USDT. نسب الأصول أعلاه هي تخصيصات المراكز الفعلية وليست ميزانيات دخول مقترحة.';
+}
+async function paper(){try{const r=await fetch('latest-state.json?ts='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const root=await r.json();if(root.mode!=='PAPER_ONLY'||root.initial_capital_usdt!=='70.00')throw Error('Paper safety schema mismatch');const s=root.snapshot;if(Number(s.tick)<lastPaperTick)return;lastPaperTick=Number(s.tick);renderAgentAssets(s.assets,s.compounder||{});
 document.getElementById('equity').textContent=fmt(s.equity)+' USDT';document.getElementById('cash').textContent=fmt(s.cash)+' USDT';document.getElementById('realized').textContent=fmt(s.realized_pnl)+' USDT';document.getElementById('returns').textContent=fmt(s.return_pct,3)+'%';document.getElementById('trades').textContent=s.trades;document.getElementById('positionsCount').textContent=s.positions.length;
 document.getElementById('paperUpdated').textContent='الدورة #'+s.tick+' · آخر سجل: '+s.updated_at+' UTC · '+(s.halted?'إيقاف حماية':'Paper يعمل');
 document.getElementById('positions').innerHTML=table(s.positions,['الأصل','الكمية','الدخول','السعر المرجعي','القيمة'],x=>'<tr><td>'+esc(x.symbol)+'</td><td>'+fmt(x.quantity,8)+'</td><td>'+fmt(x.entry_price,8)+'</td><td>'+fmt(x.mark_price,8)+'</td><td>'+fmt(x.market_value)+'</td></tr>');

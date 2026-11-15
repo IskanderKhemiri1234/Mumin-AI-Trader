@@ -27,7 +27,7 @@ def test_mobile_report_exports_paper_snapshot(tmp_path):
     assert "0.50%" in page
     assert "صافي الخروج بعد رسوم الدخول والخروج والانزلاق السعري" in markdown
     assert "1.25%" in page
-    assert "12" in markdown and "درع السيولة" in markdown
+    assert "8 نقاط أساس" in markdown and "درع السيولة" in markdown
     assert "viewport-fit=cover" in page
     assert "nav aria-label=" in page
     assert "asset-grid" in page

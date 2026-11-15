@@ -100,6 +100,7 @@ jobs:
           KEYSTORE_PATH="$RUNNER_TEMP/mumin-release-key.jks"
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
           test -s "$KEYSTORE_PATH"
+          keytool -list -keystore "$KEYSTORE_PATH" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null
           echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
           echo "ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
           echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
@@ -114,7 +115,7 @@ jobs:
           APK="android/app/build/outputs/apk/release/app-release.apk"
           test -s "$APK"
           BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
-          "$BUILD_TOOLS/apksigner" verify --verbose "$APK"
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
           "$BUILD_TOOLS/aapt" dump badging "$APK" | grep -q "package: name='com.mumin.aitrader'"
           mkdir -p dist
           cp "$APK" dist/Mumin-AI-Trader.apk
