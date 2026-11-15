@@ -65,13 +65,13 @@ async def test_preflight_is_disabled_by_default() -> None:
 
 @pytest.mark.asyncio
 async def test_preflight_refuses_mainnet_and_live_flags() -> None:
-    with pytest.raises(ValueError, match="Live|Mainnet"):
+    with pytest.raises(ValueError, match="(?i)mainnet|live"):
         make_settings(ALLOW_MAINNET=True)
 
 
 @pytest.mark.asyncio
 async def test_preflight_refuses_non_testnet_environment() -> None:
-    with pytest.raises(ValueError, match="MAINNET blocked"):
+    with pytest.raises(ValueError, match="MAINNET is disabled"):
         make_settings(TRADING_ENV=TradingEnvironment.MAINNET)
 
 
