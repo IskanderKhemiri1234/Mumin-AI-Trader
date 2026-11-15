@@ -104,3 +104,29 @@ def test_micro_alpha_blocks_long_below_falling_hourly_sma20():
     )
     assert details["signal"] == "HOLD"
     assert details["filter_reason"].startswith("MACRO_TREND_BLOCK_PRICE_BELOW_FALLING_SMA20")
+
+
+
+def test_micro_alpha_rejects_spread_at_or_above_eight_basis_points():
+    from mumin_trader.strategy_micro_alpha import MicroAlphaFilterAgent
+
+    agent = MicroAlphaFilterAgent()
+    assert agent.evaluate(
+        "BUY", "BUY", Decimal("99.96"), Decimal("100.04"),
+        Decimal("8"), Decimal("0.20"), Decimal("100"), [Decimal("100")] * 21,
+    ) == "HOLD"
+    assert agent.evaluate(
+        "BUY", "BUY", Decimal("99.95"), Decimal("100.05"),
+        Decimal("8"), Decimal("0.20"), Decimal("100"), [Decimal("100")] * 21,
+    ) == "HOLD"
+
+
+def test_micro_alpha_rejects_atr_outside_calibrated_band():
+    from mumin_trader.strategy_micro_alpha import MicroAlphaFilterAgent
+
+    agent = MicroAlphaFilterAgent()
+    for atr in (Decimal("0.049"), Decimal("0.801")):
+        assert agent.evaluate(
+            "BUY", "BUY", Decimal("100"), Decimal("100.01"),
+            Decimal("8"), atr, Decimal("100"), [Decimal("100")] * 21,
+        ) == "HOLD"
