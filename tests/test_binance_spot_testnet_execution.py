@@ -591,3 +591,31 @@ async def test_cancel_api_error_marks_order_unknown_without_retry(tmp_path) -> N
         assert sum(req.method == "DELETE" for req in seen) == 1
     finally:
         await client.close()
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"accountType": None}, "account type"),
+        ({"canWithdraw": None}, "Withdrawal permission"),
+    ],
+)
+async def test_missing_account_permission_fields_fail_closed(tmp_path, overrides, message) -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/account":
+            return httpx.Response(200, json={**account_info(), **overrides})
+        return httpx.Response(404, json={"msg": "unexpected endpoint"})
+
+    client = BinanceSpotTestnetExecution(
+        settings(), SQLiteOrderStore(str(tmp_path / "orders.db")),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        with pytest.raises(SpotExecutionError, match=message):
+            await client._account()
+    finally:
+        await client.close()
