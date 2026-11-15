@@ -111,7 +111,7 @@ class SQLiteOrderStore:
 
     def halt(self, reason: str) -> None:
         normalized = reason.strip()[:500] or "MANUAL_EMERGENCY_STOP"
-        with self._connect() as db:
+        with self._connection() as db:
             db.execute(
                 """UPDATE spot_execution_control
                    SET halted=1, halt_reason=?, updated_at=? WHERE id=1""",
@@ -121,7 +121,7 @@ class SQLiteOrderStore:
     def register_intent(self, request: dict[str, str]) -> tuple[dict[str, Any], bool]:
         now = self._now()
         encoded = json.dumps(request, sort_keys=True, separators=(",", ":"))
-        with self._connect() as db:
+        with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             halted = db.execute(
                 "SELECT halted, halt_reason FROM spot_execution_control WHERE id=1"
@@ -155,7 +155,7 @@ class SQLiteOrderStore:
             return dict(row), True
 
     def claim_submission(self, client_order_id: str) -> bool:
-        with self._connect() as db:
+        with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             halted = db.execute(
                 "SELECT halted, halt_reason FROM spot_execution_control WHERE id=1"
@@ -193,7 +193,7 @@ class SQLiteOrderStore:
         if state not in allowed:
             raise OrderStoreError(f"Unsupported order state: {state}")
         payload = response or {}
-        with self._connect() as db:
+        with self._connection() as db:
             db.execute(
                 """UPDATE spot_order_intents SET state=?, exchange_order_id=?,
                    executed_quantity=?, cumulative_quote_quantity=?, response_json=?,
@@ -211,7 +211,7 @@ class SQLiteOrderStore:
             )
 
     def get_order(self, client_order_id: str) -> dict[str, Any] | None:
-        with self._connect() as db:
+        with self._connection() as db:
             row = db.execute(
                 "SELECT * FROM spot_order_intents WHERE client_order_id=?",
                 (client_order_id,),
@@ -219,7 +219,7 @@ class SQLiteOrderStore:
             return dict(row) if row else None
 
     def unresolved_orders(self) -> list[dict[str, Any]]:
-        with self._connect() as db:
+        with self._connection() as db:
             rows = db.execute(
                 """SELECT * FROM spot_order_intents
                    WHERE state IN ('SUBMITTING','UNKNOWN','NEW','PARTIALLY_FILLED','CANCEL_PENDING')
@@ -295,7 +295,7 @@ class SQLiteOrderStore:
         open_orders: list[dict[str, Any]],
         discrepancies: list[str],
     ) -> None:
-        with self._connect() as db:
+        with self._connection() as db:
             db.execute(
                 """INSERT INTO spot_reconciliation_snapshots
                    (created_at,balances_json,open_orders_json,discrepancies_json)
