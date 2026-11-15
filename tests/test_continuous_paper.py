@@ -194,7 +194,7 @@ def test_public_micro_alpha_entry_persists_atr_adaptive_position_targets(tmp_pat
     result = bot.step(
         {"BTCUSDT": Decimal("100.2")},
         source="BINANCE_PUBLIC_MARKET_DATA",
-        quotes={"BTCUSDT": (Decimal("100.1"), Decimal("100.2"))},
+        quotes={"BTCUSDT": (Decimal("100.1"), Decimal("100.15"))},
         candle_close_times={"BTCUSDT": 15},
         received_at_ms=1_800_000_000_115,
         market_features={"BTCUSDT": {
@@ -223,7 +223,7 @@ def test_public_micro_alpha_entry_persists_atr_adaptive_position_targets(tmp_pat
     assert decision[2] == "BUY"
     assert "IMBALANCE" in decision[3]
     assert decision[4] == "BUY"
-    assert "CONSENSUS_PASSED" in decision[5]
+    assert "STRICT_3_OF_3_BUY_CONSENSUS_PASSED" in decision[5]
     assert Decimal(decision[6]) > 0
     assert Decimal(decision[7]) > 0
     assert decision[8] == "BUY"
