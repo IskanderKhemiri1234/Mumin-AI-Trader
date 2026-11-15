@@ -104,7 +104,17 @@ class BinanceSpotTestnetOrderPreflight:
 
     @staticmethod
     def _is_step_aligned(value: Decimal, step: Decimal) -> bool:
-        return step > 0 and value % step == 0
+        return step == 0 or (step > 0 and value % step == 0)
+
+    @staticmethod
+    def _nonnegative_decimal(value: Decimal | str | int, field: str) -> Decimal:
+        try:
+            result = Decimal(str(value))
+        except (InvalidOperation, ValueError) as exc:
+            raise TestnetPreflightError(f"{field} must be a valid decimal.") from exc
+        if not result.is_finite() or result < 0:
+            raise TestnetPreflightError(f"{field} must be zero or greater.")
+        return result
 
     async def validate_limit_order(
         self,
@@ -140,12 +150,12 @@ class BinanceSpotTestnetOrderPreflight:
         if not price_filter or not lot_filter:
             raise TestnetPreflightError("Required PRICE_FILTER or LOT_SIZE metadata is missing.")
 
-        tick_size = self._decimal(price_filter.get("tickSize", "0"), "tickSize")
-        step_size = self._decimal(lot_filter.get("stepSize", "0"), "stepSize")
-        min_price = Decimal(str(price_filter.get("minPrice", "0")))
-        max_price = Decimal(str(price_filter.get("maxPrice", "0")))
-        min_qty = self._decimal(lot_filter.get("minQty", "0"), "minQty")
-        max_qty = self._decimal(lot_filter.get("maxQty", "0"), "maxQty")
+        tick_size = self._nonnegative_decimal(price_filter.get("tickSize", "0"), "tickSize")
+        step_size = self._nonnegative_decimal(lot_filter.get("stepSize", "0"), "stepSize")
+        min_price = self._nonnegative_decimal(price_filter.get("minPrice", "0"), "minPrice")
+        max_price = self._nonnegative_decimal(price_filter.get("maxPrice", "0"), "maxPrice")
+        min_qty = self._nonnegative_decimal(lot_filter.get("minQty", "0"), "minQty")
+        max_qty = self._nonnegative_decimal(lot_filter.get("maxQty", "0"), "maxQty")
 
         if not self._is_step_aligned(limit_price, tick_size):
             raise TestnetPreflightError("price does not align with the symbol tickSize.")
@@ -153,19 +163,21 @@ class BinanceSpotTestnetOrderPreflight:
             raise TestnetPreflightError("quantity does not align with the symbol stepSize.")
         if limit_price < min_price or (max_price > 0 and limit_price > max_price):
             raise TestnetPreflightError("price is outside the symbol PRICE_FILTER range.")
-        if qty < min_qty or qty > max_qty:
+        if qty < min_qty or (max_qty > 0 and qty > max_qty):
             raise TestnetPreflightError("quantity is outside the symbol LOT_SIZE range.")
 
         notional = qty * limit_price
         notional_filter = filters.get("NOTIONAL") or filters.get("MIN_NOTIONAL")
         if notional_filter:
-            minimum = Decimal(str(notional_filter.get("minNotional", "0")))
-            maximum = Decimal(str(notional_filter.get("maxNotional", "0")))
+            minimum = self._nonnegative_decimal(notional_filter.get("minNotional", "0"), "minNotional")
+            maximum = self._nonnegative_decimal(notional_filter.get("maxNotional", "0"), "maxNotional")
             if minimum > 0 and notional < minimum:
                 raise TestnetPreflightError("Order notional is below the exchange minimum.")
             if maximum > 0 and notional > maximum:
                 raise TestnetPreflightError("Order notional exceeds the exchange maximum.")
 
+        if notional < self.settings.MIN_TRADE_ALLOCATION_USD:
+            raise TestnetPreflightError("Order notional is below the configured minimum trade allocation.")
         if notional > self.settings.MAX_TRADE_ALLOCATION_USD:
             raise TestnetPreflightError("Order notional exceeds the configured per-trade ceiling.")
         return {
