@@ -178,8 +178,8 @@ class BinanceSpotTestnetOrderPreflight:
             if maximum > 0 and notional > maximum:
                 raise TestnetPreflightError("Order notional exceeds the exchange maximum.")
 
-        if notional < self.settings.MIN_TRADE_ALLOCATION_USD:
-            raise TestnetPreflightError("Order notional is below the configured minimum trade allocation.")
+        if normalized_side == "BUY" and notional < self.settings.MIN_TRADE_ALLOCATION_USD:
+            raise TestnetPreflightError("BUY notional is below the configured minimum trade allocation.")
         if notional > self.settings.MAX_TRADE_ALLOCATION_USD:
             raise TestnetPreflightError("Order notional exceeds the configured per-trade ceiling.")
         return {
