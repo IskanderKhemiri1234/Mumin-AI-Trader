@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from mumin_trader.ai_engine.strategy_engine import StrategyEngine\nfrom mumin_trader.exchanges.binance.rest_client import BinanceSpotRESTClient
+from mumin_trader.ai_engine.strategy_engine import CORE_SYMBOLS, StrategyEngine\nfrom mumin_trader.exchanges.binance.rest_client import BinanceSpotRESTClient
 
 ZERO = Decimal("0")
 BPS = Decimal("10000")
@@ -103,7 +103,7 @@ class MarketScanner:
         self.quote_asset = quote_asset.upper()
         self.min_quote_volume = Decimal(min_quote_volume)
         self.max_spread_bps = Decimal(max_spread_bps)
-        self.allowed_symbols = {s.upper() for s in allowed_symbols} if allowed_symbols else None
+        self.allowed_symbols = {s.upper() for s in allowed_symbols} if allowed_symbols else set(CORE_SYMBOLS)
         self.interval = interval
         self.candle_limit = max(60, min(int(candle_limit), 500))
         self.max_symbols = max(1, min(int(max_symbols), 100))
