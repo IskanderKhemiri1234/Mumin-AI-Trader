@@ -371,7 +371,7 @@ class ContinuousPaperBot:
                 )
                 spread_blocked = not liquidity_ok
                 signals.append(
-                    f"{symbol}:{signal_name}:MOM={momentum_vote}" + (":SPREAD_BLOCK" if spread_blocked else "")
+                    f"{symbol}:{signal_name}" + (":SPREAD_BLOCK" if spread_blocked else "")
                 )
                 if position is not None:
                     # Trigger exits on estimated NET return after both entry and
