@@ -79,6 +79,12 @@ pytest -q
 
 Paper fills are simulated and persisted in SQLite; they are not exchange fills. Docker Compose defaults the continuous Paper service to Binance public market data. Set `MUMIN_MARKET_DATA_SOURCE=MOCK_SYNTHETIC` in the private environment to use deterministic offline prices. Separate database files are used for synthetic and public-market sessions. BNB fee deduction is not enabled by the continuous Paper engine; fees are estimated in USDT and are not account-verified.
 
+## Spot Testnet order preflight (non-executing)
+
+The isolated `BinanceSpotTestnetOrderPreflight` adapter validates a Spot LIMIT order against live Spot Testnet `exchangeInfo` filters and signs only Binance's `POST /api/v3/order/test` endpoint. Binance documents this endpoint as validating an order without sending it to the matching engine. The adapter pins its REST host to `https://testnet.binance.vision`, supports only the configured Spot watchlist, enforces the configured per-trade quote ceiling, and is disabled by default.
+
+To opt into this validation-only check, set `TESTNET_ORDER_PREFLIGHT_ENABLED=true` together with Spot Testnet API credentials. The process must remain `TRADING_ENV=TESTNET`, `TRADING_MODE=PAPER`, `ALLOW_MAINNET=false`, and `LIVE_TRADING_ENABLED=false`. This does **not** place a Testnet order, create a persistent order record, or authorize Mainnet trading. A separate reviewed implementation is still required for actual Testnet order submission, durable order lifecycle state, idempotent retries, partial-fill reconciliation, exchange-side protective orders, and emergency halt behavior.
+
 ## Not production-ready
 
 No exchange order submission, withdrawals, margin, or futures. Before even a first Spot Testnet order, the project still needs a separately reviewed Testnet-only execution adapter, exchange filter validation, persistent order state, idempotency, reconciliation, explicit emergency halt, and tests proving Mainnet is rejected. Paper backtests and simulated results never guarantee future returns.
