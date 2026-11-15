@@ -29,7 +29,7 @@ h1{font-size:19px;color:var(--gold);margin:0 0 5px}h2{font-size:15px;color:var(-
 @media(max-width:360px){body{padding:10px}.grid{grid-template-columns:1fr}.metric b{font-size:16px}}
 </style></head><body>
 <header><h1>MUMIN AI TRADER</h1><div class="status"><i class="dot"></i><span id="marketStatus" class="muted">الاتصال بالسوق العام…</span></div>
-<p class="muted">مؤشر السوق يتحدث كل 5 ثوانٍ · سجل Paper يتحدث عند نشر دورة المحرك</p><span class="pill">PAPER ONLY · LIVE ORDERS DISABLED</span></header>
+<p class="muted">أسعار السوق عبر WebSocket مباشر · سجل Paper يُحدّث كل 10 ثوانٍ</p><span class="pill">PAPER ONLY · LIVE ORDERS DISABLED</span></header>
 <section class="card"><h2>المحفظة التجريبية · 70 USDT</h2><div class="metrics">
 <div class="metric"><small>قيمة المحفظة</small><b id="equity">—</b></div><div class="metric"><small>النقد المتاح</small><b id="cash">—</b></div>
 <div class="metric"><small>الربح المحقق</small><b id="realized">—</b></div><div class="metric"><small>العائد الكلي</small><b id="returns">—</b></div>
@@ -45,7 +45,16 @@ const fmt=(v,d=4)=>{const n=Number(v);return Number.isFinite(n)?n.toLocaleString
 const esc=s=>String(s??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function spark(values){if(values.length<2)return '';const lo=Math.min(...values),hi=Math.max(...values),span=hi-lo||1;const pts=values.map((v,i)=>((i/(values.length-1))*180)+','+(30-((v-lo)/span)*25)).join(' ');return '<svg viewBox="0 0 180 36" preserveAspectRatio="none"><polyline fill="none" stroke="#e7c982" stroke-width="2" points="'+pts+'"/></svg>'}
 function renderAssets(rows){document.getElementById('assets').innerHTML=symbols.map(s=>{const x=rows.find(v=>v.symbol===s);if(!x)return '<article class="asset"><b>'+s+'</b><span class="muted">لا توجد بيانات</span></article>';const p=Number(x.lastPrice),chg=Number(x.priceChangePercent);const h=history[s]||(history[s]=[]);h.push(p);if(h.length>24)h.shift();return '<article class="asset"><div class="top"><span class="symbol">'+s.replace('USDT','')+'</span><span class="change '+(chg>=0?'up':'down')+'">'+(chg>=0?'+':'')+fmt(chg,2)+'%</span></div><strong class="price">'+fmt(p,8)+' USDT</strong>'+spark(h)+'</article>'}).join('')}
-async function market(){try{const url='https://api.binance.com/api/v3/ticker/24hr?symbols='+encodeURIComponent(JSON.stringify(symbols));const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const rows=await r.json();renderAssets(rows);document.getElementById('marketStatus').textContent='السوق العام متصل · '+new Date().toLocaleTimeString();}catch(e){document.getElementById('marketStatus').textContent='تعذر تحديث أسعار السوق · '+e.message}}
+const marketRows={};let marketSocket=null;let reconnectDelay=1000;let reconnectTimer=null;
+function connectMarket(){
+ if(marketSocket&&(marketSocket.readyState===WebSocket.OPEN||marketSocket.readyState===WebSocket.CONNECTING))return;
+ const streams=symbols.map(s=>s.toLowerCase()+'@ticker').join('/');
+ marketSocket=new WebSocket('wss://stream.binance.com:9443/stream?streams='+streams);
+ marketSocket.onopen=()=>{reconnectDelay=1000;document.getElementById('marketStatus').textContent='WebSocket متصل · أسعار مباشرة';};
+ marketSocket.onmessage=(event)=>{try{const packet=JSON.parse(event.data);const x=packet.data||packet;if(!x.s||!symbols.includes(x.s))return;marketRows[x.s]={symbol:x.s,lastPrice:x.c,priceChangePercent:x.P};renderAssets(Object.values(marketRows));document.getElementById('marketStatus').textContent='تحديث مباشر · '+new Date().toLocaleTimeString();}catch(e){document.getElementById('marketStatus').textContent='وصلت رسالة سوق غير صالحة';}};
+ marketSocket.onerror=()=>{document.getElementById('marketStatus').textContent='خلل WebSocket · محاولة إعادة الاتصال';};
+ marketSocket.onclose=()=>{document.getElementById('marketStatus').textContent='انقطع بث السوق · إعادة الاتصال تلقائياً';if(reconnectTimer)clearTimeout(reconnectTimer);reconnectTimer=setTimeout(connectMarket,reconnectDelay);reconnectDelay=Math.min(reconnectDelay*2,30000);};
+}
 function table(rows,heads,render){if(!rows||!rows.length)return '<p class="muted">لا توجد سجلات حالياً</p>';return '<table><thead><tr>'+heads.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.map(render).join('')+'</tbody></table>'}
 async function paper(){try{const r=await fetch('latest-state.json?ts='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const root=await r.json();if(root.mode!=='PAPER_ONLY'||root.initial_capital_usdt!=='70.00')throw Error('Paper safety schema mismatch');const s=root.snapshot;if(Number(s.tick)<lastPaperTick)return;lastPaperTick=Number(s.tick);
 document.getElementById('equity').textContent=fmt(s.equity)+' USDT';document.getElementById('cash').textContent=fmt(s.cash)+' USDT';document.getElementById('realized').textContent=fmt(s.realized_pnl)+' USDT';document.getElementById('returns').textContent=fmt(s.return_pct,3)+'%';document.getElementById('trades').textContent=s.trades;document.getElementById('positionsCount').textContent=s.positions.length;
@@ -53,7 +62,7 @@ document.getElementById('paperUpdated').textContent='الدورة #'+s.tick+' ·
 document.getElementById('positions').innerHTML=table(s.positions,['الأصل','الكمية','الدخول','السعر المرجعي','القيمة'],x=>'<tr><td>'+esc(x.symbol)+'</td><td>'+fmt(x.quantity,8)+'</td><td>'+fmt(x.entry_price,8)+'</td><td>'+fmt(x.mark_price,8)+'</td><td>'+fmt(x.market_value)+'</td></tr>');
 document.getElementById('fills').innerHTML=table(s.fills,['الدورة','الأصل','الجانب','السعر','صافي النتيجة'],x=>'<tr><td>'+esc(x.tick)+'</td><td>'+esc(x.symbol)+'</td><td>'+esc(x.side)+'</td><td>'+fmt(x.fill_price,8)+'</td><td>'+fmt(x.net_pnl)+'</td></tr>');
 }catch(e){document.getElementById('paperUpdated').textContent='تعذر تحديث سجل Paper: '+e.message+' · نحتفظ بآخر لقطة صحيحة.'}}
-market();paper();setInterval(market,5000);setInterval(paper,10000);
+connectMarket();paper();setInterval(paper,10000);
 </script></body></html>
 """
     }
