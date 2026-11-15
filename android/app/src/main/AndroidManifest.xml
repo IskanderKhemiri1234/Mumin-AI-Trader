@@ -12,7 +12,7 @@
         android:theme="@style/Theme.MuminTrader"
         android:usesCleartextTraffic="false">
         <activity
-            android:name=".MainActivity"
+            android:name=".LiveDashboardActivity"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:exported="true">
             <intent-filter>
