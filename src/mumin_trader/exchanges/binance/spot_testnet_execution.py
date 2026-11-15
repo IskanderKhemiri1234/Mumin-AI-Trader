@@ -291,13 +291,13 @@ class BinanceSpotTestnetExecution:
                 "Network failure during order submission. The order may exist; do not retry with a new ID."
             ) from exc
         except SpotExecutionError as exc:
-            if "API error 5" in str(exc):
-                self.store.update_order(client_order_id, state="UNKNOWN", error=str(exc))
-                raise SpotOrderOutcomeUnknown(
-                    "Binance returned a server error after submission; order outcome is unknown."
-                ) from exc
-            self.store.update_order(client_order_id, state="REJECTED", error=str(exc))
-            raise
+            self.store.update_order(
+                client_order_id, state="UNKNOWN",
+                error="Exchange response after submission attempt requires reconciliation: " + str(exc),
+            )
+            raise SpotOrderOutcomeUnknown(
+                "Binance returned an error after the submission attempt; outcome is treated as unknown and will not be retried automatically."
+            ) from exc
 
         state = self._status(response)
         self.store.update_order(client_order_id, state=state, response=response)
@@ -357,39 +357,45 @@ class BinanceSpotTestnetExecution:
             return {"halted": True, "cancelled": [], "failures": [type(exc).__name__]}
 
     async def reconcile(self) -> dict[str, Any]:
-        account = await self._account()
-        exchange_open = await self._request("GET", "/api/v3/openOrders", signed=True)
-        exchange_by_id = {
-            str(order.get("clientOrderId", "")): order for order in exchange_open
-        }
-        discrepancies: list[str] = []
-        local_unresolved = self.store.unresolved_orders()
-        local_ids = {str(order["client_order_id"]) for order in local_unresolved}
+        try:
+            account = await self._account()
+            exchange_open = await self._request("GET", "/api/v3/openOrders", signed=True)
+            if not isinstance(exchange_open, list):
+                raise SpotExecutionError("Open-order reconciliation response is malformed.")
+            exchange_by_id = {
+                str(order.get("clientOrderId", "")): order for order in exchange_open
+            }
+            discrepancies: list[str] = []
+            local_unresolved = self.store.unresolved_orders()
+            local_ids = {str(order["client_order_id"]) for order in local_unresolved}
 
-        for local in local_unresolved:
-            client_id = str(local["client_order_id"])
-            observed = await self._query_by_client_id(str(local["symbol"]), client_id)
-            if observed is None:
-                if local["state"] in {"SUBMITTING", "UNKNOWN", "CANCEL_PENDING"}:
-                    discrepancies.append(f"UNRESOLVED_ORDER_OUTCOME:{client_id}")
-                    self.store.update_order(
-                        client_id, state="UNKNOWN",
-                        error="Order absent from query; outcome remains unresolved and cannot be resubmitted.",
-                    )
-                continue
-            state = self._status(observed)
-            self.store.update_order(client_id, state=state, response=observed)
+            for local in local_unresolved:
+                client_id = str(local["client_order_id"])
+                observed = await self._query_by_client_id(str(local["symbol"]), client_id)
+                if observed is None:
+                    if local["state"] in {"SUBMITTING", "UNKNOWN", "CANCEL_PENDING"}:
+                        discrepancies.append(f"UNRESOLVED_ORDER_OUTCOME:{client_id}")
+                        self.store.update_order(
+                            client_id, state="UNKNOWN",
+                            error="Order absent from query; outcome remains unresolved and cannot be resubmitted.",
+                        )
+                    continue
+                state = self._status(observed)
+                self.store.update_order(client_id, state=state, response=observed)
 
-        for client_id, order in exchange_by_id.items():
-            if client_id not in local_ids:
-                discrepancies.append(f"EXCHANGE_ORDER_WITHOUT_LOCAL_INTENT:{client_id}")
-        balances = account.get("balances", [])
-        self.store.record_reconciliation(balances, exchange_open, discrepancies)
-        if discrepancies:
-            self.store.halt("RECONCILIATION_MISMATCH")
-        return {
-            "balances": balances,
-            "open_orders": exchange_open,
-            "discrepancies": discrepancies,
-            "halted": self.store.is_halted()[0],
-        }
+            for client_id in exchange_by_id:
+                if client_id not in local_ids:
+                    discrepancies.append(f"EXCHANGE_ORDER_WITHOUT_LOCAL_INTENT:{client_id}")
+            balances = account.get("balances", [])
+            self.store.record_reconciliation(balances, exchange_open, discrepancies)
+            if discrepancies:
+                self.store.halt("RECONCILIATION_MISMATCH")
+            return {
+                "balances": balances,
+                "open_orders": exchange_open,
+                "discrepancies": discrepancies,
+                "halted": self.store.is_halted()[0],
+            }
+        except Exception:
+            self.store.halt("RECONCILIATION_UNAVAILABLE")
+            raise
