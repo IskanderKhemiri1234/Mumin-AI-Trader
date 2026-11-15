@@ -215,6 +215,12 @@ class ContinuousPaperBot:
                     ask_depth_qty TEXT NOT NULL,
                     final_signal TEXT NOT NULL,
                     action TEXT NOT NULL,
+                    macro_sma20 TEXT NOT NULL DEFAULT '0',
+                    macro_sma20_slope TEXT NOT NULL DEFAULT '0',
+                    macro_trend_reason TEXT NOT NULL DEFAULT 'NOT_EVALUATED',
+                    spread_pass INTEGER NOT NULL DEFAULT 0,
+                    agent_consensus TEXT NOT NULL DEFAULT 'NOT_EVALUATED',
+                    agent_consensus_pass INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     UNIQUE(tick, symbol)
                 );
@@ -225,6 +231,18 @@ class ContinuousPaperBot:
             for name, default in (("stop_loss_pct", "0.50"), ("take_profit_pct", "1.25")):
                 if name not in position_columns:
                     db.execute(f"ALTER TABLE bot_positions ADD COLUMN {name} TEXT NOT NULL DEFAULT '{default}'")
+            decision_columns = {row[1] for row in db.execute("PRAGMA table_info(bot_agent_decisions)")}
+            decision_migrations = {
+                "macro_sma20": "TEXT NOT NULL DEFAULT '0'",
+                "macro_sma20_slope": "TEXT NOT NULL DEFAULT '0'",
+                "macro_trend_reason": "TEXT NOT NULL DEFAULT 'NOT_EVALUATED'",
+                "spread_pass": "INTEGER NOT NULL DEFAULT 0",
+                "agent_consensus": "TEXT NOT NULL DEFAULT 'NOT_EVALUATED'",
+                "agent_consensus_pass": "INTEGER NOT NULL DEFAULT 0",
+            }
+            for name, definition in decision_migrations.items():
+                if name not in decision_columns:
+                    db.execute(f"ALTER TABLE bot_agent_decisions ADD COLUMN {name} {definition}")
             market_columns = {row[1] for row in db.execute("PRAGMA table_info(bot_market_ticks)")}
             for name in ("candle_open", "candle_high", "candle_low", "candle_volume", "bid_depth_qty", "ask_depth_qty"):
                 if name not in market_columns:
@@ -424,6 +442,7 @@ class ContinuousPaperBot:
 
             # First manage existing positions for every symbol with a fresh quote.
             for symbol, price in normalized.items():
+                symbol_feature = market_features.get(symbol, {})
                 if source == PUBLIC_SOURCE and candle_close_times.get(symbol) is not None:
                     history = db.execute(
                         """SELECT price,candle_high,candle_low,candle_volume,bid_depth_qty,ask_depth_qty
@@ -455,7 +474,7 @@ class ContinuousPaperBot:
                         bid_depth=Decimal(ordered_history[-1]["bid_depth_qty"]),
                         ask_depth=Decimal(ordered_history[-1]["ask_depth_qty"]),
                         bid=bid, ask=ask, max_spread_bps=MAX_SPREAD_BPS,
-                        macro_hourly_closes=feature.get("macro_hourly_closes"),
+                        macro_hourly_closes=symbol_feature.get("macro_hourly_closes"),
                     )
                     signal_name = str(agent_details["signal"])
                     dynamic_stop = Decimal(agent_details["stop_pct"])
@@ -571,8 +590,10 @@ class ContinuousPaperBot:
                         (tick,symbol,data_source,liquidity_sweep_vote,liquidity_sweep_reason,
                          depth_imbalance_vote,depth_imbalance_reason,micro_alpha_filter_vote,
                          micro_alpha_filter_reason,bid,ask,spread_bps,atr_pct,stop_pct,target_pct,
-                         bid_depth_qty,ask_depth_qty,final_signal,action,created_at)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                         bid_depth_qty,ask_depth_qty,final_signal,action,macro_sma20,
+                         macro_sma20_slope,macro_trend_reason,spread_pass,agent_consensus,
+                         agent_consensus_pass,created_at)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (
                             tick, symbol, source,
                             str(agent_details["sweep_vote"]), str(agent_details["sweep_reason"]),
@@ -581,7 +602,24 @@ class ContinuousPaperBot:
                             str(bid), str(ask), str(agent_details["spread_bps"]),
                             str(agent_details["atr_pct"]), str(agent_details["stop_pct"]),
                             str(agent_details["target_pct"]), str(agent_details["bid_depth"]),
-                            str(agent_details["ask_depth"]), signal_name, action, timestamp,
+                            str(agent_details["ask_depth"]), signal_name, action,
+                            str(agent_details.get("macro_sma20", Decimal("0"))),
+                            str(agent_details.get("macro_sma20_slope", Decimal("0"))),
+                            str(agent_details.get("macro_trend_reason", "NOT_EVALUATED")),
+                            int(Decimal(agent_details["spread_bps"]) < MAX_SPREAD_BPS),
+                            (
+                                f'{agent_details["sweep_vote"]}_3_OF_3'
+                                if agent_details["sweep_vote"] in {"BUY", "SELL"}
+                                and agent_details["sweep_vote"] == agent_details["depth_vote"]
+                                and agent_details["depth_vote"] == agent_details["filter_vote"]
+                                else "NO_CONSENSUS"
+                            ),
+                            int(
+                                agent_details["sweep_vote"] in {"BUY", "SELL"}
+                                and agent_details["sweep_vote"] == agent_details["depth_vote"]
+                                and agent_details["depth_vote"] == agent_details["filter_vote"]
+                            ),
+                            timestamp,
                         ),
                     )
                 if action != "NONE":
