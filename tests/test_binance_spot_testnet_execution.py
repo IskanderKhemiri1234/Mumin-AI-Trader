@@ -55,6 +55,7 @@ def symbol_info() -> dict[str, object]:
 
 def account_info() -> dict[str, object]:
     return {
+        "accountType": "SPOT",
         "canTrade": True,
         "canWithdraw": False,
         "balances": [
