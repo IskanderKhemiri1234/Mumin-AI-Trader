@@ -450,3 +450,49 @@ async def test_reconciliation_persists_trade_fills_and_matches_account_balances(
         assert store.is_halted() == (False, "")
     finally:
         await client.close()
+
+
+
+@pytest.mark.asyncio
+async def test_sell_limit_order_requires_and_uses_free_base_balance(tmp_path) -> None:
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/exchangeInfo":
+            return httpx.Response(200, json=symbol_info())
+        if request.url.path == "/api/v3/account":
+            account = account_info()
+            account["balances"] = [
+                {"asset": "USDT", "free": "100", "locked": "0"},
+                {"asset": "BTC", "free": "0.00010", "locked": "0"},
+            ]
+            return httpx.Response(200, json=account)
+        if request.url.path == "/api/v3/openOrders":
+            return httpx.Response(200, json=[])
+        if request.url.path == "/api/v3/myTrades":
+            return httpx.Response(200, json=[])
+        if request.url.path == "/api/v3/order" and request.method == "POST":
+            return httpx.Response(200, json={**order_response(), "side": "SELL"})
+        return httpx.Response(404, json={"code": -2013, "msg": "Order does not exist."})
+
+    store = SQLiteOrderStore(str(tmp_path / "orders.db"))
+    client = BinanceSpotTestnetExecution(
+        settings(), store, transport=httpx.MockTransport(handler),
+    )
+    try:
+        await client.reconcile()
+        response = await client.submit_limit_order(
+            symbol="BTCUSDT", side="SELL", quantity="0.00010",
+            price="50000.00", client_order_id="mumin-test-sell-1",
+        )
+        assert response["side"] == "SELL"
+        assert store.get_order("mumin-test-sell-1")["side"] == "SELL"
+        assert any(
+            request.method == "POST" and request.url.params.get("side") == "SELL"
+            for request in seen
+        )
+    finally:
+        await client.close()
