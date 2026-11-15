@@ -219,3 +219,79 @@ def test_client_order_id_cannot_be_reused_for_different_parameters(tmp_path) -> 
     changed = dict(request, price="50001.00")
     with pytest.raises(OrderStoreError, match="collision"):
         store.register_intent(changed)
+
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_mismatch_persistently_halts_execution(tmp_path) -> None:
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/account":
+            return httpx.Response(200, json=account_info())
+        if request.url.path == "/api/v3/openOrders":
+            return httpx.Response(200, json=[order_response()])
+        return httpx.Response(404, json={"code": -2013, "msg": "Order does not exist."})
+
+    store = SQLiteOrderStore(str(tmp_path / "orders.db"))
+    client = BinanceSpotTestnetExecution(
+        settings(), store, transport=httpx.MockTransport(handler),
+    )
+    try:
+        report = await client.reconcile()
+        assert report["discrepancies"] == ["EXCHANGE_ORDER_WITHOUT_LOCAL_INTENT:mumin-test-1001"]
+        assert report["halted"] is True
+        assert store.is_halted() == (True, "RECONCILIATION_MISMATCH")
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_transport_failure_activates_kill_switch(tmp_path) -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        raise httpx.ConnectError("simulated exchange outage", request=request)
+
+    store = SQLiteOrderStore(str(tmp_path / "orders.db"))
+    client = BinanceSpotTestnetExecution(
+        settings(), store, transport=httpx.MockTransport(handler),
+    )
+    try:
+        with pytest.raises(httpx.ConnectError):
+            await client.reconcile()
+        assert store.is_halted() == (True, "RECONCILIATION_UNAVAILABLE")
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_account_without_spot_trade_permission_blocks_before_order(tmp_path) -> None:
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/exchangeInfo":
+            return httpx.Response(200, json=symbol_info())
+        if request.url.path == "/api/v3/account":
+            return httpx.Response(200, json={**account_info(), "canTrade": False})
+        return httpx.Response(200, json=[])
+
+    client = BinanceSpotTestnetExecution(
+        settings(), SQLiteOrderStore(str(tmp_path / "orders.db")),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        with pytest.raises(SpotExecutionError, match="Spot trading permission"):
+            await client.submit_limit_order(
+                symbol="BTCUSDT", side="BUY", quantity="0.00010",
+                price="50000.00", client_order_id="mumin-test-1003",
+            )
+        assert not any(req.method == "POST" and req.url.path == "/api/v3/order" for req in seen)
+    finally:
+        await client.close()
