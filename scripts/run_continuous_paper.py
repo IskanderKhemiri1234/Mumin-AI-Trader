@@ -400,7 +400,6 @@ class ContinuousPaperBot:
                 bid, ask = quotes.get(symbol, (price, price))
                 atr_pct = Decimal("0")
                 dynamic_stop, dynamic_target = STOP_LOSS_PERCENT, TAKE_PROFIT_PERCENT
-                alpha_reason = "LEGACY_PAPER_RULES"
                 if source == PUBLIC_SOURCE:
                     if len(ordered_history) >= 15:
                         signal_name, atr_pct, dynamic_stop, dynamic_target, _alpha_reason = self.micro_alpha.evaluate(
