@@ -92,11 +92,11 @@ class ExecutionEngine:
     async def submit_order(
         self,
         *,
-        settings: Any,
-        symbol: str,
-        side: OrderSide | str,
-        quantity: Decimal,
-        reference_price: Decimal,
+        settings: Any = None,
+        symbol: str = "",
+        side: OrderSide | str = "BUY",
+        quantity: Decimal | None = None,
+        reference_price: Decimal | None = None,
         **paper_options: Any,
     ) -> PaperOrder:
         """Submit through the unified entry point, but PAPER mode only.
@@ -105,6 +105,10 @@ class ExecutionEngine:
         settings object is mandatory; MAINNET, LIVE, and enabled live flags
         fail closed before a simulated fill can be created.
         """
+        if settings is None or quantity is None or reference_price is None:
+            raise ExecutionDisabledError(
+                "PAPER submission requires explicit TESTNET/PAPER settings, quantity and reference price."
+            )
         environment = getattr(settings, "TRADING_ENV", None)
         mode = getattr(settings, "TRADING_MODE", None)
         environment = getattr(environment, "value", environment)
