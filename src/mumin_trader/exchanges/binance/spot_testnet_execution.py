@@ -50,7 +50,7 @@ class BinanceSpotTestnetExecution:
             headers={"X-MBX-APIKEY": settings.BINANCE_API_KEY.get_secret_value()},
             transport=transport,
         )
-        self._validator = BinanceSpotTestnetOrderPreflight(settings)
+        self._validator = BinanceSpotTestnetOrderPreflight(settings, transport=transport)
 
     @staticmethod
     def _assert_safety_gate(settings: Settings) -> None:
@@ -61,7 +61,9 @@ class BinanceSpotTestnetExecution:
         if settings.ALLOW_MAINNET or settings.LIVE_TRADING_ENABLED:
             raise SpotExecutionError("Mainnet/live flags must remain false.")
         if not settings.TESTNET_ORDER_PREFLIGHT_ENABLED:
-            raise SpotExecutionError("Testnet execution gate is disabled.")
+            raise SpotExecutionError("Testnet order preflight gate is disabled.")
+        if not settings.TESTNET_SPOT_EXECUTION_ENABLED:
+            raise SpotExecutionError("Spot Testnet execution gate is disabled by default.")
         if not settings.BINANCE_API_KEY.get_secret_value() or not settings.BINANCE_API_SECRET.get_secret_value():
             raise SpotExecutionError("Binance Spot Testnet credentials are required.")
 
@@ -114,6 +116,10 @@ class BinanceSpotTestnetExecution:
         payload = await self._request("GET", "/api/v3/account", signed=True)
         if not isinstance(payload, dict) or not isinstance(payload.get("balances"), list):
             raise SpotExecutionError("Account response is incomplete; refusing order.")
+        if payload.get("canTrade") is not True:
+            raise SpotExecutionError("Binance account does not explicitly confirm Spot trading permission.")
+        if payload.get("canWithdraw") is not False:
+            raise SpotExecutionError("API key must explicitly have withdrawals disabled.")
         return payload
 
     async def _exchange_symbol(self, symbol: str) -> dict[str, Any]:
@@ -153,7 +159,6 @@ class BinanceSpotTestnetExecution:
         symbol_info: dict[str, Any],
     ) -> None:
         balances = self._balance_map(account)
-        filters = {item.get("filterType"): item for item in symbol_info.get("filters", [])}
         quote_asset = str(symbol_info.get("quoteAsset", self.settings.QUOTE_ASSET)).upper()
         base_asset = str(symbol_info.get("baseAsset", "")).upper()
         if not base_asset or quote_asset != self.settings.QUOTE_ASSET.upper():
