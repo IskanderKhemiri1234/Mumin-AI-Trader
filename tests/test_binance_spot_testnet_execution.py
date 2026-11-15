@@ -332,7 +332,7 @@ def test_risk_halt_allows_only_sell_intents_while_manual_halt_blocks_all(tmp_pat
         "symbol": "BTCUSDT", "side": "SELL", "type": "LIMIT", "timeInForce": "GTC",
         "quantity": "0.00010", "price": "50000.00", "newClientOrderId": "risk-exit-1",
     }
-    intent, created = store.register_intent(sell)
+    _, created = store.register_intent(sell)
     assert created is True
     assert store.claim_submission("risk-exit-1") is True
 
