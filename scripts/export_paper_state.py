@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,6 @@ try:
 except ModuleNotFoundError:
     from scripts.export_paper_report import load_snapshot
 from mumin_trader.strategy_swarm import compound_allocation, compoundable_equity
-import sqlite3
 
 
 def json_value(value: Any) -> Any:
