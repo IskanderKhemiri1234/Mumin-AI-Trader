@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     TRADING_MODE: TradingMode = TradingMode.PAPER
     ALLOW_MAINNET: bool = False
     LIVE_TRADING_ENABLED: bool = False
+    TESTNET_ORDER_PREFLIGHT_ENABLED: bool = False
     MAINNET_CONFIRMATION: str = ""
     MAINNET_LEGAL_ELIGIBILITY_CONFIRMED: bool = False
     BINANCE_API_KEY: SecretStr = SecretStr("")
@@ -60,6 +61,15 @@ class Settings(BaseSettings):
             raise ValueError("Per-trade risk must be below daily loss limit.")
         if self.TRADING_ENV == TradingEnvironment.TESTNET and (self.TRADING_MODE == TradingMode.LIVE or self.LIVE_TRADING_ENABLED):
             raise ValueError("Live trading is prohibited in TESTNET configuration.")
+        if self.TESTNET_ORDER_PREFLIGHT_ENABLED:
+            if self.TRADING_ENV is not TradingEnvironment.TESTNET:
+                raise ValueError("Testnet order preflight is restricted to TESTNET.")
+            if self.TRADING_MODE is not TradingMode.PAPER:
+                raise ValueError("Testnet order preflight requires PAPER mode.")
+            if self.ALLOW_MAINNET or self.LIVE_TRADING_ENABLED:
+                raise ValueError("Testnet order preflight requires all Mainnet/live flags disabled.")
+            if not self.BINANCE_API_KEY.get_secret_value() or not self.BINANCE_API_SECRET.get_secret_value():
+                raise ValueError("Testnet order preflight requires Spot Testnet API credentials.")
         if self.TRADING_ENV == TradingEnvironment.MAINNET:
             required = (self.ALLOW_MAINNET, self.LIVE_TRADING_ENABLED, self.TRADING_MODE == TradingMode.LIVE, self.MAINNET_CONFIRMATION == "I_UNDERSTAND_LIVE_RISK", self.MAINNET_LEGAL_ELIGIBILITY_CONFIRMED)
             if not all(required):
