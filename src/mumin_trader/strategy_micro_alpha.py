@@ -40,7 +40,6 @@ class LiquiditySweepAgent:
     def evaluate(self, highs: list[Decimal], lows: list[Decimal], closes: list[Decimal], volumes: list[Decimal]) -> str:
         if min(len(highs), len(lows), len(closes), len(volumes)) < 9:
             return "HOLD"
-        previous_low, previous_high = min(lows[-9:-1]), max(highs[-9:-1])
         candle_range = highs[-1] - lows[-1]
         average_volume = _mean(volumes[-9:-1])
         if candle_range <= 0 or volumes[-1] <= 0 or average_volume <= 0:
