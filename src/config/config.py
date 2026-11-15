@@ -15,6 +15,7 @@ class TradingEnvironment(str, Enum):
 
 class TradingMode(str, Enum):
     PAPER = "PAPER"
+    TESTNET = "TESTNET"
     LIVE = "LIVE"
 
 
@@ -65,25 +66,21 @@ class Settings(BaseSettings):
         if self.TESTNET_SPOT_EXECUTION_ENABLED and not self.TESTNET_ORDER_PREFLIGHT_ENABLED:
             raise ValueError("Spot Testnet execution requires the order preflight gate.")
         if self.TESTNET_SPOT_EXECUTION_ENABLED:
-            if self.TRADING_ENV is not TradingEnvironment.TESTNET or self.TRADING_MODE is not TradingMode.PAPER:
-                raise ValueError("Spot Testnet execution requires TESTNET and PAPER modes.")
+            if self.TRADING_ENV is not TradingEnvironment.TESTNET or self.TRADING_MODE is not TradingMode.TESTNET:
+                raise ValueError("Spot Testnet execution requires TRADING_ENV=TESTNET and TRADING_MODE=TESTNET.")
             if self.ALLOW_MAINNET or self.LIVE_TRADING_ENABLED:
                 raise ValueError("Spot Testnet execution requires all Mainnet/live flags disabled.")
         if self.TESTNET_ORDER_PREFLIGHT_ENABLED:
             if self.TRADING_ENV is not TradingEnvironment.TESTNET:
                 raise ValueError("Testnet order preflight is restricted to TESTNET.")
-            if self.TRADING_MODE is not TradingMode.PAPER:
-                raise ValueError("Testnet order preflight requires PAPER mode.")
+            if self.TRADING_MODE not in {TradingMode.PAPER, TradingMode.TESTNET}:
+                raise ValueError("Testnet preflight requires PAPER or TESTNET mode.")
             if self.ALLOW_MAINNET or self.LIVE_TRADING_ENABLED:
                 raise ValueError("Testnet order preflight requires all Mainnet/live flags disabled.")
             if not self.BINANCE_API_KEY.get_secret_value() or not self.BINANCE_API_SECRET.get_secret_value():
                 raise ValueError("Testnet order preflight requires Spot Testnet API credentials.")
-        if self.TRADING_ENV == TradingEnvironment.MAINNET:
-            required = (self.ALLOW_MAINNET, self.LIVE_TRADING_ENABLED, self.TRADING_MODE == TradingMode.LIVE, self.MAINNET_CONFIRMATION == "I_UNDERSTAND_LIVE_RISK", self.MAINNET_LEGAL_ELIGIBILITY_CONFIRMED)
-            if not all(required):
-                raise ValueError("MAINNET blocked: explicit safety and eligibility checks failed.")
-            if not self.BINANCE_API_KEY.get_secret_value() or not self.BINANCE_API_SECRET.get_secret_value():
-                raise ValueError("MAINNET requires API credentials.")
+        if self.TRADING_ENV is TradingEnvironment.MAINNET:
+            raise ValueError("MAINNET is disabled in this release; only the isolated Spot TESTNET adapter exists.")
         return self
 
     @property
