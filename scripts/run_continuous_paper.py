@@ -34,7 +34,7 @@ FEE_RATE = Decimal("0.001")
 SLIPPAGE_BPS = Decimal("2")
 STOP_LOSS_PERCENT = Decimal(os.getenv("SIMULATED_STOP_LOSS_PERCENT", "0.50"))
 TAKE_PROFIT_PERCENT = Decimal(os.getenv("SIMULATED_TAKE_PROFIT_PERCENT", "1.25"))
-MAX_SPREAD_BPS = Decimal(os.getenv("MAX_SPREAD_BPS", "12.00"))
+MAX_SPREAD_BPS = Decimal(os.getenv("MAX_SPREAD_BPS", "8.00"))
 MAX_DAILY_LOSS_PERCENT = Decimal(os.getenv("MAX_DAILY_LOSS_PERCENT", "2.00"))
 MAX_DRAWDOWN_PERCENT = Decimal(os.getenv("MAX_DRAWDOWN_PERCENT", "5.00"))
 
@@ -47,8 +47,8 @@ if STOP_LOSS_PERCENT != Decimal("0.50"):
     raise RuntimeError("Paper maximum stop-loss cap is fixed at 0.50%.")
 if TAKE_PROFIT_PERCENT != Decimal("1.25"):
     raise RuntimeError("Paper maximum take-profit cap is fixed at 1.25%.")
-if MAX_SPREAD_BPS != Decimal("12.00"):
-    raise RuntimeError("Paper liquidity shield is fixed at a 12.00 bps maximum spread.")
+if MAX_SPREAD_BPS != Decimal("8.00"):
+    raise RuntimeError("Paper liquidity shield is fixed at a strict 8.00 bps maximum spread.")
 if MAX_DAILY_LOSS_PERCENT != Decimal("2.00"):
     raise RuntimeError("Paper daily loss limit is fixed at 2.00%.")
 
@@ -455,6 +455,7 @@ class ContinuousPaperBot:
                         bid_depth=Decimal(ordered_history[-1]["bid_depth_qty"]),
                         ask_depth=Decimal(ordered_history[-1]["ask_depth_qty"]),
                         bid=bid, ask=ask, max_spread_bps=MAX_SPREAD_BPS,
+                        macro_hourly_closes=feature.get("macro_hourly_closes"),
                     )
                     signal_name = str(agent_details["signal"])
                     dynamic_stop = Decimal(agent_details["stop_pct"])
@@ -758,6 +759,7 @@ async def run_bot(
                         "low": item.candle_low, "volume": item.candle_volume,
                         "bid_depth_qty": item.bid_depth_qty,
                         "ask_depth_qty": item.ask_depth_qty,
+                        "macro_hourly_closes": item.macro_hourly_closes,
                     }
                     for symbol, item in snapshots.items()
                 }
