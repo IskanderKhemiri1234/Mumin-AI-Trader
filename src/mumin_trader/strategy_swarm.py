@@ -73,12 +73,16 @@ def compound_allocation(
 ) -> Decimal:
     """Reinvest available Paper profits while preserving the 70-USDT capital ceiling.
 
-    Position budget scales with current equity at the original 5/70 ratio, never
-    exceeds 5 USDT, and cannot consume the reserved cash balance.
+    Position budget scales with current equity at the original 5/70 ratio and
+    cannot consume the reserved cash balance. Portfolio exposure is capped by
+    the engine's independent 70-USDT capital-allocation ceiling.
     """
-    equity = max(Decimal("0"), min(Decimal(equity), Decimal(initial_capital)))
+    equity = max(Decimal("0"), Decimal(equity))
     cash_available = max(Decimal("0"), Decimal(cash) - Decimal(reserve_cash))
     if initial_capital <= 0:
         return Decimal("0")
+    # max_trade is the base budget at the original 70-USDT equity. Realized
+    # profits increase the percentage-based budget, while the caller's
+    # portfolio exposure ceiling remains the hard limit on total deployed funds.
     proportional_budget = equity * Decimal(max_trade) / Decimal(initial_capital)
-    return min(Decimal(max_trade), proportional_budget, cash_available)
+    return min(proportional_budget, cash_available)
