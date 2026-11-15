@@ -93,6 +93,8 @@ def handler_for(seen: list[httpx.Request], *, timeout_submit: bool = False, miss
             return httpx.Response(200, json=account_info())
         if path == "/api/v3/openOrders":
             return httpx.Response(200, json=[])
+        if path == "/api/v3/myTrades":
+            return httpx.Response(200, json=[])
         if path == "/api/v3/order" and request.method == "POST":
             if timeout_submit:
                 raise httpx.ReadTimeout("simulated timeout", request=request)
@@ -127,6 +129,7 @@ async def test_submit_is_testnet_only_and_persists_idempotent_order(tmp_path) ->
     store = SQLiteOrderStore(str(tmp_path / "orders.db"))
     client = BinanceSpotTestnetExecution(settings(), store, transport=transport)
     try:
+        await client.reconcile()
         response = await client.submit_limit_order(
             symbol="BTCUSDT", side="BUY", quantity="0.00010",
             price="50000.00", client_order_id="mumin-test-1001",
@@ -152,6 +155,7 @@ async def test_cancel_order_persists_exchange_cancel_status(tmp_path) -> None:
         transport=httpx.MockTransport(handler_for(seen)),
     )
     try:
+        await client.reconcile()
         await client.submit_limit_order(
             symbol="BTCUSDT", side="BUY", quantity="0.00010",
             price="50000.00", client_order_id="mumin-test-1001",
@@ -171,6 +175,7 @@ async def test_timeout_marks_unknown_and_never_resubmits(tmp_path) -> None:
         transport=httpx.MockTransport(handler_for(seen, timeout_submit=True, missing_query=True)),
     )
     try:
+        await client.reconcile()
         with pytest.raises(SpotOrderOutcomeUnknown):
             await client.submit_limit_order(
                 symbol="BTCUSDT", side="BUY", quantity="0.00010",
@@ -284,9 +289,13 @@ async def test_account_without_spot_trade_permission_blocks_before_order(tmp_pat
             return httpx.Response(200, json={**account_info(), "canTrade": False})
         return httpx.Response(200, json=[])
 
+    store = SQLiteOrderStore(str(tmp_path / "orders.db"))
+    store.update_risk_state(
+        equity="100", trading_day="2026-11-15",
+        max_daily_loss_percent="2", max_drawdown_percent="5",
+    )
     client = BinanceSpotTestnetExecution(
-        settings(), SQLiteOrderStore(str(tmp_path / "orders.db")),
-        transport=httpx.MockTransport(handler),
+        settings(), store, transport=httpx.MockTransport(handler),
     )
     try:
         with pytest.raises(SpotExecutionError, match="Spot trading permission"):
