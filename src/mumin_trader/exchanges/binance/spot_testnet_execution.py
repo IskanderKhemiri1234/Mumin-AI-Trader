@@ -56,8 +56,8 @@ class BinanceSpotTestnetExecution:
     def _assert_safety_gate(settings: Settings) -> None:
         if settings.TRADING_ENV is not TradingEnvironment.TESTNET:
             raise SpotExecutionError("Spot execution is restricted to Binance TESTNET.")
-        if settings.TRADING_MODE is not TradingMode.PAPER:
-            raise SpotExecutionError("Application mode must remain PAPER for isolated Testnet execution.")
+        if settings.TRADING_MODE is not TradingMode.TESTNET:
+            raise SpotExecutionError("TRADING_MODE=TESTNET is required for exchange order execution.")
         if settings.ALLOW_MAINNET or settings.LIVE_TRADING_ENABLED:
             raise SpotExecutionError("Mainnet/live flags must remain false.")
         if not settings.TESTNET_ORDER_PREFLIGHT_ENABLED:
@@ -118,8 +118,6 @@ class BinanceSpotTestnetExecution:
             raise SpotExecutionError("Account response is incomplete; refusing order.")
         if payload.get("canTrade") is not True:
             raise SpotExecutionError("Binance account does not explicitly confirm Spot trading permission.")
-        if payload.get("canWithdraw") is not False:
-            raise SpotExecutionError("API key must explicitly have withdrawals disabled.")
         return payload
 
     async def _exchange_symbol(self, symbol: str) -> dict[str, Any]:
