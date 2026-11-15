@@ -61,6 +61,6 @@ Scope: current `main` Paper engine plus the isolated Testnet implementation prop
 ## Current release gate
 
 - Paper engine: remains Paper only.
-- Testnet adapter: isolated, opt-in, under review; not connected to autonomous signals.
+- Testnet adapter: isolated, opt-in, under review; has an explicit operator CLI, but is not connected to autonomous signals.
 - Mainnet: hard blocked.
 - Real-money trading: **not approved and not enabled**.
