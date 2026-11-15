@@ -267,6 +267,18 @@ class BinanceSpotTestnetExecution:
             raise
         return response if isinstance(response, dict) else None
 
+    async def _sync_fills_if_needed(self, response: dict[str, Any]) -> None:
+        executed = Decimal(str(response.get("executedQty", "0")))
+        if executed <= 0:
+            return
+        try:
+            await self.sync_trade_history()
+        except Exception as exc:
+            self.store.halt("TRADE_LEDGER_SYNC_UNAVAILABLE")
+            raise SpotOrderOutcomeUnknown(
+                "The exchange reports an execution but trade fills could not be persisted; all new orders are halted pending reconciliation."
+            ) from exc
+
     async def submit_limit_order(
         self,
         *,
@@ -345,6 +357,7 @@ class BinanceSpotTestnetExecution:
 
         state = self._status(response)
         self.store.update_order(client_order_id, state=state, response=response)
+        await self._sync_fills_if_needed(response)
         return response
 
     async def cancel_order(self, *, symbol: str, client_order_id: str) -> dict[str, Any]:
@@ -368,12 +381,14 @@ class BinanceSpotTestnetExecution:
             raise SpotOrderOutcomeUnknown("Cancellation outcome is unknown; query order status before retry.") from exc
         state = self._status(response)
         self.store.update_order(client_order_id, state=state, response=response)
+        await self._sync_fills_if_needed(response)
         return response
 
     async def get_order(self, *, symbol: str, client_order_id: str) -> dict[str, Any] | None:
         response = await self._query_by_client_id(symbol.upper(), client_order_id)
         if response is not None:
             self.store.update_order(client_order_id, state=self._status(response), response=response)
+            await self._sync_fills_if_needed(response)
         return response
 
     async def emergency_stop(self, reason: str = "MANUAL_EMERGENCY_STOP") -> dict[str, Any]:
