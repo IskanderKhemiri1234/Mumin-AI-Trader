@@ -112,6 +112,7 @@ class MarketScanner:
         self.candle_limit = max(60, min(int(candle_limit), 500))
         self.max_symbols = max(1, min(int(max_symbols), 100))
         self.min_expected_move_bps = Decimal(min_expected_move_bps)
+        self.strategy_engine = StrategyEngine()
         self._book: dict[str, tuple[Decimal, Decimal]] = {}
         self._volume: dict[str, tuple[Decimal, Decimal]] = {}
 
