@@ -4,7 +4,8 @@ from pydantic import ValidationError
 from config.config import Settings, TradingEnvironment, TradingMode
 
 
-def test_safe_defaults():
+def test_safe_defaults(monkeypatch):
+    monkeypatch.delenv("WATCHLIST", raising=False)
     settings = Settings(_env_file=None)
     assert settings.TRADING_ENV == TradingEnvironment.TESTNET
     assert settings.TRADING_MODE == TradingMode.PAPER
