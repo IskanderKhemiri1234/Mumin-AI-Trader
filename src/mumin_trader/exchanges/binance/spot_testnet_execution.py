@@ -144,6 +144,34 @@ class BinanceSpotTestnetExecution:
             result[str(row["asset"]).upper()] = (free, locked)
         return result
 
+    async def sync_trade_history(self) -> dict[str, Decimal]:
+        """Page and persist every Spot trade for the configured symbols."""
+        for symbol in self.settings.watchlist_symbols:
+            last_id = self.store.last_trade_id(symbol)
+            from_id = 0 if last_id is None else last_id + 1
+            for page in range(100):
+                fills = await self._request(
+                    "GET", "/api/v3/myTrades",
+                    {"symbol": symbol, "limit": "1000", "fromId": str(from_id)},
+                    signed=True,
+                )
+                if not isinstance(fills, list):
+                    raise SpotExecutionError(f"Trade-history response is malformed for {symbol}.")
+                if not fills:
+                    break
+                ids = [int(fill["id"]) for fill in fills]
+                if ids != sorted(ids) or ids[-1] < from_id:
+                    raise SpotExecutionError(f"Trade-history pagination is inconsistent for {symbol}.")
+                self.store.record_trade_fills(symbol, fills)
+                if len(fills) < 1000:
+                    break
+                from_id = ids[-1] + 1
+            else:
+                raise SpotExecutionError(
+                    f"Trade history for {symbol} exceeded the 100-page safety bound; reconciliation is incomplete."
+                )
+        return self.store.trade_position_quantities(self.settings.QUOTE_ASSET)
+
     async def _check_portfolio_risk(
         self,
         *,
@@ -409,6 +437,7 @@ class BinanceSpotTestnetExecution:
             )
             if risk_reason:
                 discrepancies.append(f"RISK_LIMIT:{risk_reason}")
+            trade_positions = await self.sync_trade_history()
             local_unresolved = self.store.unresolved_orders()
             local_ids = {str(order["client_order_id"]) for order in local_unresolved}
 
@@ -430,6 +459,10 @@ class BinanceSpotTestnetExecution:
                 if client_id not in local_ids:
                     discrepancies.append(f"EXCHANGE_ORDER_WITHOUT_LOCAL_INTENT:{client_id}")
             balances = account.get("balances", [])
+            balance_discrepancies = self.store.reconcile_account_balances(
+                balances, quote_asset=self.settings.QUOTE_ASSET,
+            )
+            discrepancies.extend(balance_discrepancies)
             self.store.record_reconciliation(balances, exchange_open, discrepancies)
             if any(not item.startswith("RISK_LIMIT:") for item in discrepancies):
                 self.store.halt("RECONCILIATION_MISMATCH")
@@ -440,6 +473,7 @@ class BinanceSpotTestnetExecution:
                 "open_orders": exchange_open,
                 "discrepancies": discrepancies,
                 "risk_reason": risk_reason,
+                "trade_positions": {asset: str(quantity) for asset, quantity in trade_positions.items()},
                 "halted": self.store.is_halted()[0],
             }
         except Exception:
