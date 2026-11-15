@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 
+from mumin_trader.strategy_swarm import PaperSwarm, compound_allocation
 from mumin_trader.exchanges.binance.public_market_data import (
     ALLOWED_SYMBOLS,
     PublicMarketData,
@@ -84,6 +85,7 @@ class ContinuousPaperBot:
         if database != ":memory:":
             Path(database).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        self.swarm = PaperSwarm()
 
     def _connect(self):
         db = sqlite3.connect(self.database, timeout=20)
@@ -361,20 +363,15 @@ class ContinuousPaperBot:
                 momentum = self._momentum(
                     [Decimal(row["price"]) for row in reversed(history)]
                 )
-                signal_name = "BUY" if momentum >= Decimal("8") else (
-                    "SELL" if momentum <= Decimal("-8") else "HOLD"
-                )
                 position = open_positions.get(symbol)
                 action = "NONE"
                 bid, ask = quotes.get(symbol, (price, price))
-                spread_mid = (bid + ask) / Decimal("2")
-                spread_bps = (
-                    (ask - bid) / spread_mid * Decimal("10000")
-                    if spread_mid > 0 else Decimal("Infinity")
+                signal_name, momentum_vote, liquidity_ok = self.swarm.evaluate(
+                    momentum, bid, ask, MAX_SPREAD_BPS
                 )
-                spread_blocked = spread_bps > MAX_SPREAD_BPS
+                spread_blocked = not liquidity_ok
                 signals.append(
-                    f"{symbol}:{signal_name}" + (":SPREAD_BLOCK" if spread_blocked else "")
+                    f"{symbol}:{signal_name}:MOM={momentum_vote}" + (":SPREAD_BLOCK" if spread_blocked else "")
                 )
                 if position is not None:
                     # Trigger exits on estimated NET return after both entry and
@@ -435,7 +432,10 @@ class ContinuousPaperBot:
                          for pos_symbol, pos in open_positions.items()),
                         Decimal("0"),
                     )
-                    allocation = min(MAX_TRADE, max(Decimal("0"), cash - reserve_cash))
+                    allocation = compound_allocation(
+                        marked_equity, cash, reserve_cash,
+                        initial_capital=self.initial_cash, max_trade=MAX_TRADE,
+                    )
                     if exposure + allocation <= MAX_TOTAL_EXPOSURE and allocation > 0:
                         fill = simulated_fill_price("BUY", bid, ask, SLIPPAGE_BPS)
                         quantity = (allocation / (fill * (Decimal(1) + FEE_RATE))).quantize(
