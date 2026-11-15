@@ -340,3 +340,38 @@ def test_risk_halt_allows_only_sell_intents_while_manual_halt_blocks_all(tmp_pat
     manual_store.halt("MANUAL_EMERGENCY_STOP")
     with pytest.raises(OrderStoreError, match="Execution halt"):
         manual_store.register_intent(sell)
+
+
+
+@pytest.mark.asyncio
+async def test_partial_fill_status_and_quantities_are_persisted(tmp_path) -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/order":
+            partial = {
+                **order_response("PARTIALLY_FILLED"),
+                "executedQty": "0.00004",
+                "cummulativeQuoteQty": "2.00",
+            }
+            return httpx.Response(200, json=partial)
+        return httpx.Response(404, json={"code": -2013, "msg": "Order does not exist."})
+
+    store = SQLiteOrderStore(str(tmp_path / "orders.db"))
+    store.register_intent({
+        "symbol": "BTCUSDT", "side": "BUY", "type": "LIMIT", "timeInForce": "GTC",
+        "quantity": "0.00010", "price": "50000.00", "newClientOrderId": "mumin-test-1004",
+    })
+    client = BinanceSpotTestnetExecution(
+        settings(), store, transport=httpx.MockTransport(handler),
+    )
+    try:
+        result = await client.get_order(symbol="BTCUSDT", client_order_id="mumin-test-1004")
+        assert result is not None
+        assert result["status"] == "PARTIALLY_FILLED"
+        saved = store.get_order("mumin-test-1004")
+        assert saved["state"] == "PARTIALLY_FILLED"
+        assert saved["executed_quantity"] == "0.00004"
+        assert saved["cumulative_quote_quantity"] == "2.00"
+    finally:
+        await client.close()
