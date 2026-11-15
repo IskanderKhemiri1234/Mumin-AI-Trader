@@ -97,8 +97,6 @@ The project is **not approved for real-money trading**. Mainnet is hard-blocked 
 
 
 
-No exchange order submission, withdrawals, margin, or futures. Before even a first Spot Testnet order, the project still needs a separately reviewed Testnet-only execution adapter, exchange filter validation, persistent order state, idempotency, reconciliation, explicit emergency halt, and tests proving Mainnet is rejected. Paper backtests and simulated results never guarantee future returns.
-
 ## Verify Binance Spot Testnet credentials (read-only)
 
 1. In GitHub repository Settings → Secrets and variables → Actions, create repository secrets named `BINANCE_API_KEY` and `BINANCE_API_SECRET` using **Binance Spot Testnet** credentials.
