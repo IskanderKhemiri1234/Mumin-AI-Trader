@@ -18,7 +18,7 @@ from mumin_trader.exchanges.binance.testnet_order_preflight import TESTNET_REST_
 def settings(**overrides: object) -> Settings:
     values: dict[str, object] = {
         "TRADING_ENV": TradingEnvironment.TESTNET,
-        "TRADING_MODE": TradingMode.PAPER,
+        "TRADING_MODE": TradingMode.TESTNET,
         "ALLOW_MAINNET": False,
         "LIVE_TRADING_ENABLED": False,
         "TESTNET_ORDER_PREFLIGHT_ENABLED": True,
@@ -116,7 +116,7 @@ async def test_execution_gate_is_disabled_by_default(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_execution_refuses_mainnet_or_live_configuration(tmp_path) -> None:
-    with pytest.raises(ValueError, match="Live|Mainnet"):
+    with pytest.raises(ValueError, match="(?i)mainnet|live"):
         settings(ALLOW_MAINNET=True)
 
 
