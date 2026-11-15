@@ -46,8 +46,8 @@ class BinanceSpotTestnetOrderPreflight:
     def _assert_safety_gate(settings: Settings) -> None:
         if settings.TRADING_ENV is not TradingEnvironment.TESTNET:
             raise TestnetPreflightError("Refusing non-Testnet environment.")
-        if settings.TRADING_MODE is not TradingMode.PAPER:
-            raise TestnetPreflightError("Refusing unless trading mode remains PAPER.")
+        if settings.TRADING_MODE not in {TradingMode.PAPER, TradingMode.TESTNET}:
+            raise TestnetPreflightError("Refusing unless trading mode is PAPER or TESTNET.")
         if settings.ALLOW_MAINNET or settings.LIVE_TRADING_ENABLED:
             raise TestnetPreflightError("Refusing while any Mainnet/live flag is enabled.")
         if not settings.TESTNET_ORDER_PREFLIGHT_ENABLED:
