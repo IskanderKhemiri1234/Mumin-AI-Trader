@@ -19,6 +19,8 @@ _CLIENT_ORDER_ID = re.compile(r"^[A-Za-z0-9_-]{1,36}$")
 class TestnetPreflightError(RuntimeError):
     """Raised when a Spot Testnet order fails a local safety or exchange check."""
 
+    __test__ = False
+
 
 class BinanceSpotTestnetOrderPreflight:
     """Validate a Spot LIMIT order and call Binance's non-executing /order/test endpoint.
