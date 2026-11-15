@@ -496,3 +496,34 @@ async def test_sell_limit_order_requires_and_uses_free_base_balance(tmp_path) ->
         )
     finally:
         await client.close()
+
+
+
+@pytest.mark.asyncio
+async def test_emergency_stop_cancels_exchange_open_orders_and_keeps_halt(tmp_path) -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/openOrders":
+            return httpx.Response(200, json=[order_response()])
+        if request.url.path == "/api/v3/order" and request.method == "DELETE":
+            return httpx.Response(200, json=order_response("CANCELED"))
+        return httpx.Response(404, json={"code": -2013, "msg": "Order does not exist."})
+
+    store = SQLiteOrderStore(str(tmp_path / "orders.db"))
+    store.register_intent({
+        "symbol": "BTCUSDT", "side": "BUY", "type": "LIMIT", "timeInForce": "GTC",
+        "quantity": "0.00010", "price": "50000.00", "newClientOrderId": "mumin-test-1001",
+    })
+    store.update_order("mumin-test-1001", state="NEW", response=order_response())
+    client = BinanceSpotTestnetExecution(
+        settings(), store, transport=httpx.MockTransport(handler),
+    )
+    try:
+        result = await client.emergency_stop("MANUAL_EMERGENCY_STOP")
+        assert result["halted"] is True
+        assert len(result["cancelled"]) == 1
+        assert store.get_order("mumin-test-1001")["state"] == "CANCELED"
+        assert store.is_halted() == (True, "MANUAL_EMERGENCY_STOP")
+    finally:
+        await client.close()
