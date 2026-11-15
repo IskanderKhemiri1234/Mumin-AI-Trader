@@ -431,22 +431,25 @@ class SQLiteOrderStore:
     def order_fill_quantity_discrepancies(self, tolerance: str = "0.00000001") -> list[str]:
         epsilon = Decimal(tolerance)
         with self._connection() as db:
-            rows = db.execute(
-                """SELECT o.client_order_id,o.symbol,o.exchange_order_id,
-                          o.executed_quantity,COALESCE(SUM(CAST(f.quantity AS REAL)),0) AS filled_qty
-                   FROM spot_order_intents AS o
-                   LEFT JOIN spot_trade_fills AS f
-                     ON f.symbol=o.symbol AND f.order_id=CAST(o.exchange_order_id AS INTEGER)
-                   WHERE o.exchange_order_id IS NOT NULL
-                   GROUP BY o.client_order_id,o.symbol,o.exchange_order_id,o.executed_quantity"""
+            orders = db.execute(
+                """SELECT client_order_id,symbol,exchange_order_id,executed_quantity
+                   FROM spot_order_intents WHERE exchange_order_id IS NOT NULL"""
             ).fetchall()
+            fills = db.execute(
+                """SELECT symbol,order_id,quantity FROM spot_trade_fills"""
+            ).fetchall()
+        totals: dict[tuple[str, int], Decimal] = {}
+        for fill in fills:
+            key = (str(fill["symbol"]), int(fill["order_id"]))
+            totals[key] = totals.get(key, Decimal("0")) + Decimal(fill["quantity"])
         discrepancies: list[str] = []
-        for row in rows:
-            exchange_reported = Decimal(row["executed_quantity"])
-            ledger_filled = Decimal(str(row["filled_qty"]))
+        for order in orders:
+            key = (str(order["symbol"]), int(order["exchange_order_id"]))
+            exchange_reported = Decimal(order["executed_quantity"])
+            ledger_filled = totals.get(key, Decimal("0"))
             if abs(exchange_reported - ledger_filled) > epsilon:
                 discrepancies.append(
-                    f"ORDER_FILL_MISMATCH:{row['client_order_id']}:"
+                    f"ORDER_FILL_MISMATCH:{order['client_order_id']}:"
                     f"exchange={exchange_reported}:ledger={ledger_filled}"
                 )
         return discrepancies
