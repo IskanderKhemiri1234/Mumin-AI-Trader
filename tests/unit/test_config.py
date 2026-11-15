@@ -4,10 +4,16 @@ from pydantic import ValidationError
 from config.config import Settings, TradingEnvironment, TradingMode
 
 
-def test_safe_defaults():
+def test_safe_defaults(monkeypatch):
+    monkeypatch.delenv("WATCHLIST", raising=False)
     settings = Settings(_env_file=None)
     assert settings.TRADING_ENV == TradingEnvironment.TESTNET
     assert settings.TRADING_MODE == TradingMode.PAPER
+    assert settings.INITIAL_CAPITAL_USD == 70
+    assert settings.MAX_CAPITAL_ALLOCATION_USD == 70
+    assert Settings.model_fields["WATCHLIST"].default == (
+        "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,AVAXUSDT,LINKUSDT"
+    )
 
 
 def test_mainnet_is_blocked_without_explicit_flags():

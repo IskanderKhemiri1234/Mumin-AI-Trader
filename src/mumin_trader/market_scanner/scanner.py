@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from mumin_trader.ai_engine.strategy_engine import CORE_SYMBOLS, StrategyEngine
 from mumin_trader.exchanges.binance.rest_client import BinanceSpotRESTClient
 
 ZERO = Decimal("0")
@@ -32,6 +33,9 @@ class MarketCandidate:
     ema_fast: Decimal | None = None
     ema_slow: Decimal | None = None
     expected_move_bps: Decimal = ZERO
+    strategy_score: int = 0
+    stop_loss_price: Decimal | None = None
+    take_profit_price: Decimal | None = None
 
 
 def screen_tickers(
@@ -103,11 +107,12 @@ class MarketScanner:
         self.quote_asset = quote_asset.upper()
         self.min_quote_volume = Decimal(min_quote_volume)
         self.max_spread_bps = Decimal(max_spread_bps)
-        self.allowed_symbols = {s.upper() for s in allowed_symbols} if allowed_symbols else None
+        self.allowed_symbols = {s.upper() for s in allowed_symbols} if allowed_symbols else set(CORE_SYMBOLS)
         self.interval = interval
         self.candle_limit = max(60, min(int(candle_limit), 500))
         self.max_symbols = max(1, min(int(max_symbols), 100))
         self.min_expected_move_bps = Decimal(min_expected_move_bps)
+        self.strategy_engine = StrategyEngine()
         self._book: dict[str, tuple[Decimal, Decimal]] = {}
         self._volume: dict[str, tuple[Decimal, Decimal]] = {}
 
@@ -194,11 +199,34 @@ class MarketScanner:
             rsi = _rsi(closes, 14)
             momentum_bps = ((closes[-1] / closes[-6]) - Decimal(1)) * BPS if len(closes) >= 6 else ZERO
 
-            # A candidate requires trend alignment, positive short momentum and
-            # RSI below an overbought threshold. This is a filter, not a guarantee.
-            signal = "HOLD"
-            if fast > slow and momentum_bps > Decimal("5") and rsi is not None and Decimal("45") <= rsi <= Decimal("68"):
-                signal = "BUY_CANDIDATE"
+            # Multi-timeframe confirmation uses closed candles only.
+            candles_15m = await client.klines(symbol, interval="15m", limit=self.candle_limit)
+            candles_1h = await client.klines(symbol, interval="1h", limit=self.candle_limit)
+
+            def timeframe_bullish(rows: list[list[Any]]) -> bool:
+                timeframe_closes = [
+                    value for candle in rows[:-1]
+                    if len(candle) > 4
+                    and (value := _decimal(candle[4])) is not None
+                    and value > ZERO
+                ]
+                if len(timeframe_closes) < 30:
+                    return False
+                return _ema(timeframe_closes, 9) > _ema(timeframe_closes, 21)
+
+            decision = self.strategy_engine.evaluate(
+                symbol=symbol,
+                entry_price=last,
+                spread_bps=spread,
+                quote_volume=volume,
+                rsi=rsi,
+                momentum_bps=momentum_bps,
+                timeframe_trends={
+                    "fast": fast > slow,
+                    "15m": timeframe_bullish(candles_15m),
+                    "1h": timeframe_bullish(candles_1h),
+                },
+            )
             candidates.append(
                 MarketCandidate(
                     symbol=symbol,
@@ -208,11 +236,14 @@ class MarketScanner:
                     quote_volume=volume,
                     change_percent=change,
                     last_price=last,
-                    signal=signal,
+                    signal="BUY_CANDIDATE" if decision.approved else "HOLD",
                     rsi=rsi,
                     ema_fast=fast,
                     ema_slow=slow,
                     expected_move_bps=max(momentum_bps, ZERO),
+                    strategy_score=decision.score,
+                    stop_loss_price=decision.stop_loss_price,
+                    take_profit_price=decision.take_profit_price,
                 )
             )
         return self.rank(candidates)

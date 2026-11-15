@@ -32,8 +32,8 @@ class Settings(BaseSettings):
     BINANCE_API_SECRET: SecretStr = SecretStr("")
     BINANCE_RECV_WINDOW_MS: int = Field(default=5000, ge=1000, le=10000)
     BINANCE_TIMEOUT_SECONDS: float = Field(default=10.0, gt=0, le=60)
-    INITIAL_CAPITAL_USD: Decimal = Field(default=Decimal("50.00"), gt=0)
-    MAX_CAPITAL_ALLOCATION_USD: Decimal = Field(default=Decimal("50.00"), gt=0)
+    INITIAL_CAPITAL_USD: Decimal = Field(default=Decimal("70.00"), gt=0)
+    MAX_CAPITAL_ALLOCATION_USD: Decimal = Field(default=Decimal("70.00"), gt=0)
     MAX_TRADE_ALLOCATION_USD: Decimal = Field(default=Decimal("5.00"), gt=0)
     MIN_TRADE_ALLOCATION_USD: Decimal = Field(default=Decimal("5.00"), gt=0)
     CAPITAL_RESERVE_PERCENT: Decimal = Field(default=Decimal("20"), ge=0, lt=100)
@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     MAX_DRAWDOWN_PERCENT: Decimal = Field(default=Decimal("5.00"), gt=0, le=20)
     MAX_OPEN_POSITIONS: int = Field(default=2, ge=1, le=20)
     QUOTE_ASSET: str = "USDT"
-    WATCHLIST: str = "BTCUSDT,ETHUSDT,BNBUSDT"
+    WATCHLIST: str = "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,AVAXUSDT,LINKUSDT"
     ENABLE_BNB_FEE_DISCOUNT: bool = True
     BNB_FEE_ASSET: str = "BNB"
     REQUIRE_BNB_BALANCE_FOR_DISCOUNT: bool = True

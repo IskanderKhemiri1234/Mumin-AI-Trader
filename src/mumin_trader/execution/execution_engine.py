@@ -89,9 +89,45 @@ class ExecutionEngine:
         self.require_verified_commission = require_verified_commission
         self._paper_orders: dict[str, PaperOrder] = {}
 
-    async def submit_order(self, *args: Any, **kwargs: Any) -> None:
-        raise ExecutionDisabledError(
-            "LIVE order submission is hard-disabled. This engine supports PAPER fills only."
+    async def submit_order(
+        self,
+        *,
+        settings: Any = None,
+        symbol: str = "",
+        side: OrderSide | str = "BUY",
+        quantity: Decimal | None = None,
+        reference_price: Decimal | None = None,
+        **paper_options: Any,
+    ) -> PaperOrder:
+        """Submit through the unified entry point, but PAPER mode only.
+
+        This method never calls an exchange order endpoint. A TESTNET/PAPER
+        settings object is mandatory; MAINNET, LIVE, and enabled live flags
+        fail closed before a simulated fill can be created.
+        """
+        if settings is None or quantity is None or reference_price is None:
+            raise ExecutionDisabledError(
+                "PAPER submission requires explicit TESTNET/PAPER settings, quantity and reference price."
+            )
+        environment = getattr(settings, "TRADING_ENV", None)
+        mode = getattr(settings, "TRADING_MODE", None)
+        environment = getattr(environment, "value", environment)
+        mode = getattr(mode, "value", mode)
+        if (
+            environment != "TESTNET"
+            or mode != "PAPER"
+            or bool(getattr(settings, "ALLOW_MAINNET", False))
+            or bool(getattr(settings, "LIVE_TRADING_ENABLED", False))
+        ):
+            raise ExecutionDisabledError(
+                "Execution bridge is PAPER-only. MAINNET and LIVE order submission remain disabled."
+            )
+        return await self.submit_paper_order(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            reference_price=reference_price,
+            **paper_options,
         )
 
     def resolve_fee_model(
