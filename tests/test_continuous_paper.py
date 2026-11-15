@@ -1,6 +1,8 @@
 import sqlite3
 from decimal import Decimal
 
+import pytest
+
 from scripts.run_continuous_paper import (
     PUBLIC_SOURCE,
     SYMBOLS,
@@ -346,9 +348,6 @@ def test_export_contract_exposes_all_assets_and_actual_compounder_allocations(tm
         "actual_position_market_value_divided_by_current_equity"
     )
 
-
-
-import pytest
 
 
 @pytest.mark.asyncio
