@@ -63,6 +63,18 @@ class PaperSwarm:
         return final_vote, momentum_vote, liquidity_ok
 
 
+def compoundable_equity(
+    marked_equity: Decimal,
+    realized_pnl: Decimal,
+    *,
+    initial_capital: Decimal = Decimal("70.00"),
+) -> Decimal:
+    """Exclude unrealized gains from compounding while respecting marked losses."""
+    marked = max(Decimal("0"), Decimal(marked_equity))
+    realized_equity = max(Decimal("0"), Decimal(initial_capital) + Decimal(realized_pnl))
+    return min(marked, realized_equity)
+
+
 def compound_allocation(
     equity: Decimal,
     cash: Decimal,
