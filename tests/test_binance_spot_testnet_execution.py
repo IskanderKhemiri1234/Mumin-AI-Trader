@@ -295,3 +295,48 @@ async def test_account_without_spot_trade_permission_blocks_before_order(tmp_pat
         assert not any(req.method == "POST" and req.url.path == "/api/v3/order" for req in seen)
     finally:
         await client.close()
+
+
+
+def test_daily_loss_and_drawdown_limits_persist_a_halt(tmp_path) -> None:
+    store = SQLiteOrderStore(str(tmp_path / "orders.db"))
+    assert store.update_risk_state(
+        equity="100", trading_day="2026-11-15",
+        max_daily_loss_percent="2", max_drawdown_percent="5",
+    ) is None
+    assert store.update_risk_state(
+        equity="97.99", trading_day="2026-11-15",
+        max_daily_loss_percent="2", max_drawdown_percent="5",
+    ) == "MAX_DAILY_LOSS"
+    assert store.is_halted() == (True, "MAX_DAILY_LOSS")
+
+
+def test_drawdown_limit_takes_priority_and_halts(tmp_path) -> None:
+    store = SQLiteOrderStore(str(tmp_path / "orders.db"))
+    store.update_risk_state(
+        equity="100", trading_day="2026-11-15",
+        max_daily_loss_percent="2", max_drawdown_percent="5",
+    )
+    reason = store.update_risk_state(
+        equity="94", trading_day="2026-11-15",
+        max_daily_loss_percent="2", max_drawdown_percent="5",
+    )
+    assert reason == "MAX_DRAWDOWN"
+    assert store.is_halted() == (True, "MAX_DRAWDOWN")
+
+
+def test_risk_halt_allows_only_sell_intents_while_manual_halt_blocks_all(tmp_path) -> None:
+    store = SQLiteOrderStore(str(tmp_path / "orders.db"))
+    store.halt("MAX_DAILY_LOSS")
+    sell = {
+        "symbol": "BTCUSDT", "side": "SELL", "type": "LIMIT", "timeInForce": "GTC",
+        "quantity": "0.00010", "price": "50000.00", "newClientOrderId": "risk-exit-1",
+    }
+    intent, created = store.register_intent(sell)
+    assert created is True
+    assert store.claim_submission("risk-exit-1") is True
+
+    manual_store = SQLiteOrderStore(str(tmp_path / "manual-orders.db"))
+    manual_store.halt("MANUAL_EMERGENCY_STOP")
+    with pytest.raises(OrderStoreError, match="Execution halt"):
+        manual_store.register_intent(sell)
