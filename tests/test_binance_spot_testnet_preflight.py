@@ -199,3 +199,26 @@ async def test_zero_exchange_filter_steps_are_treated_as_disabled(tmp_path) -> N
         assert params["price"] == "50000.01"
     finally:
         await client.close()
+
+
+
+@pytest.mark.asyncio
+async def test_configured_entry_floor_does_not_block_exchange_valid_sell_exit():
+    payload = exchange_info()
+    payload["symbols"][0]["filters"][2]["minNotional"] = "1.00"
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    client = BinanceSpotTestnetOrderPreflight(
+        make_settings(MIN_TRADE_ALLOCATION_USD=Decimal("5")),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        params = await client.validate_limit_order(
+            symbol="BTCUSDT", side="SELL", quantity="0.00005",
+            price="50000.00", client_order_id="mumin-sell-exit-small",
+        )
+        assert Decimal(params["quantity"]) * Decimal(params["price"]) == Decimal("2.5")
+    finally:
+        await client.close()
