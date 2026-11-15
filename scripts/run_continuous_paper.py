@@ -403,7 +403,7 @@ class ContinuousPaperBot:
                 alpha_reason = "LEGACY_PAPER_RULES"
                 if source == PUBLIC_SOURCE:
                     if len(ordered_history) >= 15:
-                        signal_name, atr_pct, dynamic_stop, dynamic_target, alpha_reason = self.micro_alpha.evaluate(
+                        signal_name, atr_pct, dynamic_stop, dynamic_target, _alpha_reason = self.micro_alpha.evaluate(
                             closes=[Decimal(row["price"]) for row in ordered_history],
                             highs=[Decimal(row["candle_high"]) for row in ordered_history],
                             lows=[Decimal(row["candle_low"]) for row in ordered_history],
@@ -413,7 +413,7 @@ class ContinuousPaperBot:
                             bid=bid, ask=ask, max_spread_bps=MAX_SPREAD_BPS,
                         )
                     else:
-                        signal_name, alpha_reason = "HOLD", "WARMUP"
+                        signal_name, _alpha_reason = "HOLD", "WARMUP"
                     momentum_vote, liquidity_ok = "MICRO_ALPHA", True
                 else:
                     signal_name, momentum_vote, liquidity_ok = self.swarm.evaluate(
@@ -422,7 +422,6 @@ class ContinuousPaperBot:
                 spread_blocked = not liquidity_ok
                 signals.append(
                     f"{symbol}:{signal_name}" + (":SPREAD_BLOCK" if spread_blocked else "")
-                    + (f":{alpha_reason}" if source == PUBLIC_SOURCE else "")
                 )
                 if position is not None:
                     # Trigger exits on estimated NET return after both entry and
