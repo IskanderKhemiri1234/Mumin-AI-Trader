@@ -234,6 +234,8 @@ async def test_reconciliation_mismatch_persistently_halts_execution(tmp_path) ->
             return httpx.Response(200, json=account_info())
         if request.url.path == "/api/v3/openOrders":
             return httpx.Response(200, json=[order_response()])
+        if request.url.path == "/api/v3/myTrades":
+            return httpx.Response(200, json=[])
         return httpx.Response(404, json={"code": -2013, "msg": "Order does not exist."})
 
     store = SQLiteOrderStore(str(tmp_path / "orders.db"))
