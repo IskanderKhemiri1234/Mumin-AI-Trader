@@ -65,16 +65,14 @@ async def test_preflight_is_disabled_by_default() -> None:
 
 @pytest.mark.asyncio
 async def test_preflight_refuses_mainnet_and_live_flags() -> None:
-    settings = make_settings(ALLOW_MAINNET=True)
-    with pytest.raises(TestnetPreflightError, match="Mainnet/live"):
-        BinanceSpotTestnetOrderPreflight(settings)
+    with pytest.raises(ValueError, match="Live|Mainnet"):
+        make_settings(ALLOW_MAINNET=True)
 
 
 @pytest.mark.asyncio
 async def test_preflight_refuses_non_testnet_environment() -> None:
-    settings = make_settings(TRADING_ENV=TradingEnvironment.MAINNET)
-    with pytest.raises((ValueError, TestnetPreflightError)):
-        BinanceSpotTestnetOrderPreflight(settings)
+    with pytest.raises(ValueError, match="MAINNET blocked"):
+        make_settings(TRADING_ENV=TradingEnvironment.MAINNET)
 
 
 @pytest.mark.asyncio
