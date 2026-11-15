@@ -91,6 +91,23 @@ The adapter includes exchange filter checks, quote-reserve and exposure limits, 
 
 This adapter is not connected to the Paper signal loop or Android app. Current automated tests use mocked Binance responses; **no real Testnet order has yet been placed or verified**. A dedicated Testnet operator run and independent review are still required. A successful Testnet run will not enable Mainnet.
 
+### Operator CLI (Spot Testnet only)
+
+The operator CLI is explicit and is not wired to autonomous signals. Run it only in a private environment with dedicated Spot Testnet credentials and a dedicated SQLite ledger:
+
+```bash
+python scripts/binance_spot_testnet.py reconcile
+python scripts/binance_spot_testnet.py preflight --symbol BTCUSDT --side BUY --quantity 0.00010 --price 50000 --client-order-id mumin-preflight-001
+```
+
+Only after reviewing a clean reconciliation and deliberately enabling both Testnet gates, a single Testnet order requires the literal confirmation:
+
+```bash
+python scripts/binance_spot_testnet.py submit --symbol BTCUSDT --side BUY --quantity 0.00010 --price 50000 --client-order-id mumin-test-001 --confirm-testnet-order TESTNET_ONLY
+```
+
+Cancellation also requires `--confirm-testnet-cancel TESTNET_ONLY`. The CLI never selects a Mainnet URL. Do not run the submit command against a real-money account or with Mainnet credentials.
+
 ## Not production-ready
 
 The project is **not approved for real-money trading**. Mainnet is hard-blocked by the current Settings validator. Paper stop-loss/take-profit are simulated, not exchange-hosted protective orders. Before any Mainnet consideration, the project still requires green CI, a verified dedicated Spot Testnet lifecycle, complete cost-basis/fee accounting, exchange-hosted protective exits, an operator-facing authenticated emergency stop, supervised market-data freshness/reconnect handling, independent security review, and a numeric GO/NO-GO report. Any later Mainnet implementation and first real order require a separate explicit human approval. Paper or Testnet results do not guarantee future returns.
