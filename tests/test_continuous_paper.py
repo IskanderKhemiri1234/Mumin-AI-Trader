@@ -2,8 +2,10 @@ import sqlite3
 from decimal import Decimal
 
 from scripts.run_continuous_paper import (
+    PUBLIC_SOURCE,
     SYMBOLS,
     ContinuousPaperBot,
+    run_bot,
 )
 
 
@@ -343,3 +345,32 @@ def test_export_contract_exposes_all_assets_and_actual_compounder_allocations(tm
     assert contract["compounder"]["allocation_semantics"] == (
         "actual_position_market_value_divided_by_current_equity"
     )
+
+
+
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_incomplete_public_snapshot_skips_entire_finite_cycle_without_fallback(
+    tmp_path, monkeypatch,
+):
+    import scripts.run_continuous_paper as paper_module
+
+    class IncompleteFeed:
+        async def snapshots(self, symbols):
+            return {"BTCUSDT": object()}, {"ETHUSDT": "simulated stale feed"}
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(paper_module, "PublicMarketData", IncompleteFeed)
+    database = tmp_path / "incomplete-snapshot.sqlite3"
+    with pytest.raises(RuntimeError, match="requires all eight fresh assets"):
+        await run_bot(str(database), 0.001, 1, PUBLIC_SOURCE)
+
+    with sqlite3.connect(database) as db:
+        ticks = db.execute("SELECT COUNT(*) FROM bot_equity").fetchone()[0]
+        market_rows = db.execute("SELECT COUNT(*) FROM bot_market_ticks").fetchone()[0]
+    assert ticks == 0
+    assert market_rows == 0
