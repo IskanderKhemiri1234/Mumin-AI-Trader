@@ -174,3 +174,28 @@ async def test_preflight_rejects_notional_above_trade_ceiling() -> None:
             )
     finally:
         await client.close()
+
+
+
+@pytest.mark.asyncio
+async def test_zero_exchange_filter_steps_are_treated_as_disabled(tmp_path) -> None:
+    payload = exchange_info()
+    metadata = payload["symbols"][0]
+    metadata["filters"][0].update({"minPrice": "0", "maxPrice": "0", "tickSize": "0"})
+    metadata["filters"][1].update({"minQty": "0", "maxQty": "0", "stepSize": "0"})
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    client = BinanceSpotTestnetOrderPreflight(
+        make_settings(MAX_TRADE_ALLOCATION_USD=Decimal("6")),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        params = await client.validate_limit_order(
+            symbol="BTCUSDT", side="BUY", quantity="0.00010",
+            price="50000.01", client_order_id="mumin-test-zero-filter",
+        )
+        assert params["price"] == "50000.01"
+    finally:
+        await client.close()
