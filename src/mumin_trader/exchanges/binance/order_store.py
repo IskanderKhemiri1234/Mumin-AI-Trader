@@ -84,6 +84,14 @@ class SQLiteOrderStore:
                     open_orders_json TEXT NOT NULL,
                     discrepancies_json TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS spot_risk_state (
+                    id INTEGER PRIMARY KEY CHECK(id=1),
+                    trading_day TEXT NOT NULL,
+                    daily_start_equity TEXT NOT NULL,
+                    high_watermark TEXT NOT NULL,
+                    last_equity TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 INSERT OR IGNORE INTO spot_execution_control
                     (id, halted, halt_reason, updated_at)
                 VALUES (1, 0, '', '1970-01-01T00:00:00+00:00');
@@ -206,6 +214,68 @@ class SQLiteOrderStore:
                    ORDER BY created_at"""
             ).fetchall()
             return [dict(row) for row in rows]
+
+    def update_risk_state(
+        self,
+        *,
+        equity: str,
+        trading_day: str,
+        max_daily_loss_percent: str,
+        max_drawdown_percent: str,
+    ) -> str | None:
+        from decimal import Decimal
+
+        current = Decimal(equity)
+        daily_limit = Decimal(max_daily_loss_percent)
+        drawdown_limit = Decimal(max_drawdown_percent)
+        if not current.is_finite() or current <= 0:
+            raise OrderStoreError("Account equity is invalid; risk state cannot be updated.")
+        if not daily_limit.is_finite() or daily_limit <= 0 or not drawdown_limit.is_finite() or drawdown_limit <= 0:
+            raise OrderStoreError("Risk limits must be positive finite percentages.")
+
+        reason: str | None = None
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM spot_risk_state WHERE id=1").fetchone()
+            if row is None:
+                daily_start = current
+                high_watermark = current
+                db.execute(
+                    """INSERT INTO spot_risk_state
+                       (id,trading_day,daily_start_equity,high_watermark,last_equity,updated_at)
+                       VALUES (1,?,?,?,?,?)""",
+                    (trading_day, str(current), str(current), str(current), self._now()),
+                )
+            else:
+                daily_start = Decimal(row["daily_start_equity"])
+                high_watermark = Decimal(row["high_watermark"])
+                if row["trading_day"] != trading_day:
+                    daily_start = current
+                high_watermark = max(high_watermark, current)
+                daily_loss_pct = (
+                    (daily_start - current) / daily_start * Decimal("100")
+                    if daily_start > 0 else Decimal("100")
+                )
+                drawdown_pct = (
+                    (high_watermark - current) / high_watermark * Decimal("100")
+                    if high_watermark > 0 else Decimal("100")
+                )
+                if daily_loss_pct >= daily_limit:
+                    reason = "MAX_DAILY_LOSS"
+                if drawdown_pct >= drawdown_limit:
+                    reason = "MAX_DRAWDOWN"
+                db.execute(
+                    """UPDATE spot_risk_state SET trading_day=?,daily_start_equity=?,
+                       high_watermark=?,last_equity=?,updated_at=? WHERE id=1""",
+                    (trading_day, str(daily_start), str(high_watermark), str(current), self._now()),
+                )
+            if reason:
+                db.execute(
+                    """UPDATE spot_execution_control
+                       SET halted=1,halt_reason=?,updated_at=? WHERE id=1""",
+                    (reason, self._now()),
+                )
+        return reason
 
     def record_reconciliation(
         self,
