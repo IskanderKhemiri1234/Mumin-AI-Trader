@@ -428,6 +428,29 @@ class SQLiteOrderStore:
                     )
         return discrepancies
 
+    def order_fill_quantity_discrepancies(self, tolerance: str = "0.00000001") -> list[str]:
+        epsilon = Decimal(tolerance)
+        with self._connection() as db:
+            rows = db.execute(
+                """SELECT o.client_order_id,o.symbol,o.exchange_order_id,
+                          o.executed_quantity,COALESCE(SUM(CAST(f.quantity AS REAL)),0) AS filled_qty
+                   FROM spot_order_intents AS o
+                   LEFT JOIN spot_trade_fills AS f
+                     ON f.symbol=o.symbol AND f.order_id=CAST(o.exchange_order_id AS INTEGER)
+                   WHERE o.exchange_order_id IS NOT NULL
+                   GROUP BY o.client_order_id,o.symbol,o.exchange_order_id,o.executed_quantity"""
+            ).fetchall()
+        discrepancies: list[str] = []
+        for row in rows:
+            exchange_reported = Decimal(row["executed_quantity"])
+            ledger_filled = Decimal(str(row["filled_qty"]))
+            if abs(exchange_reported - ledger_filled) > epsilon:
+                discrepancies.append(
+                    f"ORDER_FILL_MISMATCH:{row['client_order_id']}:"
+                    f"exchange={exchange_reported}:ledger={ledger_filled}"
+                )
+        return discrepancies
+
     def unmatched_trade_order_ids(self) -> list[str]:
         with self._connection() as db:
             rows = db.execute(
