@@ -33,7 +33,7 @@ def test_micro_alpha_requires_sweep_and_depth_consensus():
     signal, atr, stop, target, reason = PaperMicroAlphaSwarm().evaluate(
         closes=closes, highs=highs, lows=lows, volumes=volumes,
         bid_depth=Decimal("80"), ask_depth=Decimal("20"),
-        bid=Decimal("100.1"), ask=Decimal("100.2"), max_spread_bps=Decimal("12"),
+        bid=Decimal("100.1"), ask=Decimal("100.15"), max_spread_bps=Decimal("8"), macro_hourly_closes=[Decimal("100")] * 21,
     )
     assert signal == "BUY" and atr > 0
     assert stop <= Decimal("0.50") and target <= Decimal("1.25")
@@ -48,7 +48,7 @@ def test_micro_alpha_fails_closed_on_depth_disagreement():
     signal, *_ = PaperMicroAlphaSwarm().evaluate(
         closes=closes, highs=highs, lows=lows, volumes=volumes,
         bid_depth=Decimal("20"), ask_depth=Decimal("80"),
-        bid=Decimal("100.1"), ask=Decimal("100.2"), max_spread_bps=Decimal("12"),
+        bid=Decimal("100.1"), ask=Decimal("100.15"), max_spread_bps=Decimal("8"), macro_hourly_closes=[Decimal("100")] * 21,
     )
     assert signal == "HOLD"
 
@@ -62,14 +62,45 @@ def test_detailed_agent_log_explains_votes_spread_and_atr():
     details = PaperMicroAlphaSwarm().evaluate_detailed(
         closes=closes, highs=highs, lows=lows, volumes=volumes,
         bid_depth=Decimal("80"), ask_depth=Decimal("20"),
-        bid=Decimal("100.1"), ask=Decimal("100.2"),
-        max_spread_bps=Decimal("12"),
+        bid=Decimal("100.1"), ask=Decimal("100.15"),
+        max_spread_bps=Decimal("8"), macro_hourly_closes=[Decimal("100")] * 21,
     )
     assert details["sweep_vote"] == "BUY"
     assert details["sweep_reason"] == "LOW_SWEPT_AND_RECLAIMED_WITH_STRONG_CLOSE"
     assert details["depth_vote"] == "BUY"
     assert details["depth_reason"] == "BID_DEPTH_IMBALANCE_AT_LEAST_12_PERCENT"
     assert details["filter_vote"] == "BUY"
-    assert details["filter_reason"] == "SWEEP_AND_DEPTH_CONSENSUS_PASSED"
+    assert "STRICT_3_OF_3_BUY_CONSENSUS_PASSED" in details["filter_reason"]
     assert Decimal(details["spread_bps"]) > 0
     assert Decimal(details["atr_pct"]) > 0
+
+
+def test_micro_alpha_fails_closed_when_macro_hourly_data_is_missing():
+    closes = [Decimal("100")] * 14 + [Decimal("100.2")]
+    highs = [Decimal("100.2")] * 14 + [Decimal("100.3")]
+    lows = [Decimal("99.8")] * 14 + [Decimal("99.0")]
+    volumes = [Decimal("10")] * 14 + [Decimal("15")]
+    details = PaperMicroAlphaSwarm().evaluate_detailed(
+        closes=closes, highs=highs, lows=lows, volumes=volumes,
+        bid_depth=Decimal("80"), ask_depth=Decimal("20"),
+        bid=Decimal("100.1"), ask=Decimal("100.15"),
+        max_spread_bps=Decimal("8"), macro_hourly_closes=None,
+    )
+    assert details["signal"] == "HOLD"
+    assert details["filter_reason"] == "MACRO_TREND_DATA_MISSING_OR_INSUFFICIENT"
+
+
+def test_micro_alpha_blocks_long_below_falling_hourly_sma20():
+    closes = [Decimal("100")] * 14 + [Decimal("100.2")]
+    highs = [Decimal("100.2")] * 14 + [Decimal("100.3")]
+    lows = [Decimal("99.8")] * 14 + [Decimal("99.0")]
+    volumes = [Decimal("10")] * 14 + [Decimal("15")]
+    hourly = [Decimal("110")] * 20 + [Decimal("109")]
+    details = PaperMicroAlphaSwarm().evaluate_detailed(
+        closes=closes, highs=highs, lows=lows, volumes=volumes,
+        bid_depth=Decimal("80"), ask_depth=Decimal("20"),
+        bid=Decimal("100.1"), ask=Decimal("100.15"),
+        max_spread_bps=Decimal("8"), macro_hourly_closes=hourly,
+    )
+    assert details["signal"] == "HOLD"
+    assert details["filter_reason"].startswith("MACRO_TREND_BLOCK_PRICE_BELOW_FALLING_SMA20")
