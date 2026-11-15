@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 from urllib.parse import urlencode
@@ -162,13 +163,8 @@ class BinanceSpotTestnetExecution:
         if not base_asset or quote_asset != self.settings.QUOTE_ASSET.upper():
             raise SpotExecutionError("Only configured USDT-quoted Spot symbols are supported.")
         notional = quantity * price
-        free_quote = balances.get(quote_asset, (Decimal("0"), Decimal("0")))[0]
+        free_quote, locked_quote = balances.get(quote_asset, (Decimal("0"), Decimal("0")))
         free_base = balances.get(base_asset, (Decimal("0"), Decimal("0")))[0]
-
-        if side == "SELL":
-            if free_base < quantity:
-                raise SpotExecutionError("Insufficient free base-asset balance for SELL.")
-            return
 
         fee_buffer = Decimal("0.002")
         reserve = self.settings.MAX_CAPITAL_ALLOCATION_USD * self.settings.CAPITAL_RESERVE_PERCENT / Decimal("100")
@@ -176,16 +172,37 @@ class BinanceSpotTestnetExecution:
             raise SpotExecutionError("BUY would consume the configured quote reserve or exceed free USDT.")
 
         exposure = Decimal("0")
+        marked_assets = Decimal("0")
         occupied_symbols: set[str] = set()
+        known_assets = {watch_symbol.removesuffix(quote_asset) for watch_symbol in self.settings.watchlist_symbols}
+        for asset, (free, locked) in balances.items():
+            if asset != quote_asset and free + locked > 0 and asset not in known_assets:
+                raise SpotExecutionError(f"Non-zero {asset} balance is outside the configured valuation watchlist.")
         for watch_symbol in self.settings.watchlist_symbols:
             base = watch_symbol.removesuffix(quote_asset)
             free, locked = balances.get(base, (Decimal("0"), Decimal("0")))
             total = free + locked
             if total > 0:
                 mark = price if watch_symbol == symbol else await self._ticker_price(watch_symbol)
-                exposure += total * mark
-                if total * mark >= Decimal("1.00"):
+                marked_value = total * mark
+                exposure += marked_value
+                marked_assets += marked_value
+                if marked_value >= Decimal("1.00"):
                     occupied_symbols.add(watch_symbol)
+
+        equity = free_quote + locked_quote + marked_assets
+        risk_reason = self.store.update_risk_state(
+            equity=str(equity),
+            trading_day=datetime.now(timezone.utc).date().isoformat(),
+            max_daily_loss_percent=str(self.settings.MAX_DAILY_LOSS_PERCENT),
+            max_drawdown_percent=str(self.settings.MAX_DRAWDOWN_PERCENT),
+        )
+        if risk_reason and side == "BUY":
+            raise SpotExecutionError(f"Risk limit reached: {risk_reason}; new BUY entries are halted.")
+        if side == "SELL":
+            if free_base < quantity:
+                raise SpotExecutionError("Insufficient free base-asset balance for SELL.")
+            return
 
         for order in open_orders:
             if str(order.get("side", "")).upper() == "BUY":
@@ -233,8 +250,9 @@ class BinanceSpotTestnetExecution:
         price: Decimal | str,
         client_order_id: str,
     ) -> dict[str, Any]:
-        if self.store.is_halted()[0]:
-            raise SpotExecutionError("Emergency stop is active; no new order may be submitted.")
+        halted, halt_reason = self.store.is_halted()
+        if halted and not (side.strip().upper() == "SELL" and halt_reason in {"MAX_DAILY_LOSS", "MAX_DRAWDOWN"}):
+            raise SpotExecutionError("Execution halt is active; new orders are blocked.")
         try:
             params = await self._validator.validate_limit_order(
                 symbol=symbol, side=side, quantity=quantity, price=price,
