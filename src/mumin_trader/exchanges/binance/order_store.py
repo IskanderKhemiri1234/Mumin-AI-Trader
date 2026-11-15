@@ -428,6 +428,17 @@ class SQLiteOrderStore:
                     )
         return discrepancies
 
+    def unmatched_trade_order_ids(self) -> list[str]:
+        with self._connection() as db:
+            rows = db.execute(
+                """SELECT DISTINCT f.symbol || ':' || CAST(f.order_id AS TEXT) AS order_ref
+                   FROM spot_trade_fills AS f
+                   LEFT JOIN spot_order_intents AS o
+                     ON o.symbol=f.symbol AND CAST(o.exchange_order_id AS INTEGER)=f.order_id
+                   WHERE o.client_order_id IS NULL"""
+            ).fetchall()
+            return [str(row["order_ref"]) for row in rows]
+
     def trade_position_quantities(self, quote_asset: str) -> dict[str, Decimal]:
         quote = quote_asset.upper()
         deltas = self.trade_asset_deltas(quote)
