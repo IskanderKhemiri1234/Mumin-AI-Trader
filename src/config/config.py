@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     MAX_DRAWDOWN_PERCENT: Decimal = Field(default=Decimal("5.00"), gt=0, le=20)
     MAX_OPEN_POSITIONS: int = Field(default=2, ge=1, le=20)
     QUOTE_ASSET: str = "USDT"
-    WATCHLIST: str = "BTCUSDT,ETHUSDT,BNBUSDT"
+    WATCHLIST: str = "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,AVAXUSDT,LINKUSDT"
     ENABLE_BNB_FEE_DISCOUNT: bool = True
     BNB_FEE_ASSET: str = "BNB"
     REQUIRE_BNB_BALANCE_FOR_DISCOUNT: bool = True
