@@ -6,7 +6,10 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from export_paper_report import load_snapshot
+try:
+    from export_paper_report import load_snapshot
+except ModuleNotFoundError:
+    from scripts.export_paper_report import load_snapshot
 from mumin_trader.strategy_swarm import compound_allocation, compoundable_equity
 import sqlite3
 
