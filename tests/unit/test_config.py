@@ -11,10 +11,9 @@ def test_safe_defaults(monkeypatch):
     assert settings.TRADING_MODE == TradingMode.PAPER
     assert settings.INITIAL_CAPITAL_USD == 70
     assert settings.MAX_CAPITAL_ALLOCATION_USD == 70
-    assert settings.watchlist_symbols == [
-        "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
-        "XRPUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT",
-    ]
+    assert Settings.model_fields["WATCHLIST"].default == (
+        "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,AVAXUSDT,LINKUSDT"
+    )
 
 
 def test_mainnet_is_blocked_without_explicit_flags():
