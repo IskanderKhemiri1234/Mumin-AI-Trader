@@ -12,6 +12,7 @@ from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 
 from mumin_trader.strategy_swarm import PaperSwarm, compound_allocation
+from mumin_trader.strategy_micro_alpha import PaperMicroAlphaSwarm, atr_adaptive_targets
 from mumin_trader.exchanges.binance.public_market_data import (
     ALLOWED_SYMBOLS,
     PublicMarketData,
@@ -43,9 +44,9 @@ MAX_DRAWDOWN_PERCENT = Decimal(os.getenv("MAX_DRAWDOWN_PERCENT", "5.00"))
 if INITIAL_CASH != Decimal("70.00"):
     raise RuntimeError("Paper engine requires the configured 70.00 USDT starting capital.")
 if STOP_LOSS_PERCENT != Decimal("0.50"):
-    raise RuntimeError("Paper stop-loss is fixed at 0.50%.")
+    raise RuntimeError("Paper maximum stop-loss cap is fixed at 0.50%.")
 if TAKE_PROFIT_PERCENT != Decimal("1.25"):
-    raise RuntimeError("Paper take-profit is fixed at 1.25%.")
+    raise RuntimeError("Paper maximum take-profit cap is fixed at 1.25%.")
 if MAX_SPREAD_BPS != Decimal("12.00"):
     raise RuntimeError("Paper liquidity shield is fixed at a 12.00 bps maximum spread.")
 if MAX_DAILY_LOSS_PERCENT != Decimal("2.00"):
@@ -86,6 +87,7 @@ class ContinuousPaperBot:
             Path(database).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
         self.swarm = PaperSwarm()
+        self.micro_alpha = PaperMicroAlphaSwarm()
 
     def _connect(self):
         db = sqlite3.connect(self.database, timeout=20)
@@ -119,6 +121,8 @@ class ContinuousPaperBot:
                     entry_price TEXT NOT NULL,
                     entry_gross TEXT NOT NULL,
                     entry_fee TEXT NOT NULL,
+                    stop_loss_pct TEXT NOT NULL DEFAULT '0.50',
+                    take_profit_pct TEXT NOT NULL DEFAULT '1.25',
                     opened_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS bot_fills (
@@ -167,6 +171,12 @@ class ContinuousPaperBot:
                     price TEXT NOT NULL,
                     bid TEXT NOT NULL,
                     ask TEXT NOT NULL,
+                    candle_open TEXT NOT NULL DEFAULT '0',
+                    candle_high TEXT NOT NULL DEFAULT '0',
+                    candle_low TEXT NOT NULL DEFAULT '0',
+                    candle_volume TEXT NOT NULL DEFAULT '0',
+                    bid_depth_qty TEXT NOT NULL DEFAULT '0',
+                    ask_depth_qty TEXT NOT NULL DEFAULT '0',
                     data_source TEXT NOT NULL,
                     candle_close_time_ms INTEGER,
                     received_at_ms INTEGER NOT NULL,
@@ -185,6 +195,14 @@ class ContinuousPaperBot:
                     created_at TEXT NOT NULL
                 );
             """)
+            position_columns = {row[1] for row in db.execute("PRAGMA table_info(bot_positions)")}
+            for name, default in (("stop_loss_pct", "0.50"), ("take_profit_pct", "1.25")):
+                if name not in position_columns:
+                    db.execute(f"ALTER TABLE bot_positions ADD COLUMN {name} TEXT NOT NULL DEFAULT '{default}'")
+            market_columns = {row[1] for row in db.execute("PRAGMA table_info(bot_market_ticks)")}
+            for name in ("candle_open", "candle_high", "candle_low", "candle_volume", "bid_depth_qty", "ask_depth_qty"):
+                if name not in market_columns:
+                    db.execute(f"ALTER TABLE bot_market_ticks ADD COLUMN {name} TEXT NOT NULL DEFAULT '0'")
             row = db.execute("SELECT initial_cash FROM bot_account WHERE id=1").fetchone()
             if row is None:
                 db.execute(
@@ -250,6 +268,7 @@ class ContinuousPaperBot:
         quotes: dict[str, tuple[Decimal, Decimal]] | None = None,
         candle_close_times: dict[str, int] | None = None,
         received_at_ms: int | None = None,
+        market_features: dict[str, dict[str, Decimal]] | None = None,
     ) -> TickResult:
         if source not in {SYNTHETIC_SOURCE, PUBLIC_SOURCE}:
             raise ValueError("Unknown market data source.")
@@ -270,6 +289,7 @@ class ContinuousPaperBot:
             raise ValueError("Prices must contain positive finite values for allowlisted symbols.")
         quotes = quotes or {symbol: (price, price) for symbol, price in normalized.items()}
         candle_close_times = candle_close_times or {}
+        market_features = market_features or {}
 
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -299,11 +319,23 @@ class ContinuousPaperBot:
                 bid, ask = Decimal(bid), Decimal(ask)
                 if bid <= 0 or ask < bid:
                     raise ValueError(f"Invalid bid/ask for {symbol}")
+                feature = market_features.get(symbol, {})
+                candle_open = Decimal(feature.get("open", price))
+                candle_high = Decimal(feature.get("high", price))
+                candle_low = Decimal(feature.get("low", price))
+                candle_volume = Decimal(feature.get("volume", 0))
+                bid_depth_qty = Decimal(feature.get("bid_depth_qty", 0))
+                ask_depth_qty = Decimal(feature.get("ask_depth_qty", 0))
+                if candle_low <= 0 or candle_high < candle_low or candle_volume < 0:
+                    raise ValueError(f"Invalid candle features for {symbol}")
                 db.execute(
                     """INSERT INTO bot_market_ticks
-                    (tick,symbol,price,bid,ask,data_source,candle_close_time_ms,received_at_ms)
-                    VALUES (?,?,?,?,?,?,?,?)""",
-                    (tick, symbol, str(price), str(bid), str(ask), source,
+                    (tick,symbol,price,bid,ask,candle_open,candle_high,candle_low,candle_volume,
+                     bid_depth_qty,ask_depth_qty,data_source,candle_close_time_ms,received_at_ms)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (tick, symbol, str(price), str(bid), str(ask), str(candle_open),
+                     str(candle_high), str(candle_low), str(candle_volume),
+                     str(bid_depth_qty), str(ask_depth_qty), source,
                      candle_close_times.get(symbol), received),
                 )
 
@@ -346,32 +378,51 @@ class ContinuousPaperBot:
 
             # First manage existing positions for every symbol with a fresh quote.
             for symbol, price in normalized.items():
-                if candle_close_times.get(symbol) is not None:
+                if source == PUBLIC_SOURCE and candle_close_times.get(symbol) is not None:
                     history = db.execute(
-                        """SELECT price FROM bot_market_ticks
-                           WHERE symbol=? AND data_source=? AND candle_close_time_ms IS NOT NULL
-                           GROUP BY candle_close_time_ms
-                           ORDER BY MAX(tick) DESC LIMIT 4""",
+                        """SELECT price,candle_high,candle_low,candle_volume,bid_depth_qty,ask_depth_qty
+                           FROM bot_market_ticks WHERE symbol=? AND data_source=?
+                           AND candle_close_time_ms IS NOT NULL
+                           GROUP BY candle_close_time_ms ORDER BY MAX(id) DESC LIMIT 30""",
                         (symbol, source),
                     ).fetchall()
                 else:
                     history = db.execute(
-                        """SELECT price FROM bot_market_ticks
-                           WHERE symbol=? AND data_source=? ORDER BY tick DESC LIMIT 4""",
+                        """SELECT price,candle_high,candle_low,candle_volume,bid_depth_qty,ask_depth_qty
+                           FROM bot_market_ticks WHERE symbol=? AND data_source=?
+                           ORDER BY tick DESC LIMIT 30""",
                         (symbol, source),
                     ).fetchall()
-                momentum = self._momentum(
-                    [Decimal(row["price"]) for row in reversed(history)]
-                )
+                ordered_history = list(reversed(history))
+                momentum = self._momentum([Decimal(row["price"]) for row in ordered_history])
                 position = open_positions.get(symbol)
                 action = "NONE"
                 bid, ask = quotes.get(symbol, (price, price))
-                signal_name, momentum_vote, liquidity_ok = self.swarm.evaluate(
-                    momentum, bid, ask, MAX_SPREAD_BPS
-                )
+                atr_pct = Decimal("0")
+                dynamic_stop, dynamic_target = STOP_LOSS_PERCENT, TAKE_PROFIT_PERCENT
+                alpha_reason = "LEGACY_PAPER_RULES"
+                if source == PUBLIC_SOURCE:
+                    if len(ordered_history) >= 15:
+                        signal_name, atr_pct, dynamic_stop, dynamic_target, alpha_reason = self.micro_alpha.evaluate(
+                            closes=[Decimal(row["price"]) for row in ordered_history],
+                            highs=[Decimal(row["candle_high"]) for row in ordered_history],
+                            lows=[Decimal(row["candle_low"]) for row in ordered_history],
+                            volumes=[Decimal(row["candle_volume"]) for row in ordered_history],
+                            bid_depth=Decimal(ordered_history[-1]["bid_depth_qty"]),
+                            ask_depth=Decimal(ordered_history[-1]["ask_depth_qty"]),
+                            bid=bid, ask=ask, max_spread_bps=MAX_SPREAD_BPS,
+                        )
+                    else:
+                        signal_name, alpha_reason = "HOLD", "WARMUP"
+                    momentum_vote, liquidity_ok = "MICRO_ALPHA", True
+                else:
+                    signal_name, momentum_vote, liquidity_ok = self.swarm.evaluate(
+                        momentum, bid, ask, MAX_SPREAD_BPS
+                    )
                 spread_blocked = not liquidity_ok
                 signals.append(
                     f"{symbol}:{signal_name}" + (":SPREAD_BLOCK" if spread_blocked else "")
+                    + (f":{alpha_reason}" if source == PUBLIC_SOURCE else "")
                 )
                 if position is not None:
                     # Trigger exits on estimated NET return after both entry and
@@ -387,8 +438,8 @@ class ContinuousPaperBot:
                         if entry_cost > 0 else Decimal("-100")
                     )
                     if (
-                        net_return_pct <= -STOP_LOSS_PERCENT
-                        or net_return_pct >= TAKE_PROFIT_PERCENT
+                        net_return_pct <= -Decimal(position["stop_loss_pct"])
+                        or net_return_pct >= Decimal(position["take_profit_pct"])
                         or signal_name == "SELL"
                     ):
                         net_trade = projected_net
@@ -449,9 +500,10 @@ class ContinuousPaperBot:
                             fees_paid += fee
                             db.execute(
                                 """INSERT INTO bot_positions
-                                (symbol,quantity,entry_price,entry_gross,entry_fee,opened_at)
-                                VALUES (?,?,?,?,?,?)""",
-                                (symbol, str(quantity), str(fill), str(gross), str(fee), timestamp),
+                                (symbol,quantity,entry_price,entry_gross,entry_fee,stop_loss_pct,take_profit_pct,opened_at)
+                                VALUES (?,?,?,?,?,?,?,?)""",
+                                (symbol, str(quantity), str(fill), str(gross), str(fee),
+                                 str(dynamic_stop), str(dynamic_target), timestamp),
                             )
                             db.execute(
                                 """INSERT INTO bot_fills
@@ -634,10 +686,20 @@ async def run_bot(
                 prices = {symbol: item.last_closed_price for symbol, item in snapshots.items()}
                 quotes = {symbol: (item.bid, item.ask) for symbol, item in snapshots.items()}
                 candle_times = {symbol: item.candle_close_time_ms for symbol, item in snapshots.items()}
+                features = {
+                    symbol: {
+                        "open": item.candle_open, "high": item.candle_high,
+                        "low": item.candle_low, "volume": item.candle_volume,
+                        "bid_depth_qty": item.bid_depth_qty,
+                        "ask_depth_qty": item.ask_depth_qty,
+                    }
+                    for symbol, item in snapshots.items()
+                }
                 received = min(item.received_at_ms for item in snapshots.values())
                 result = bot.step(
                     prices, source=PUBLIC_SOURCE, quotes=quotes,
                     candle_close_times=candle_times, received_at_ms=received,
+                    market_features=features,
                 )
 
             print(
