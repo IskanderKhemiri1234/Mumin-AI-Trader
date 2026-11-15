@@ -201,6 +201,7 @@ def test_public_micro_alpha_entry_persists_atr_adaptive_position_targets(tmp_pat
             "open": Decimal("99.5"), "high": Decimal("100.3"),
             "low": Decimal("99.0"), "volume": Decimal("15"),
             "bid_depth_qty": Decimal("80"), "ask_depth_qty": Decimal("20"),
+            "macro_hourly_closes": [Decimal("100")] * 21,
         }},
     )
 
