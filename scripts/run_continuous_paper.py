@@ -194,6 +194,32 @@ class ContinuousPaperBot:
                     data_source TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS bot_agent_decisions (
+                    decision_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tick INTEGER NOT NULL,
+                    symbol TEXT NOT NULL,
+                    data_source TEXT NOT NULL,
+                    liquidity_sweep_vote TEXT NOT NULL,
+                    liquidity_sweep_reason TEXT NOT NULL,
+                    depth_imbalance_vote TEXT NOT NULL,
+                    depth_imbalance_reason TEXT NOT NULL,
+                    micro_alpha_filter_vote TEXT NOT NULL,
+                    micro_alpha_filter_reason TEXT NOT NULL,
+                    bid TEXT NOT NULL,
+                    ask TEXT NOT NULL,
+                    spread_bps TEXT NOT NULL,
+                    atr_pct TEXT NOT NULL,
+                    stop_pct TEXT NOT NULL,
+                    target_pct TEXT NOT NULL,
+                    bid_depth_qty TEXT NOT NULL,
+                    ask_depth_qty TEXT NOT NULL,
+                    final_signal TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(tick, symbol)
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_decisions_symbol_tick
+                    ON bot_agent_decisions(symbol, tick);
             """)
             position_columns = {row[1] for row in db.execute("PRAGMA table_info(bot_positions)")}
             for name, default in (("stop_loss_pct", "0.50"), ("take_profit_pct", "1.25")):
@@ -216,6 +242,26 @@ class ContinuousPaperBot:
                 raise RuntimeError(
                     "Configured initial capital differs from stored ledger; refusing reset."
                 )
+
+    def finalize_database_batch(self) -> dict[str, object]:
+        """Verify SQLite integrity and flush the WAL after a completed cycle batch."""
+        with self._connect() as db:
+            integrity_rows = [row[0] for row in db.execute("PRAGMA integrity_check").fetchall()]
+            if integrity_rows != ["ok"]:
+                raise RuntimeError(f"SQLite integrity_check failed: {integrity_rows}")
+            checkpoint = db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            busy, log_frames, checkpointed_frames = map(int, checkpoint)
+            if busy != 0 or checkpointed_frames < log_frames:
+                raise RuntimeError(
+                    "SQLite WAL checkpoint incomplete: "
+                    f"busy={busy}, log_frames={log_frames}, checkpointed={checkpointed_frames}"
+                )
+            return {
+                "integrity": "ok",
+                "wal_busy": busy,
+                "wal_log_frames": log_frames,
+                "wal_checkpointed_frames": checkpointed_frames,
+            }
 
     @staticmethod
     def synthetic_price(tick: int) -> Decimal:
@@ -400,19 +446,21 @@ class ContinuousPaperBot:
                 bid, ask = quotes.get(symbol, (price, price))
                 atr_pct = Decimal("0")
                 dynamic_stop, dynamic_target = STOP_LOSS_PERCENT, TAKE_PROFIT_PERCENT
+                agent_details = None
                 if source == PUBLIC_SOURCE:
-                    if len(ordered_history) >= 15:
-                        signal_name, atr_pct, dynamic_stop, dynamic_target, _alpha_reason = self.micro_alpha.evaluate(
-                            closes=[Decimal(row["price"]) for row in ordered_history],
-                            highs=[Decimal(row["candle_high"]) for row in ordered_history],
-                            lows=[Decimal(row["candle_low"]) for row in ordered_history],
-                            volumes=[Decimal(row["candle_volume"]) for row in ordered_history],
-                            bid_depth=Decimal(ordered_history[-1]["bid_depth_qty"]),
-                            ask_depth=Decimal(ordered_history[-1]["ask_depth_qty"]),
-                            bid=bid, ask=ask, max_spread_bps=MAX_SPREAD_BPS,
-                        )
-                    else:
-                        signal_name, _alpha_reason = "HOLD", "WARMUP"
+                    agent_details = self.micro_alpha.evaluate_detailed(
+                        closes=[Decimal(row["price"]) for row in ordered_history],
+                        highs=[Decimal(row["candle_high"]) for row in ordered_history],
+                        lows=[Decimal(row["candle_low"]) for row in ordered_history],
+                        volumes=[Decimal(row["candle_volume"]) for row in ordered_history],
+                        bid_depth=Decimal(ordered_history[-1]["bid_depth_qty"]),
+                        ask_depth=Decimal(ordered_history[-1]["ask_depth_qty"]),
+                        bid=bid, ask=ask, max_spread_bps=MAX_SPREAD_BPS,
+                    )
+                    signal_name = str(agent_details["signal"])
+                    atr_pct = Decimal(agent_details["atr_pct"])
+                    dynamic_stop = Decimal(agent_details["stop_pct"])
+                    dynamic_target = Decimal(agent_details["target_pct"])
                     momentum_vote, liquidity_ok = "MICRO_ALPHA", True
                 else:
                     signal_name, momentum_vote, liquidity_ok = self.swarm.evaluate(
@@ -518,6 +566,25 @@ class ContinuousPaperBot:
                             open_positions[symbol] = {
                                 "symbol": symbol, "quantity": str(quantity)
                             }
+                if agent_details is not None:
+                    db.execute(
+                        """INSERT INTO bot_agent_decisions
+                        (tick,symbol,data_source,liquidity_sweep_vote,liquidity_sweep_reason,
+                         depth_imbalance_vote,depth_imbalance_reason,micro_alpha_filter_vote,
+                         micro_alpha_filter_reason,bid,ask,spread_bps,atr_pct,stop_pct,target_pct,
+                         bid_depth_qty,ask_depth_qty,final_signal,action,created_at)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (
+                            tick, symbol, source,
+                            str(agent_details["sweep_vote"]), str(agent_details["sweep_reason"]),
+                            str(agent_details["depth_vote"]), str(agent_details["depth_reason"]),
+                            str(agent_details["filter_vote"]), str(agent_details["filter_reason"]),
+                            str(bid), str(ask), str(agent_details["spread_bps"]),
+                            str(agent_details["atr_pct"]), str(agent_details["stop_pct"]),
+                            str(agent_details["target_pct"]), str(agent_details["bid_depth"]),
+                            str(agent_details["ask_depth"]), signal_name, action, timestamp,
+                        ),
+                    )
                 if action != "NONE":
                     actions.append(action)
 
@@ -712,6 +779,14 @@ async def run_bot(
             )
             if result.halted:
                 print(f"RISK HALT: {bot.report()['halt_reason']}; new entries blocked.", flush=True)
+            if completed % 3 == 0 or (cycles is not None and completed == cycles):
+                audit = bot.finalize_database_batch()
+                print(
+                    "SQLITE BATCH AUDIT | "
+                    f"integrity={audit['integrity']} WAL busy={audit['wal_busy']} "
+                    f"frames={audit['wal_checkpointed_frames']}/{audit['wal_log_frames']}",
+                    flush=True,
+                )
             if loop.time() - last_report >= REPORT_SECONDS or (cycles is not None and completed == cycles):
                 report = bot.save_hourly_report()
                 print(
