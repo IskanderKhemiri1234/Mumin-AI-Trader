@@ -115,12 +115,12 @@ class BinanceSpotTestnetExecution:
         payload = await self._request("GET", "/api/v3/account", signed=True)
         if not isinstance(payload, dict) or not isinstance(payload.get("balances"), list):
             raise SpotExecutionError("Account response is incomplete; refusing order.")
-        if payload.get("accountType") not in {None, "SPOT"}:
-            raise SpotExecutionError("Binance account is not a Spot account.")
+        if payload.get("accountType") != "SPOT":
+            raise SpotExecutionError("Binance account type is missing or is not explicitly SPOT.")
         if payload.get("canTrade") is not True:
             raise SpotExecutionError("Binance account does not explicitly confirm Spot trading permission.")
-        if payload.get("canWithdraw") is True:
-            raise SpotExecutionError("API key/account exposes withdrawal permission; Spot execution is blocked.")
+        if payload.get("canWithdraw") is not False:
+            raise SpotExecutionError("Withdrawal permission is enabled or cannot be verified; Spot execution is blocked.")
         return payload
 
     async def _exchange_symbol(self, symbol: str) -> dict[str, Any]:
