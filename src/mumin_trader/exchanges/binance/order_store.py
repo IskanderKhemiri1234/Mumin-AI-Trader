@@ -126,8 +126,11 @@ class SQLiteOrderStore:
             halted = db.execute(
                 "SELECT halted, halt_reason FROM spot_execution_control WHERE id=1"
             ).fetchone()
-            if halted["halted"]:
-                raise OrderStoreError(f"Emergency stop is active: {halted['halt_reason']}")
+            if halted["halted"] and not (
+                request.get("side") == "SELL"
+                and halted["halt_reason"] in {"MAX_DAILY_LOSS", "MAX_DRAWDOWN"}
+            ):
+                raise OrderStoreError(f"Execution halt is active: {halted['halt_reason']}")
             existing = db.execute(
                 "SELECT * FROM spot_order_intents WHERE client_order_id=?",
                 (request["newClientOrderId"],),
@@ -155,10 +158,19 @@ class SQLiteOrderStore:
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             halted = db.execute(
-                "SELECT halted FROM spot_execution_control WHERE id=1"
+                "SELECT halted, halt_reason FROM spot_execution_control WHERE id=1"
             ).fetchone()
-            if halted["halted"]:
-                raise OrderStoreError("Emergency stop is active; new order submission is blocked.")
+            intent = db.execute(
+                "SELECT side FROM spot_order_intents WHERE client_order_id=?",
+                (client_order_id,),
+            ).fetchone()
+            if intent is None:
+                raise OrderStoreError("Cannot claim a submission without a persisted order intent.")
+            if halted["halted"] and not (
+                intent["side"] == "SELL"
+                and halted["halt_reason"] in {"MAX_DAILY_LOSS", "MAX_DRAWDOWN"}
+            ):
+                raise OrderStoreError("Execution halt is active; this order is blocked.")
             cursor = db.execute(
                 """UPDATE spot_order_intents SET state='SUBMITTING', updated_at=?
                    WHERE client_order_id=? AND state='PREPARED'""",
