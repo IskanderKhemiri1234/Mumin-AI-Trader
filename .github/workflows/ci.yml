@@ -81,7 +81,7 @@ jobs:
         if: always()
         run: |
           if [ -f data/mumin_public_paper.db ]; then
-            python -c "import sqlite3; db=sqlite3.connect('data/mumin_public_paper.db'); symbols={r[0] for r in db.execute('SELECT DISTINCT symbol FROM bot_market_ticks')}; ticks=db.execute('SELECT COUNT(*) FROM bot_equity').fetchone()[0]; assert symbols == {'BTCUSDT','ETHUSDT','BNBUSDT'}, symbols; assert ticks == 40, ticks; assert db.execute('SELECT COUNT(*) FROM bot_portfolio_snapshots').fetchone()[0] == 40"
+            python -c "import sqlite3; db=sqlite3.connect('data/mumin_public_paper.db'); symbols={r[0] for r in db.execute('SELECT DISTINCT symbol FROM bot_market_ticks')}; ticks=db.execute('SELECT COUNT(*) FROM bot_equity').fetchone()[0]; assert symbols == {'BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT','ADAUSDT','AVAXUSDT','LINKUSDT'}, symbols; assert ticks == 40, ticks; assert db.execute('SELECT COUNT(*) FROM bot_portfolio_snapshots').fetchone()[0] == 40"
           fi
       - name: Preserve Paper ledgers
         if: always()
