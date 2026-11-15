@@ -384,6 +384,33 @@ class BinanceSpotTestnetExecution:
                 str(order.get("clientOrderId", "")): order for order in exchange_open
             }
             discrepancies: list[str] = []
+            balances_map = self._balance_map(account)
+            quote_asset = self.settings.QUOTE_ASSET.upper()
+            quote_free, quote_locked = balances_map.get(quote_asset, (Decimal("0"), Decimal("0")))
+            known_assets = {
+                watch_symbol.removesuffix(quote_asset)
+                for watch_symbol in self.settings.watchlist_symbols
+            }
+            marked_assets = Decimal("0")
+            for asset, (free, locked) in balances_map.items():
+                if asset != quote_asset and free + locked > 0 and asset not in known_assets:
+                    raise SpotExecutionError(
+                        f"Non-zero {asset} balance is outside the configured valuation watchlist."
+                    )
+            for watch_symbol in self.settings.watchlist_symbols:
+                base = watch_symbol.removesuffix(quote_asset)
+                free, locked = balances_map.get(base, (Decimal("0"), Decimal("0")))
+                if free + locked > 0:
+                    marked_assets += (free + locked) * await self._ticker_price(watch_symbol)
+            account_equity = quote_free + quote_locked + marked_assets
+            risk_reason = self.store.update_risk_state(
+                equity=str(account_equity),
+                trading_day=datetime.now(timezone.utc).date().isoformat(),
+                max_daily_loss_percent=str(self.settings.MAX_DAILY_LOSS_PERCENT),
+                max_drawdown_percent=str(self.settings.MAX_DRAWDOWN_PERCENT),
+            )
+            if risk_reason:
+                discrepancies.append(f"RISK_LIMIT:{risk_reason}")
             local_unresolved = self.store.unresolved_orders()
             local_ids = {str(order["client_order_id"]) for order in local_unresolved}
 
@@ -406,12 +433,15 @@ class BinanceSpotTestnetExecution:
                     discrepancies.append(f"EXCHANGE_ORDER_WITHOUT_LOCAL_INTENT:{client_id}")
             balances = account.get("balances", [])
             self.store.record_reconciliation(balances, exchange_open, discrepancies)
-            if discrepancies:
+            if any(not item.startswith("RISK_LIMIT:") for item in discrepancies):
                 self.store.halt("RECONCILIATION_MISMATCH")
+            elif risk_reason:
+                self.store.halt(risk_reason)
             return {
                 "balances": balances,
                 "open_orders": exchange_open,
                 "discrepancies": discrepancies,
+                "risk_reason": risk_reason,
                 "halted": self.store.is_halted()[0],
             }
         except Exception:
