@@ -74,16 +74,62 @@ class OrderBookImbalanceAgent:
 class MicroAlphaFilterAgent:
     name = "micro_alpha_filter"
 
-    def evaluate(self, sweep_vote: str, depth_vote: str, bid: Decimal, ask: Decimal, max_spread_bps: Decimal, atr_pct_value: Decimal) -> str:
+    def evaluate_detailed(
+        self, sweep_vote: str, depth_vote: str, bid: Decimal, ask: Decimal,
+        max_spread_bps: Decimal, atr_pct_value: Decimal, current_price: Decimal,
+        macro_hourly_closes: list[Decimal] | None,
+    ) -> tuple[str, str, Decimal, Decimal, str]:
         bid, ask = Decimal(bid), Decimal(ask)
+        current_price = Decimal(current_price)
+        macro_sma = ZERO
+        macro_slope = ZERO
+        macro_reason = "MACRO_TREND_NOT_REQUIRED_FOR_SELL"
         if bid <= 0 or ask < bid:
-            return "HOLD"
+            return "HOLD", "INVALID_BID_ASK", macro_sma, macro_slope, macro_reason
         midpoint = (bid + ask) / Decimal("2")
-        if midpoint <= 0 or (ask - bid) / midpoint * TEN_THOUSAND > max_spread_bps:
-            return "HOLD"
-        if not Decimal("0.02") <= atr_pct_value <= Decimal("2.00"):
-            return "HOLD"
-        return sweep_vote if sweep_vote == depth_vote and sweep_vote in {"BUY", "SELL"} else "HOLD"
+        if midpoint <= 0 or (ask - bid) / midpoint * TEN_THOUSAND >= max_spread_bps:
+            return "HOLD", "SPREAD_MUST_BE_STRICTLY_BELOW_8_BPS", macro_sma, macro_slope, macro_reason
+        if not Decimal("0.05") <= atr_pct_value <= Decimal("0.80"):
+            return "HOLD", "ATR_OUTSIDE_0_05_TO_0_80_PERCENT", macro_sma, macro_slope, macro_reason
+        if sweep_vote != depth_vote or sweep_vote not in {"BUY", "SELL"}:
+            return "HOLD", "STRICT_AGENT_CONVERGENCE_FAILED_NOT_3_OF_3", macro_sma, macro_slope, macro_reason
+
+        if sweep_vote == "BUY":
+            if macro_hourly_closes is None or len(macro_hourly_closes) < 21:
+                macro_reason = "MACRO_TREND_DATA_MISSING_OR_INSUFFICIENT"
+                return "HOLD", macro_reason, macro_sma, macro_slope, macro_reason
+            hourly = [Decimal(value) for value in macro_hourly_closes[-21:]]
+            if not all(value.is_finite() and value > 0 for value in hourly):
+                macro_reason = "MACRO_TREND_DATA_INVALID"
+                return "HOLD", macro_reason, macro_sma, macro_slope, macro_reason
+            macro_sma = _mean(hourly[-20:])
+            previous_sma = _mean(hourly[-21:-1])
+            macro_slope = macro_sma - previous_sma
+            if current_price < macro_sma and macro_slope < 0:
+                macro_reason = (
+                    f"MACRO_TREND_BLOCK_PRICE_BELOW_FALLING_SMA20:"
+                    f"price={current_price}:sma20={macro_sma}:slope={macro_slope}"
+                )
+                return "HOLD", macro_reason, macro_sma, macro_slope, macro_reason
+            macro_reason = (
+                f"MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:"
+                f"price={current_price}:sma20={macro_sma}:slope={macro_slope}"
+            )
+
+        reason = f"STRICT_3_OF_3_{sweep_vote}_CONSENSUS_PASSED|{macro_reason}"
+        return sweep_vote, reason, macro_sma, macro_slope, macro_reason
+
+    def evaluate(
+        self, sweep_vote: str, depth_vote: str, bid: Decimal, ask: Decimal,
+        max_spread_bps: Decimal, atr_pct_value: Decimal,
+        current_price: Decimal = ZERO,
+        macro_hourly_closes: list[Decimal] | None = None,
+    ) -> str:
+        vote, _, _, _, _ = self.evaluate_detailed(
+            sweep_vote, depth_vote, bid, ask, max_spread_bps, atr_pct_value,
+            current_price, macro_hourly_closes,
+        )
+        return vote
 
 
 class PaperMicroAlphaSwarm:
@@ -98,6 +144,7 @@ class PaperMicroAlphaSwarm:
         self, *, closes: list[Decimal], highs: list[Decimal], lows: list[Decimal],
         volumes: list[Decimal], bid_depth: Decimal, ask_depth: Decimal,
         bid: Decimal, ask: Decimal, max_spread_bps: Decimal,
+        macro_hourly_closes: list[Decimal] | None = None,
     ) -> dict[str, Decimal | str]:
         atr = atr_percent(highs, lows, closes)
         stop, target = atr_adaptive_targets(atr)
@@ -143,21 +190,16 @@ class PaperMicroAlphaSwarm:
         else:
             depth_reason = "DEPTH_IMBALANCE_WITHIN_NEUTRAL_BAND"
 
-        if bid <= 0 or ask < bid:
-            filter_reason = "INVALID_BID_ASK"
-            signal = "HOLD"
-        elif spread_bps > max_spread_bps:
-            filter_reason = "SPREAD_ABOVE_LIMIT"
-            signal = "HOLD"
-        elif not Decimal("0.02") <= atr <= Decimal("2.00"):
-            filter_reason = "ATR_OUTSIDE_0_02_TO_2_00_PERCENT"
-            signal = "HOLD"
-        elif sweep_vote != depth_vote or sweep_vote not in {"BUY", "SELL"}:
-            filter_reason = "AGENT_DISAGREEMENT_OR_NO_DIRECTIONAL_VOTE"
-            signal = "HOLD"
-        else:
-            filter_reason = "SWEEP_AND_DEPTH_CONSENSUS_PASSED"
-            signal = sweep_vote
+        signal, filter_reason, macro_sma, macro_slope, macro_reason = self.filter.evaluate_detailed(
+            sweep_vote=sweep_vote,
+            depth_vote=depth_vote,
+            bid=bid,
+            ask=ask,
+            max_spread_bps=max_spread_bps,
+            atr_pct_value=atr,
+            current_price=closes[-1],
+            macro_hourly_closes=macro_hourly_closes,
+        )
 
         return {
             "signal": signal, "atr_pct": atr, "stop_pct": stop, "target_pct": target,
@@ -166,13 +208,15 @@ class PaperMicroAlphaSwarm:
             "filter_vote": signal, "filter_reason": filter_reason,
             "spread_bps": spread_bps, "bid_depth": bid_depth,
             "ask_depth": ask_depth, "depth_imbalance": imbalance,
+            "macro_sma20": macro_sma, "macro_sma20_slope": macro_slope,
+            "macro_trend_reason": macro_reason,
         }
 
-    def evaluate(self, *, closes: list[Decimal], highs: list[Decimal], lows: list[Decimal], volumes: list[Decimal], bid_depth: Decimal, ask_depth: Decimal, bid: Decimal, ask: Decimal, max_spread_bps: Decimal) -> tuple[str, Decimal, Decimal, Decimal, str]:
+    def evaluate(self, *, closes: list[Decimal], highs: list[Decimal], lows: list[Decimal], volumes: list[Decimal], bid_depth: Decimal, ask_depth: Decimal, bid: Decimal, ask: Decimal, max_spread_bps: Decimal, macro_hourly_closes: list[Decimal] | None = None) -> tuple[str, Decimal, Decimal, Decimal, str]:
         details = self.evaluate_detailed(
             closes=closes, highs=highs, lows=lows, volumes=volumes,
             bid_depth=bid_depth, ask_depth=ask_depth, bid=bid, ask=ask,
-            max_spread_bps=max_spread_bps,
+            max_spread_bps=max_spread_bps, macro_hourly_closes=macro_hourly_closes,
         )
         reason = (
             "SWEEP_DEPTH_CONSENSUS"

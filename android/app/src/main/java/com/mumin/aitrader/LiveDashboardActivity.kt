@@ -1,18 +1,34 @@
 package com.mumin.aitrader
 
 import android.app.Activity
-import android.graphics.Color
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
+import android.view.ViewGroup
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
+import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 
 class LiveDashboardActivity : Activity() {
     private lateinit var dashboard: WebView
+    private lateinit var updateStatus: TextView
+    private var pendingApk: File? = null
 
     companion object {
+        private const val RELEASE_API = "https://api.github.com/repos/IskanderKhemiri1234/Mumin-AI-Trader/releases/latest"
+        private const val USER_AGENT = "Mumin-AI-Trader-Android"
         private const val EMERALD = 0xFF071C17.toInt()
         private const val DASHBOARD_HTML = """
 <!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
@@ -37,7 +53,7 @@ h1{font-size:19px;color:var(--gold);margin:0 0 5px}h2{font-size:15px;color:var(-
 <section class="card"><h2>مؤشر الأصول الحي · Public Market</h2><div id="assets" class="grid"></div></section>
 <section class="card"><h2>المراكز المفتوحة · Paper Ledger</h2><div id="positions" class="rows">تحميل…</div></section>
 <section class="card"><h2>آخر الصفقات المسجلة</h2><div id="fills" class="rows">تحميل…</div></section>
-<section class="card warning"><h2>حواجز السلامة</h2><div class="metrics"><div class="metric"><small>وقف الخسارة المحاكى</small><b>0.50%</b></div><div class="metric"><small>جني الربح المحاكى</small><b>1.25%</b></div><div class="metric"><small>حد الصفقة</small><b>5 USDT</b></div><div class="metric"><small>درع السبريد</small><b>12 bps</b></div></div><p class="muted">بيانات السوق عامة للعرض فقط. الرصيد والصفقات من سجل Paper فقط. GitHub Actions ليس خادماً دائماً؛ لذلك تحديث دفتر Paper مرتبط بنجاح الدورة المجدولة، وليس لحظياً.</p></section>
+<section class="card warning"><h2>حواجز السلامة</h2><div class="metrics"><div class="metric"><small>وقف الخسارة المحاكى</small><b>0.50%</b></div><div class="metric"><small>جني الربح المحاكى</small><b>1.25%</b></div><div class="metric"><small>حد الصفقة</small><b>5 USDT</b></div><div class="metric"><small>درع السبريد</small><b>8 bps</b></div></div><p class="muted">بيانات السوق عامة للعرض فقط. الرصيد والصفقات من سجل Paper فقط. GitHub Actions ليس خادماً دائماً؛ لذلك تحديث دفتر Paper مرتبط بنجاح الدورة المجدولة، وليس لحظياً.</p></section>
 <script>
 const symbols=['BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT','ADAUSDT','AVAXUSDT','LINKUSDT'];
 const history={}; let lastPaperTick=-1;
@@ -73,6 +89,36 @@ connectMarket();paper();setInterval(paper,10000);
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = EMERALD
         window.navigationBarColor = EMERALD
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(EMERALD)
+        }
+        val updatePanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(8))
+            setBackgroundColor(0xFF10251D.toInt())
+        }
+        val updateTitle = TextView(this).apply {
+            text = "Smart Update Center"
+            textSize = 15f
+            setTextColor(0xFFE7C982.toInt())
+        }
+        val updateButton = Button(this).apply {
+            text = "Check for Updates"
+            setOnClickListener { checkForUpdates() }
+        }
+        updateStatus = TextView(this).apply {
+            text = "Updates are checked against official GitHub Releases."
+            textSize = 11f
+            setTextColor(0xFFB7C8BE.toInt())
+        }
+        updatePanel.addView(updateTitle)
+        updatePanel.addView(updateButton)
+        updatePanel.addView(updateStatus)
+        root.addView(updatePanel, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+
         dashboard = WebView(this).apply {
             setBackgroundColor(EMERALD)
             settings.javaScriptEnabled = true
@@ -86,7 +132,10 @@ connectMarket();paper();setInterval(paper,10000);
             webViewClient = WebViewClient()
             webChromeClient = WebChromeClient()
         }
-        setContentView(dashboard)
+        root.addView(dashboard, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+        ))
+        setContentView(root)
         dashboard.loadDataWithBaseURL(
             "https://raw.githubusercontent.com/IskanderKhemiri1234/Mumin-AI-Trader/mumin-paper-ledger/",
             DASHBOARD_HTML,
@@ -94,6 +143,117 @@ connectMarket();paper();setInterval(paper,10000);
             "UTF-8",
             null
         )
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private fun checkForUpdates() {
+        updateStatus.text = "Checking GitHub Releases…"
+        Thread {
+            try {
+                val connection = (URL(RELEASE_API).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 15000
+                    readTimeout = 20000
+                    setRequestProperty("Accept", "application/vnd.github+json")
+                    setRequestProperty("User-Agent", USER_AGENT)
+                }
+                val releaseText = connection.inputStream.bufferedReader().use { it.readText() }
+                connection.disconnect()
+                val release = JSONObject(releaseText)
+                val tag = release.optString("tag_name").removePrefix("v")
+                val current = packageManager.getPackageInfo(packageName, 0).versionName.orEmpty()
+                val assetList = release.optJSONArray("assets")
+                var apkUrl: String? = null
+                if (assetList != null) {
+                    for (index in 0 until assetList.length()) {
+                        val asset = assetList.getJSONObject(index)
+                        if (asset.optString("name").endsWith(".apk", ignoreCase = true)) {
+                            apkUrl = asset.optString("browser_download_url")
+                            break
+                        }
+                    }
+                }
+                if (tag.isBlank() || apkUrl.isNullOrBlank() || compareVersions(tag, current) <= 0) {
+                    runOnUiThread {
+                        updateStatus.text = if (apkUrl.isNullOrBlank()) {
+                            "No APK asset found in the latest GitHub Release."
+                        } else {
+                            "You are using the latest version ($current)."
+                        }
+                    }
+                } else {
+                    runOnUiThread { updateStatus.text = "Version $tag found. Downloading…" }
+                    val download = (URL(apkUrl).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 20000
+                        readTimeout = 30000
+                        setRequestProperty("User-Agent", USER_AGENT)
+                    }
+                    val targetDir = getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)
+                        ?: throw IllegalStateException("App download directory is unavailable.")
+                    if (!targetDir.exists()) targetDir.mkdirs()
+                    val apkFile = File(targetDir, "Mumin-AI-Trader-$tag.apk")
+                    download.inputStream.use { input ->
+                        FileOutputStream(apkFile).use { output -> input.copyTo(output) }
+                    }
+                    download.disconnect()
+                    if (!apkFile.isFile || apkFile.length() < 1024) {
+                        throw IllegalStateException("Downloaded APK is empty or incomplete.")
+                    }
+                    pendingApk = apkFile
+                    runOnUiThread {
+                        updateStatus.text = "Download complete. Opening Android installer…"
+                        installDownloadedApk(apkFile)
+                    }
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    updateStatus.text = "Update check failed: ${error.message ?: "unknown error"}"
+                }
+            }
+        }.start()
+    }
+
+    private fun compareVersions(first: String, second: String): Int {
+        val left = first.split(".", "-", "+").map { it.toIntOrNull() ?: 0 }
+        val right = second.split(".", "-", "+").map { it.toIntOrNull() ?: 0 }
+        for (index in 0 until maxOf(left.size, right.size)) {
+            val a = left.getOrElse(index) { 0 }
+            val b = right.getOrElse(index) { 0 }
+            if (a != b) return a.compareTo(b)
+        }
+        return 0
+    }
+
+    private fun installDownloadedApk(apkFile: File) {
+        if (android.os.Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
+            updateStatus.text = "Allow installs from this app, then return to continue."
+            startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:$packageName")
+                )
+            )
+            return
+        }
+        val apkUri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apkFile)
+        val installer = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(apkUri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        pendingApk = null
+        startActivity(installer)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val apk = pendingApk ?: return
+        if (apk.exists() &&
+            (android.os.Build.VERSION.SDK_INT < 26 || packageManager.canRequestPackageInstalls())
+        ) {
+            pendingApk = null
+            installDownloadedApk(apk)
+        }
     }
 
     override fun onDestroy() {

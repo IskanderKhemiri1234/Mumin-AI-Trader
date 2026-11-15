@@ -29,6 +29,7 @@ class PublicMarketSnapshot:
     candle_volume: Decimal
     bid_depth_qty: Decimal
     ask_depth_qty: Decimal
+    macro_hourly_closes: tuple[Decimal, ...]
     source: str = "BINANCE_PUBLIC_MARKET_DATA"
 
 
@@ -57,9 +58,10 @@ class PublicMarketData:
         if symbol not in ALLOWED_SYMBOLS:
             raise ValueError(f"Symbol is not in the paper-trading allowlist: {symbol}")
 
-        book, candles, depth, server = await asyncio.gather(
+        book, candles, hourly_candles, depth, server = await asyncio.gather(
             self._get("/api/v3/ticker/bookTicker", {"symbol": symbol}),
             self._get("/api/v3/klines", {"symbol": symbol, "interval": "1m", "limit": 30}),
+            self._get("/api/v3/klines", {"symbol": symbol, "interval": "1h", "limit": 22}),
             self._get("/api/v3/depth", {"symbol": symbol, "limit": 20}),
             self._get("/api/v3/time", {}),
         )
@@ -82,6 +84,19 @@ class PublicMarketData:
         if (not all(value.is_finite() for value in (open_price, high_price, low_price, close_price, volume))
                 or low_price <= 0 or high_price < low_price or volume < 0):
             raise ValueError(f"Invalid closed-candle OHLCV for {symbol}")
+        closed_hourly = [
+            row for row in hourly_candles
+            if len(row) > 6 and int(row[6]) < received_at_ms
+        ]
+        if len(closed_hourly) < 21:
+            raise ValueError(f"Insufficient fully closed hourly candles for macro trend: {symbol}")
+        latest_hourly_close_ms = int(closed_hourly[-1][6])
+        if received_at_ms - latest_hourly_close_ms > 7_200_000:
+            raise ValueError(f"Hourly macro-trend data is stale for {symbol}")
+        macro_hourly_closes = tuple(Decimal(str(row[4])) for row in closed_hourly[-21:])
+        if any(not value.is_finite() or value <= 0 for value in macro_hourly_closes):
+            raise ValueError(f"Invalid hourly macro-trend close for {symbol}")
+
         bid_depth_qty = sum((Decimal(str(level[1])) for level in depth.get("bids", [])[:10]), Decimal("0"))
         ask_depth_qty = sum((Decimal(str(level[1])) for level in depth.get("asks", [])[:10]), Decimal("0"))
         if bid_depth_qty <= 0 or ask_depth_qty <= 0:
@@ -100,6 +115,7 @@ class PublicMarketData:
             candle_volume=volume,
             bid_depth_qty=bid_depth_qty,
             ask_depth_qty=ask_depth_qty,
+            macro_hourly_closes=macro_hourly_closes,
         )
 
     async def snapshots(self, symbols: tuple[str, ...] = tuple(sorted(ALLOWED_SYMBOLS))) -> tuple[dict[str, PublicMarketSnapshot], dict[str, str]]:
