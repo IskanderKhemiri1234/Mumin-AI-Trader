@@ -35,14 +35,14 @@ Scope: current `main` Paper engine plus the isolated Testnet implementation prop
 - Testnet credentials are represented as Pydantic `SecretStr` and are sent only in the API-key header; secrets are not part of the Android app.
 - The isolated adapter pins its REST base URL to `https://testnet.binance.vision`; no caller-supplied host is accepted.
 - Mainnet is unconditionally blocked by the current Settings validator. Margin, Futures, withdrawals, and Mainnet order paths are not implemented in the Testnet adapter.
-- The account response's `canTrade` flag is checked. API-key permission scopes are not inferred from account balance fields; an operator must manually verify Spot-only trading, withdrawals disabled, Margin/Futures disabled, and IP restrictions where supported. No real API key has been supplied or tested.
+- The account response must explicitly report `canTrade=true`; any non-Spot account type or `canWithdraw=true` is rejected. Binance's account payload does not prove every API-key scope: an operator must still manually verify Spot-only trading, withdrawals disabled, Margin/Futures disabled, and IP restrictions where supported. No real API key has been supplied or tested.
 
 ## Testnet execution safeguards added in PR #37
 
 - Separate `TRADING_MODE=TESTNET` and two disabled-by-default gates: preflight and Testnet execution.
 - Spot LIMIT/GTC only, allowlisted USDT pairs, exchange symbol status and Spot permission checks, PRICE_FILTER/LOT_SIZE/NOTIONAL checks, configured minimum/maximum trade notional, and quote-reserve/exposure/open-position checks.
 - Durable SQLite order intents and unique client-order IDs. Reusing an ID with changed parameters is rejected.
-- An ambiguous submission or cancellation outcome is not automatically retried. The order is marked unresolved and must be reconciled.
+- An ambiguous submission or cancellation outcome is not automatically retried. The order is marked unresolved and must be reconciled. Any reported partial/full fill is immediately ingested into the durable trade ledger; failure to persist it activates a halt.
 - Order query, cancel, partial-fill status/quantity persistence, account/open-order reconciliation, and persistent emergency stop are implemented.
 - Daily-loss and peak-drawdown state is persisted; a loss-limit halt blocks new BUYs but permits risk-reducing SELLs. Manual emergency and reconciliation halts block all new orders.
 - Reconciliation failures and mismatches activate a persistent halt.
