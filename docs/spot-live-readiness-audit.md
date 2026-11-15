@@ -51,7 +51,7 @@ Scope: current `main` Paper engine plus the isolated Testnet implementation prop
 
 1. CI must complete successfully for compile, full pytest, Ruff, and Paper smoke. No green CI result is claimed in this audit snapshot.
 2. Testnet execution must be exercised with dedicated Spot Testnet credentials and verified BUY, SELL, cancel, partial fill, timeout, restart, duplicate ID, and reconciliation scenarios. No Testnet order has been sent by this work.
-3. Add a durable exchange-trade/fill ledger and reconcile local position quantities/cost basis/fees against Binance balances and trade history. The current order store records order quantities and states, but is not yet a complete position accounting ledger.
+3. Complete weighted-average/FIFO cost-basis and realized-PnL accounting, normalize commissions paid in quote/base/BNB assets, and stress-test balance/fill reconciliation across restart and partial-fill/cancel races. The current ledger persists raw fills and reconciles net asset deltas, but does not yet provide a fully audited cost-basis and fee-accounting ledger.
 4. Implement exchange-hosted protective exits (stop/target or an independently reviewed bracket/OCO design) and prove behavior through partial fills, cancel/replace, gaps, and API outages. Simulated Paper stops are not sufficient.
 5. Add an operator-facing, authenticated emergency-stop control and an independently tested recovery/unhalt procedure. The current kill switch is a code-level durable control, not yet a deployed dashboard control.
 6. Add a continuously supervised market-data freshness/streaming layer for automated execution; current Paper runner is REST snapshot based.
