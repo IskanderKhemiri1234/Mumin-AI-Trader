@@ -198,7 +198,7 @@ async def test_emergency_stop_blocks_new_orders_persistently(tmp_path) -> None:
     try:
         result = await client.emergency_stop("TEST_KILL_SWITCH")
         assert result["halted"] is True
-        with pytest.raises(SpotExecutionError, match="Emergency stop"):
+        with pytest.raises(SpotExecutionError, match="Execution halt"):
             await client.submit_limit_order(
                 symbol="BTCUSDT", side="BUY", quantity="0.00010",
                 price="50000.00", client_order_id="mumin-test-1002",
