@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     ALLOW_MAINNET: bool = False
     LIVE_TRADING_ENABLED: bool = False
     TESTNET_ORDER_PREFLIGHT_ENABLED: bool = False
+    TESTNET_SPOT_EXECUTION_ENABLED: bool = False
     MAINNET_CONFIRMATION: str = ""
     MAINNET_LEGAL_ELIGIBILITY_CONFIRMED: bool = False
     BINANCE_API_KEY: SecretStr = SecretStr("")
@@ -61,6 +62,13 @@ class Settings(BaseSettings):
             raise ValueError("Per-trade risk must be below daily loss limit.")
         if self.TRADING_ENV == TradingEnvironment.TESTNET and (self.TRADING_MODE == TradingMode.LIVE or self.LIVE_TRADING_ENABLED):
             raise ValueError("Live trading is prohibited in TESTNET configuration.")
+        if self.TESTNET_SPOT_EXECUTION_ENABLED and not self.TESTNET_ORDER_PREFLIGHT_ENABLED:
+            raise ValueError("Spot Testnet execution requires the order preflight gate.")
+        if self.TESTNET_SPOT_EXECUTION_ENABLED:
+            if self.TRADING_ENV is not TradingEnvironment.TESTNET or self.TRADING_MODE is not TradingMode.PAPER:
+                raise ValueError("Spot Testnet execution requires TESTNET and PAPER modes.")
+            if self.ALLOW_MAINNET or self.LIVE_TRADING_ENABLED:
+                raise ValueError("Spot Testnet execution requires all Mainnet/live flags disabled.")
         if self.TESTNET_ORDER_PREFLIGHT_ENABLED:
             if self.TRADING_ENV is not TradingEnvironment.TESTNET:
                 raise ValueError("Testnet order preflight is restricted to TESTNET.")
