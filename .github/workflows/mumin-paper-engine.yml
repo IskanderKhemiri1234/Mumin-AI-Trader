@@ -52,7 +52,8 @@ jobs:
           CAPITAL_RESERVE_PERCENT: "20"
           MAX_OPEN_POSITIONS: "2"
           SIMULATED_STOP_LOSS_PERCENT: "0.50"
-          SIMULATED_TAKE_PROFIT_PERCENT: "1.00"
+          SIMULATED_TAKE_PROFIT_PERCENT: "1.25"
+          MAX_SPREAD_BPS: "12.00"
           MAX_DAILY_LOSS_PERCENT: "2.00"
           MAX_DRAWDOWN_PERCENT: "5.00"
         run: |
@@ -65,7 +66,8 @@ jobs:
               "CAPITAL_RESERVE_PERCENT": "20",
               "MAX_OPEN_POSITIONS": "2",
               "SIMULATED_STOP_LOSS_PERCENT": "0.50",
-              "SIMULATED_TAKE_PROFIT_PERCENT": "1.00",
+              "SIMULATED_TAKE_PROFIT_PERCENT": "1.25",
+              "MAX_SPREAD_BPS": "12.00",
               "MAX_DAILY_LOSS_PERCENT": "2.00",
               "MAX_DRAWDOWN_PERCENT": "5.00",
           }
@@ -85,7 +87,8 @@ jobs:
           CAPITAL_RESERVE_PERCENT: "20"
           MAX_OPEN_POSITIONS: "2"
           SIMULATED_STOP_LOSS_PERCENT: "0.50"
-          SIMULATED_TAKE_PROFIT_PERCENT: "1.00"
+          SIMULATED_TAKE_PROFIT_PERCENT: "1.25"
+          MAX_SPREAD_BPS: "12.00"
           MAX_DAILY_LOSS_PERCENT: "2.00"
           MAX_DRAWDOWN_PERCENT: "5.00"
         run: |
@@ -124,8 +127,15 @@ jobs:
               raise SystemExit(
                   f"Paper ledger checkpoint mismatch: ticks={account[1]}, snapshots={snapshots}"
               )
+          latest_tick = int(account[1])
+          asset_count = connection.execute(
+              "SELECT COUNT(DISTINCT symbol) FROM bot_market_ticks WHERE tick=?",
+              (latest_tick,),
+          ).fetchone()[0]
           connection.close()
-          print(f"Paper ledger verified: {account[1]} durable cycles; SQLite integrity OK.")
+          if asset_count != 8:
+              raise SystemExit(f"Latest Paper cycle must contain all 8 assets; found {asset_count}.")
+          print(f"Paper ledger verified: {latest_tick} durable cycles; all 8 assets present; SQLite integrity OK.")
           PY
           python scripts/export_paper_report.py \
             --db mumin-paper-ledger/mumin_public_paper.db \
@@ -169,6 +179,8 @@ jobs:
             echo "---"
             echo
             echo "**التقرير الدائم:** [فتح أحدث ملخص Paper على GitHub]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/mumin-paper-ledger/latest-report.md)"
+            echo
+            echo "**مرآة HTML الخام:** [فتح التقرير المباشر](https://raw.githubusercontent.com/$GITHUB_REPOSITORY/mumin-paper-ledger/latest-report.html)"
             echo
             echo "**لوحة HTML لهذه الدورة:** [تنزيل لوحة Paper]($REPORT_URL)"
             echo
