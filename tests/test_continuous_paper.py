@@ -251,3 +251,95 @@ def test_sqlite_batch_audit_checks_integrity_and_checkpoints_wal(tmp_path):
     assert integrity == "ok"
     assert {"liquidity_sweep_reason", "depth_imbalance_reason",
             "micro_alpha_filter_reason", "spread_bps", "atr_pct"} <= columns
+
+
+def test_public_sma20_inputs_are_isolated_per_symbol_and_persisted(tmp_path):
+    database = tmp_path / "isolated-sma20.sqlite3"
+    bot = ContinuousPaperBot(str(database), initial_cash=Decimal("70.00"))
+    bases = {"BTCUSDT": Decimal("100"), "ETHUSDT": Decimal("200")}
+
+    for candle in range(14):
+        prices = dict(bases)
+        features = {}
+        quotes = {}
+        for symbol, base in bases.items():
+            prices[symbol] = base
+            features[symbol] = {
+                "open": base,
+                "high": base * Decimal("1.002"),
+                "low": base * Decimal("0.998"),
+                "volume": Decimal("10"),
+                "bid_depth_qty": Decimal("50"),
+                "ask_depth_qty": Decimal("50"),
+                "macro_hourly_closes": [base] * 21,
+            }
+            quotes[symbol] = (base * Decimal("0.99975"), base * Decimal("1.00025"))
+        bot.step(
+            prices,
+            source="BINANCE_PUBLIC_MARKET_DATA",
+            quotes=quotes,
+            candle_close_times={symbol: candle + 1 for symbol in bases},
+            received_at_ms=1_800_000_000_100 + candle,
+            market_features=features,
+        )
+
+    prices = {"BTCUSDT": Decimal("100.2"), "ETHUSDT": Decimal("200.4")}
+    features = {}
+    quotes = {}
+    for symbol, base in bases.items():
+        features[symbol] = {
+            "open": base * Decimal("0.995"),
+            "high": base * Decimal("1.003"),
+            "low": base * Decimal("0.990"),
+            "volume": Decimal("15"),
+            "bid_depth_qty": Decimal("80"),
+            "ask_depth_qty": Decimal("20"),
+            "macro_hourly_closes": [base] * 21,
+        }
+        price = prices[symbol]
+        quotes[symbol] = (price * Decimal("0.99975"), price * Decimal("1.00025"))
+
+    bot.step(
+        prices,
+        source="BINANCE_PUBLIC_MARKET_DATA",
+        quotes=quotes,
+        candle_close_times={symbol: 15 for symbol in bases},
+        received_at_ms=1_800_000_000_115,
+        market_features=features,
+    )
+
+    with sqlite3.connect(database) as db:
+        rows = db.execute(
+            """SELECT symbol, macro_sma20, macro_sma20_slope, macro_trend_reason,
+                      spread_pass, agent_consensus, agent_consensus_pass
+               FROM bot_agent_decisions WHERE tick=15 ORDER BY symbol"""
+        ).fetchall()
+
+    decisions = {row[0]: row[1:] for row in rows}
+    assert set(decisions) == set(bases)
+    assert Decimal(decisions["BTCUSDT"][0]) == Decimal("100")
+    assert Decimal(decisions["ETHUSDT"][0]) == Decimal("200")
+    assert decisions["BTCUSDT"][2].startswith("MACRO_TREND_PASS")
+    assert decisions["ETHUSDT"][2].startswith("MACRO_TREND_PASS")
+    assert decisions["BTCUSDT"][3] == decisions["ETHUSDT"][3] == 1
+    assert decisions["BTCUSDT"][4] == decisions["ETHUSDT"][4] == "BUY_3_OF_3"
+    assert decisions["BTCUSDT"][5] == decisions["ETHUSDT"][5] == 1
+
+
+def test_export_contract_exposes_all_assets_and_actual_compounder_allocations(tmp_path):
+    from scripts.export_paper_state import build_ui_contract
+    from scripts.export_paper_report import load_snapshot
+
+    database = tmp_path / "ui-contract.sqlite3"
+    bot = ContinuousPaperBot(str(database), initial_cash=Decimal("70.00"))
+    bot.step()
+    snapshot = load_snapshot(str(database))
+    contract = build_ui_contract(str(database), snapshot)
+
+    assert len(contract["assets"]) == 8
+    assert {asset["symbol"] for asset in contract["assets"]} == set(SYMBOLS)
+    assert all("compounder_actual_allocation_pct" in asset for asset in contract["assets"])
+    assert "next_entry_budget_usdt" in contract["compounder"]
+    assert contract["compounder"]["allocation_semantics"] == (
+        "actual_position_market_value_divided_by_current_equity"
+    )
