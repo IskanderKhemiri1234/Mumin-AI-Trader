@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   paper-cycle:
-    name: One safe Paper cycle and mobile report
+    name: Three one-minute Paper cycles and mobile report
     runs-on: ubuntu-latest
     timeout-minutes: 4
     steps:
@@ -94,8 +94,8 @@ jobs:
         run: |
           python scripts/run_continuous_paper.py \
             --db mumin-paper-ledger/mumin_public_paper.db \
-            --interval-seconds 1 \
-            --cycles 1 \
+            --interval-seconds 60 \
+            --cycles 3 \
             --data-source BINANCE_PUBLIC_MARKET_DATA
 
       - name: Checkpoint SQLite and export mobile dashboard
