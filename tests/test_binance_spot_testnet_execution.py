@@ -475,6 +475,8 @@ async def test_sell_limit_order_requires_and_uses_free_base_balance(tmp_path) ->
             return httpx.Response(200, json=[])
         if request.url.path == "/api/v3/myTrades":
             return httpx.Response(200, json=[])
+        if request.url.path == "/api/v3/ticker/price":
+            return httpx.Response(200, json={"symbol": "BTCUSDT", "price": "50000.00"})
         if request.url.path == "/api/v3/order" and request.method == "POST":
             return httpx.Response(200, json={**order_response(), "side": "SELL"})
         return httpx.Response(404, json={"code": -2013, "msg": "Order does not exist."})
@@ -545,7 +547,7 @@ async def test_account_with_withdrawal_permission_is_rejected(tmp_path) -> None:
         transport=httpx.MockTransport(handler),
     )
     try:
-        with pytest.raises(SpotExecutionError, match="withdrawal permission"):
+        with pytest.raises(SpotExecutionError, match="(?i)withdrawal permission"):
             await client._account()
     finally:
         await client.close()
