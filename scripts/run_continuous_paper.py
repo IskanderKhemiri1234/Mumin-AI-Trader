@@ -458,7 +458,6 @@ class ContinuousPaperBot:
                         bid=bid, ask=ask, max_spread_bps=MAX_SPREAD_BPS,
                     )
                     signal_name = str(agent_details["signal"])
-                    atr_pct = Decimal(agent_details["atr_pct"])
                     dynamic_stop = Decimal(agent_details["stop_pct"])
                     dynamic_target = Decimal(agent_details["target_pct"])
                     momentum_vote, liquidity_ok = "MICRO_ALPHA", True
