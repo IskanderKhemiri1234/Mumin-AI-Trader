@@ -23,6 +23,12 @@ class PublicMarketSnapshot:
     last_closed_price: Decimal
     candle_close_time_ms: int
     received_at_ms: int
+    candle_open: Decimal
+    candle_high: Decimal
+    candle_low: Decimal
+    candle_volume: Decimal
+    bid_depth_qty: Decimal
+    ask_depth_qty: Decimal
     source: str = "BINANCE_PUBLIC_MARKET_DATA"
 
 
@@ -51,9 +57,10 @@ class PublicMarketData:
         if symbol not in ALLOWED_SYMBOLS:
             raise ValueError(f"Symbol is not in the paper-trading allowlist: {symbol}")
 
-        book, candles, server = await asyncio.gather(
+        book, candles, depth, server = await asyncio.gather(
             self._get("/api/v3/ticker/bookTicker", {"symbol": symbol}),
             self._get("/api/v3/klines", {"symbol": symbol, "interval": "1m", "limit": 30}),
+            self._get("/api/v3/depth", {"symbol": symbol, "limit": 20}),
             self._get("/api/v3/time", {}),
         )
         received_at_ms = int(server["serverTime"])
@@ -69,9 +76,16 @@ class PublicMarketData:
         candle_close_time_ms = int(candle[6])
         if received_at_ms - candle_close_time_ms > 180_000:
             raise ValueError(f"Closed candle is stale for {symbol}")
-        close_price = Decimal(str(candle[4]))
-        if not close_price.is_finite() or close_price <= 0:
-            raise ValueError(f"Invalid closed-candle price for {symbol}")
+        open_price, high_price, low_price, close_price, volume = (
+            Decimal(str(candle[index])) for index in (1, 2, 3, 4, 5)
+        )
+        if (not all(value.is_finite() for value in (open_price, high_price, low_price, close_price, volume))
+                or low_price <= 0 or high_price < low_price or volume < 0):
+            raise ValueError(f"Invalid closed-candle OHLCV for {symbol}")
+        bid_depth_qty = sum((Decimal(str(level[1])) for level in depth.get("bids", [])[:10]), Decimal("0"))
+        ask_depth_qty = sum((Decimal(str(level[1])) for level in depth.get("asks", [])[:10]), Decimal("0"))
+        if bid_depth_qty <= 0 or ask_depth_qty <= 0:
+            raise ValueError(f"Insufficient public depth for {symbol}")
 
         return PublicMarketSnapshot(
             symbol=symbol,
@@ -80,6 +94,12 @@ class PublicMarketData:
             last_closed_price=close_price,
             candle_close_time_ms=candle_close_time_ms,
             received_at_ms=received_at_ms,
+            candle_open=open_price,
+            candle_high=high_price,
+            candle_low=low_price,
+            candle_volume=volume,
+            bid_depth_qty=bid_depth_qty,
+            ask_depth_qty=ask_depth_qty,
         )
 
     async def snapshots(self, symbols: tuple[str, ...] = tuple(sorted(ALLOWED_SYMBOLS))) -> tuple[dict[str, PublicMarketSnapshot], dict[str, str]]:
