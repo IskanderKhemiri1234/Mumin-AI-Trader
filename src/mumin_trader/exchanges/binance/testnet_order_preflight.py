@@ -4,7 +4,6 @@ import hashlib
 import hmac
 import re
 from decimal import Decimal, InvalidOperation
-from time import time
 from typing import Any
 from urllib.parse import urlencode
 
@@ -132,7 +131,7 @@ class BinanceSpotTestnetOrderPreflight:
         if len(symbols) != 1:
             raise TestnetPreflightError("Symbol metadata is missing or ambiguous.")
         metadata = symbols[0]
-        if metadata.get("status") != "TRADING" or metadata.get("isSpotTradingAllowed") is False:
+        if metadata.get("status") != "TRADING" or metadata.get("isSpotTradingAllowed") is not True:
             raise TestnetPreflightError("Symbol is not enabled for Spot trading on Testnet.")
 
         filters = {item.get("filterType"): item for item in metadata.get("filters", [])}
