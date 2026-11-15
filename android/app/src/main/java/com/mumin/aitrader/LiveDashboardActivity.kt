@@ -241,6 +241,7 @@ connectMarket();paper();setInterval(paper,10000);
             setDataAndType(apkUri, "application/vnd.android.package-archive")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         }
+        pendingApk = null
         startActivity(installer)
     }
 
