@@ -44,10 +44,18 @@ class MainActivity : Activity() {
     private val updateExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var updateReceiver: BroadcastReceiver? = null
+    private val reportRefreshTask = object : Runnable {
+        override fun run() {
+            if (::webView.isInitialized && !isFinishing) {
+                loadLatestReport()
+            }
+            mainHandler.postDelayed(this, 60_000L)
+        }
+    }
 
     companion object {
         private const val LATEST_RELEASE_URL = "https://api.github.com/repos/IskanderKhemiri1234/Mumin-AI-Trader/releases/latest"
-        private const val CURRENT_VERSION = "1.1.0"
+        private const val CURRENT_VERSION = "1.2.0"
         private const val INSTALL_REQUEST_CODE = 7102
         private const val REPORT_URL =
             "https://raw.githubusercontent.com/IskanderKhemiri1234/Mumin-AI-Trader/mumin-paper-ledger/latest-report.html"
@@ -80,7 +88,7 @@ class MainActivity : Activity() {
             setTypeface(null, android.graphics.Typeface.BOLD)
         })
         header.addView(TextView(this).apply {
-            text = "ROYAL EDITION  •  PAPER PORTFOLIO"
+            text = "LIVE PAPER SNAPSHOT  •  AUTO-REFRESH 60S"
             setTextColor(Color.rgb(190, 205, 197))
             textSize = 11f
             letterSpacing = 0.08f
@@ -365,6 +373,17 @@ class MainActivity : Activity() {
 
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
+
+    override fun onResume() {
+        super.onResume()
+        mainHandler.removeCallbacks(reportRefreshTask)
+        mainHandler.postDelayed(reportRefreshTask, 60_000L)
+    }
+
+    override fun onPause() {
+        mainHandler.removeCallbacks(reportRefreshTask)
+        super.onPause()
+    }
 
     override fun onSaveInstanceState(outState: Bundle) {
         webView.saveState(outState)
