@@ -527,3 +527,66 @@ async def test_emergency_stop_cancels_exchange_open_orders_and_keeps_halt(tmp_pa
         assert store.is_halted() == (True, "MANUAL_EMERGENCY_STOP")
     finally:
         await client.close()
+
+
+
+@pytest.mark.asyncio
+async def test_account_with_withdrawal_permission_is_rejected(tmp_path) -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/account":
+            return httpx.Response(200, json={**account_info(), "canWithdraw": True})
+        return httpx.Response(404, json={"msg": "unexpected endpoint"})
+
+    client = BinanceSpotTestnetExecution(
+        settings(), SQLiteOrderStore(str(tmp_path / "orders.db")),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        with pytest.raises(SpotExecutionError, match="withdrawal permission"):
+            await client._account()
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_cancel_api_error_marks_order_unknown_without_retry(tmp_path) -> None:
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/exchangeInfo":
+            return httpx.Response(200, json=symbol_info())
+        if request.url.path == "/api/v3/account":
+            return httpx.Response(200, json=account_info())
+        if request.url.path == "/api/v3/openOrders":
+            return httpx.Response(200, json=[])
+        if request.url.path == "/api/v3/myTrades":
+            return httpx.Response(200, json=[])
+        if request.url.path == "/api/v3/order" and request.method == "POST":
+            return httpx.Response(200, json=order_response())
+        if request.url.path == "/api/v3/order" and request.method == "DELETE":
+            return httpx.Response(500, json={"code": -1000, "msg": "unknown cancel outcome"})
+        if request.url.path == "/api/v3/order" and request.method == "GET":
+            return httpx.Response(200, json=order_response())
+        return httpx.Response(404, json={"msg": "unexpected endpoint"})
+
+    store = SQLiteOrderStore(str(tmp_path / "orders.db"))
+    client = BinanceSpotTestnetExecution(
+        settings(), store, transport=httpx.MockTransport(handler),
+    )
+    try:
+        await client.reconcile()
+        await client.submit_limit_order(
+            symbol="BTCUSDT", side="BUY", quantity="0.00010",
+            price="50000.00", client_order_id="mumin-cancel-unknown",
+        )
+        with pytest.raises(SpotOrderOutcomeUnknown, match="Cancellation outcome is unknown"):
+            await client.cancel_order(symbol="BTCUSDT", client_order_id="mumin-cancel-unknown")
+        assert store.get_order("mumin-cancel-unknown")["state"] == "UNKNOWN"
+        assert sum(req.method == "DELETE" for req in seen) == 1
+    finally:
+        await client.close()
