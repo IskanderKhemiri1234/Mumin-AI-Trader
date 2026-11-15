@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 import httpx
 
 from config.config import Settings, TradingEnvironment, TradingMode
-from mumin_trader.exchanges.binance.order_store import OrderStoreError, SQLiteOrderStore
+from mumin_trader.exchanges.binance.order_store import SQLiteOrderStore
 from mumin_trader.exchanges.binance.testnet_order_preflight import (
     BinanceSpotTestnetOrderPreflight,
     TESTNET_REST_BASE_URL,
@@ -32,8 +32,6 @@ class BinanceSpotTestnetExecution:
     No configurable host is accepted. This adapter is not imported by the Paper engine
     and has no Mainnet, Margin, Futures, withdrawal, or market-order implementation.
     """
-
-    ACTIVE_STATES = {"NEW", "PARTIALLY_FILLED", "PENDING_CANCEL", "CANCEL_PENDING"}
 
     def __init__(
         self,
@@ -236,7 +234,7 @@ class BinanceSpotTestnetExecution:
                 signed=True,
             )
         except SpotExecutionError as exc:
-            if "API error 400" in str(exc) or "API error 404" in str(exc):
+            if "(-2013)" in str(exc):
                 return None
             raise
         return response if isinstance(response, dict) else None
