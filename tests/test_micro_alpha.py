@@ -51,3 +51,25 @@ def test_micro_alpha_fails_closed_on_depth_disagreement():
         bid=Decimal("100.1"), ask=Decimal("100.2"), max_spread_bps=Decimal("12"),
     )
     assert signal == "HOLD"
+
+
+
+def test_detailed_agent_log_explains_votes_spread_and_atr():
+    closes = [Decimal("100")] * 14 + [Decimal("100.2")]
+    highs = [Decimal("100.2")] * 14 + [Decimal("100.3")]
+    lows = [Decimal("99.8")] * 14 + [Decimal("99.0")]
+    volumes = [Decimal("10")] * 14 + [Decimal("15")]
+    details = PaperMicroAlphaSwarm().evaluate_detailed(
+        closes=closes, highs=highs, lows=lows, volumes=volumes,
+        bid_depth=Decimal("80"), ask_depth=Decimal("20"),
+        bid=Decimal("100.1"), ask=Decimal("100.2"),
+        max_spread_bps=Decimal("12"),
+    )
+    assert details["sweep_vote"] == "BUY"
+    assert details["sweep_reason"] == "LOW_SWEPT_AND_RECLAIMED_WITH_STRONG_CLOSE"
+    assert details["depth_vote"] == "BUY"
+    assert details["depth_reason"] == "BID_DEPTH_IMBALANCE_AT_LEAST_12_PERCENT"
+    assert details["filter_vote"] == "BUY"
+    assert details["filter_reason"] == "SWEEP_AND_DEPTH_CONSENSUS_PASSED"
+    assert Decimal(details["spread_bps"]) > 0
+    assert Decimal(details["atr_pct"]) > 0
