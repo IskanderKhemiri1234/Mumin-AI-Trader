@@ -115,8 +115,12 @@ class BinanceSpotTestnetExecution:
         payload = await self._request("GET", "/api/v3/account", signed=True)
         if not isinstance(payload, dict) or not isinstance(payload.get("balances"), list):
             raise SpotExecutionError("Account response is incomplete; refusing order.")
+        if payload.get("accountType") not in {None, "SPOT"}:
+            raise SpotExecutionError("Binance account is not a Spot account.")
         if payload.get("canTrade") is not True:
             raise SpotExecutionError("Binance account does not explicitly confirm Spot trading permission.")
+        if payload.get("canWithdraw") is True:
+            raise SpotExecutionError("API key/account exposes withdrawal permission; Spot execution is blocked.")
         return payload
 
     async def _exchange_symbol(self, symbol: str) -> dict[str, Any]:
@@ -376,12 +380,14 @@ class BinanceSpotTestnetExecution:
                 {"symbol": symbol.upper(), "origClientOrderId": client_order_id},
                 signed=True,
             )
-        except (httpx.TimeoutException, httpx.TransportError) as exc:
+        except Exception as exc:
             self.store.update_order(
                 client_order_id, state="UNKNOWN",
-                error="Cancel request transport failure; reconcile exchange order status.",
+                error="Cancel request outcome is uncertain; reconcile exchange order status.",
             )
-            raise SpotOrderOutcomeUnknown("Cancellation outcome is unknown; query order status before retry.") from exc
+            raise SpotOrderOutcomeUnknown(
+                "Cancellation outcome is unknown; query order status before retry."
+            ) from exc
         state = self._status(response)
         self.store.update_order(client_order_id, state=state, response=response)
         await self._sync_fills_if_needed(response)
@@ -412,6 +418,7 @@ class BinanceSpotTestnetExecution:
                     cancelled.append(result)
                     if client_id:
                         self.store.update_order(client_id, state=self._status(result), response=result)
+                    await self._sync_fills_if_needed(result)
                 except Exception as exc:
                     failures.append(f"{symbol}:{client_id}:{type(exc).__name__}")
             return {"halted": True, "cancelled": cancelled, "failures": failures}
