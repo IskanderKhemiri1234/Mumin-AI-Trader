@@ -29,9 +29,6 @@ class LiveDashboardActivity : Activity() {
     companion object {
         private const val RELEASE_API = "https://api.github.com/repos/IskanderKhemiri1234/Mumin-AI-Trader/releases/latest"
         private const val USER_AGENT = "Mumin-AI-Trader-Android"
-    }
-
-    companion object {
         private const val EMERALD = 0xFF071C17.toInt()
         private const val DASHBOARD_HTML = """
 <!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
@@ -56,7 +53,7 @@ h1{font-size:19px;color:var(--gold);margin:0 0 5px}h2{font-size:15px;color:var(-
 <section class="card"><h2>مؤشر الأصول الحي · Public Market</h2><div id="assets" class="grid"></div></section>
 <section class="card"><h2>المراكز المفتوحة · Paper Ledger</h2><div id="positions" class="rows">تحميل…</div></section>
 <section class="card"><h2>آخر الصفقات المسجلة</h2><div id="fills" class="rows">تحميل…</div></section>
-<section class="card warning"><h2>حواجز السلامة</h2><div class="metrics"><div class="metric"><small>وقف الخسارة المحاكى</small><b>0.50%</b></div><div class="metric"><small>جني الربح المحاكى</small><b>1.25%</b></div><div class="metric"><small>حد الصفقة</small><b>5 USDT</b></div><div class="metric"><small>درع السبريد</small><b>12 bps</b></div></div><p class="muted">بيانات السوق عامة للعرض فقط. الرصيد والصفقات من سجل Paper فقط. GitHub Actions ليس خادماً دائماً؛ لذلك تحديث دفتر Paper مرتبط بنجاح الدورة المجدولة، وليس لحظياً.</p></section>
+<section class="card warning"><h2>حواجز السلامة</h2><div class="metrics"><div class="metric"><small>وقف الخسارة المحاكى</small><b>0.50%</b></div><div class="metric"><small>جني الربح المحاكى</small><b>1.25%</b></div><div class="metric"><small>حد الصفقة</small><b>5 USDT</b></div><div class="metric"><small>درع السبريد</small><b>8 bps</b></div></div><p class="muted">بيانات السوق عامة للعرض فقط. الرصيد والصفقات من سجل Paper فقط. GitHub Actions ليس خادماً دائماً؛ لذلك تحديث دفتر Paper مرتبط بنجاح الدورة المجدولة، وليس لحظياً.</p></section>
 <script>
 const symbols=['BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT','ADAUSDT','AVAXUSDT','LINKUSDT'];
 const history={}; let lastPaperTick=-1;
@@ -249,10 +246,12 @@ connectMarket();paper();setInterval(paper,10000);
 
     override fun onResume() {
         super.onResume()
-        pendingApk?.takeIf { it.exists() }?.let { apk ->
-            if (android.os.Build.VERSION.SDK_INT < 26 || packageManager.canRequestPackageInstalls()) {
-                installDownloadedApk(apk)
-            }
+        val apk = pendingApk ?: return
+        if (apk.exists() &&
+            (android.os.Build.VERSION.SDK_INT < 26 || packageManager.canRequestPackageInstalls())
+        ) {
+            pendingApk = null
+            installDownloadedApk(apk)
         }
     }
 
