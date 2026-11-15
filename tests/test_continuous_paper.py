@@ -208,9 +208,45 @@ def test_public_micro_alpha_entry_persists_atr_adaptive_position_targets(tmp_pat
         position = db.execute(
             "SELECT stop_loss_pct, take_profit_pct FROM bot_positions WHERE symbol='BTCUSDT'"
         ).fetchone()
+        decision = db.execute(
+            """SELECT liquidity_sweep_vote, liquidity_sweep_reason,
+                      depth_imbalance_vote, depth_imbalance_reason,
+                      micro_alpha_filter_vote, micro_alpha_filter_reason,
+                      spread_bps, atr_pct, final_signal, action
+               FROM bot_agent_decisions WHERE symbol='BTCUSDT' ORDER BY tick DESC LIMIT 1"""
+        ).fetchone()
     assert result.signal.startswith("BTCUSDT:BUY")
     assert position is not None
+    assert decision is not None
+    assert decision[0] == "BUY"
+    assert "RECLAIMED" in decision[1]
+    assert decision[2] == "BUY"
+    assert "IMBALANCE" in decision[3]
+    assert decision[4] == "BUY"
+    assert "CONSENSUS_PASSED" in decision[5]
+    assert Decimal(decision[6]) > 0
+    assert Decimal(decision[7]) > 0
+    assert decision[8] == "BUY"
+    assert decision[9].startswith("BTCUSDT:OPEN")
     stop, target = map(Decimal, position)
     assert Decimal("0.20") <= stop <= Decimal("0.50")
     assert Decimal("0.40") <= target <= Decimal("1.25")
     assert stop != Decimal("0.50") or target != Decimal("1.25")
+
+
+
+def test_sqlite_batch_audit_checks_integrity_and_checkpoints_wal(tmp_path):
+    database = tmp_path / "sqlite-audit.sqlite3"
+    bot = ContinuousPaperBot(str(database), initial_cash=Decimal("70.00"))
+    for _ in range(3):
+        bot.step({"BTCUSDT": Decimal("60000")})
+    audit = bot.finalize_database_batch()
+    assert audit["integrity"] == "ok"
+    assert audit["wal_busy"] == 0
+    assert audit["wal_checkpointed_frames"] >= audit["wal_log_frames"]
+    with sqlite3.connect(database) as db:
+        integrity = db.execute("PRAGMA integrity_check").fetchone()[0]
+        columns = {row[1] for row in db.execute("PRAGMA table_info(bot_agent_decisions)")}
+    assert integrity == "ok"
+    assert {"liquidity_sweep_reason", "depth_imbalance_reason",
+            "micro_alpha_filter_reason", "spread_bps", "atr_pct"} <= columns
