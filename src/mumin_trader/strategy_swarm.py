@@ -71,7 +71,7 @@ def compound_allocation(
     initial_capital: Decimal = Decimal("70.00"),
     max_trade: Decimal = Decimal("5.00"),
 ) -> Decimal:
-    """Reinvest available Paper profits while preserving the 70-USDT capital ceiling.
+    """Reinvest Paper profits while preserving the 70-USDT deployed-capital ceiling.
 
     Position budget scales with current equity at the original 5/70 ratio and
     cannot consume the reserved cash balance. Portfolio exposure is capped by
