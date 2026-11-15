@@ -14,5 +14,6 @@ def test_swarm_requires_momentum_and_liquidity_consensus():
 def test_compounder_scales_with_equity_and_respects_cap_and_reserve():
     assert compound_allocation(Decimal("70"), Decimal("60"), Decimal("14")) == Decimal("5")
     assert compound_allocation(Decimal("35"), Decimal("40"), Decimal("14")) == Decimal("2.5")
-    assert compound_allocation(Decimal("90"), Decimal("80"), Decimal("14")) == Decimal("5")
+    assert compound_allocation(Decimal("90"), Decimal("80"), Decimal("14")) == Decimal("90") * Decimal("5") / Decimal("70")
     assert compound_allocation(Decimal("70"), Decimal("18"), Decimal("14")) == Decimal("4")
+    assert compound_allocation(Decimal("77"), Decimal("60"), Decimal("14")) == Decimal("5.5")
