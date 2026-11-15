@@ -51,7 +51,8 @@ def test_synthetic_prices_are_repeatable_and_symbol_specific():
         second = ContinuousPaperBot.synthetic_price_for(symbol, 10)
         assert first == second
         assert first > 0
-    assert len({ContinuousPaperBot.synthetic_price_for(s, 10) for s in SYMBOLS}) == 3
+    assert len(SYMBOLS) == 8
+    assert len({ContinuousPaperBot.synthetic_price_for(s, 10) for s in SYMBOLS}) == 8
 
 
 def test_public_source_is_recorded_separately_from_synthetic(tmp_path):

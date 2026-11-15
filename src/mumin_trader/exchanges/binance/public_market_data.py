@@ -9,7 +9,10 @@ import httpx
 
 
 BASE_URL = "https://data-api.binance.vision"
-ALLOWED_SYMBOLS = frozenset({"BTCUSDT", "ETHUSDT", "BNBUSDT"})
+ALLOWED_SYMBOLS = frozenset({
+    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
+    "XRPUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT",
+})
 
 
 @dataclass(frozen=True, slots=True)

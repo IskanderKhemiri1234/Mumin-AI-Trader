@@ -70,5 +70,8 @@ def test_paper_fill_uses_ask_for_buy_and_bid_for_sell_with_slippage():
         simulated_fill_price("HOLD", bid, ask)
 
 
-def test_allowlist_contains_only_the_three_approved_spot_pairs():
-    assert ALLOWED_SYMBOLS == {"BTCUSDT", "ETHUSDT", "BNBUSDT"}
+def test_allowlist_contains_all_eight_approved_spot_pairs():
+    assert ALLOWED_SYMBOLS == {
+        "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
+        "XRPUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT",
+    }
