@@ -438,9 +438,6 @@ class BinanceSpotTestnetExecution:
             if risk_reason:
                 discrepancies.append(f"RISK_LIMIT:{risk_reason}")
             trade_positions = await self.sync_trade_history()
-            for trade_ref in self.store.unmatched_trade_order_ids():
-                discrepancies.append(f"EXCHANGE_TRADE_WITHOUT_LOCAL_INTENT:{trade_ref}")
-            discrepancies.extend(self.store.order_fill_quantity_discrepancies())
             local_unresolved = self.store.unresolved_orders()
             local_ids = {str(order["client_order_id"]) for order in local_unresolved}
 
@@ -457,6 +454,10 @@ class BinanceSpotTestnetExecution:
                     continue
                 state = self._status(observed)
                 self.store.update_order(client_id, state=state, response=observed)
+
+            for trade_ref in self.store.unmatched_trade_order_ids():
+                discrepancies.append(f"EXCHANGE_TRADE_WITHOUT_LOCAL_INTENT:{trade_ref}")
+            discrepancies.extend(self.store.order_fill_quantity_discrepancies())
 
             for client_id in exchange_by_id:
                 if client_id not in local_ids:
