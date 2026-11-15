@@ -20,9 +20,10 @@ class SQLiteOrderStore:
             database_path = database_path.removeprefix("sqlite:///")
         elif "://" in database_path:
             raise OrderStoreError("Only a local SQLite database is supported for Testnet orders.")
+        if database_path == ":memory:":
+            raise OrderStoreError("Spot execution requires a durable file-backed SQLite database.")
         self.database_path = database_path
-        if database_path != ":memory:":
-            Path(database_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+        Path(database_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
