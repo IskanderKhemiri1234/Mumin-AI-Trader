@@ -4,6 +4,7 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -92,6 +93,32 @@ class SQLiteOrderStore:
                     high_watermark TEXT NOT NULL,
                     last_equity TEXT NOT NULL,
                     updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS spot_trade_fills (
+                    symbol TEXT NOT NULL,
+                    trade_id INTEGER NOT NULL,
+                    order_id INTEGER NOT NULL,
+                    price TEXT NOT NULL,
+                    quantity TEXT NOT NULL,
+                    quote_quantity TEXT NOT NULL,
+                    commission TEXT NOT NULL,
+                    commission_asset TEXT NOT NULL,
+                    is_buyer INTEGER NOT NULL,
+                    trade_time_ms INTEGER NOT NULL,
+                    raw_json TEXT NOT NULL,
+                    PRIMARY KEY(symbol, trade_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_spot_trade_order
+                    ON spot_trade_fills(symbol, order_id);
+                CREATE TABLE IF NOT EXISTS spot_trade_sync_state (
+                    symbol TEXT PRIMARY KEY,
+                    last_trade_id INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS spot_balance_baseline (
+                    asset TEXT PRIMARY KEY,
+                    baseline_amount TEXT NOT NULL,
+                    captured_at TEXT NOT NULL
                 );
                 INSERT OR IGNORE INTO spot_execution_control
                     (id, halted, halt_reason, updated_at)
@@ -289,6 +316,122 @@ class SQLiteOrderStore:
                     (reason, self._now()),
                 )
         return reason
+
+    def last_trade_id(self, symbol: str) -> int | None:
+        with self._connection() as db:
+            row = db.execute(
+                "SELECT last_trade_id FROM spot_trade_sync_state WHERE symbol=?",
+                (symbol.upper(),),
+            ).fetchone()
+            return int(row["last_trade_id"]) if row else None
+
+    def record_trade_fills(self, symbol: str, fills: list[dict[str, Any]]) -> int | None:
+        normalized = symbol.upper()
+        latest: int | None = None
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            for fill in fills:
+                trade_id = int(fill["id"])
+                latest = trade_id if latest is None else max(latest, trade_id)
+                db.execute(
+                    """INSERT OR IGNORE INTO spot_trade_fills
+                       (symbol,trade_id,order_id,price,quantity,quote_quantity,commission,
+                        commission_asset,is_buyer,trade_time_ms,raw_json)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        normalized, trade_id, int(fill["orderId"]), str(fill["price"]),
+                        str(fill["qty"]), str(fill["quoteQty"]), str(fill["commission"]),
+                        str(fill["commissionAsset"]).upper(), int(bool(fill["isBuyer"])),
+                        int(fill["time"]), json.dumps(fill, sort_keys=True),
+                    ),
+                )
+            if latest is not None:
+                db.execute(
+                    """INSERT INTO spot_trade_sync_state(symbol,last_trade_id,updated_at)
+                       VALUES (?,?,?)
+                       ON CONFLICT(symbol) DO UPDATE SET
+                       last_trade_id=MAX(last_trade_id,excluded.last_trade_id),
+                       updated_at=excluded.updated_at""",
+                    (normalized, latest, self._now()),
+                )
+        return latest
+
+    def trade_asset_deltas(self, quote_asset: str) -> dict[str, Decimal]:
+        quote = quote_asset.upper()
+        deltas: dict[str, Decimal] = {}
+        with self._connection() as db:
+            rows = db.execute(
+                """SELECT symbol,price,quantity,quote_quantity,commission,
+                          commission_asset,is_buyer
+                   FROM spot_trade_fills ORDER BY trade_time_ms,trade_id"""
+            ).fetchall()
+        for row in rows:
+            symbol = str(row["symbol"])
+            if not symbol.endswith(quote):
+                raise OrderStoreError(f"Stored trade is outside the configured quote asset: {symbol}")
+            base = symbol.removesuffix(quote)
+            quantity = Decimal(row["quantity"])
+            quote_quantity = Decimal(row["quote_quantity"])
+            commission = Decimal(row["commission"])
+            commission_asset = str(row["commission_asset"]).upper()
+            if not all(value.is_finite() and value >= 0 for value in (quantity, quote_quantity, commission)):
+                raise OrderStoreError("Stored trade contains invalid quantities or commission.")
+            deltas[base] = deltas.get(base, Decimal("0")) + (quantity if row["is_buyer"] else -quantity)
+            deltas[quote] = deltas.get(quote, Decimal("0")) + (-quote_quantity if row["is_buyer"] else quote_quantity)
+            deltas[commission_asset] = deltas.get(commission_asset, Decimal("0")) - commission
+        return deltas
+
+    def reconcile_account_balances(
+        self,
+        balances: list[dict[str, Any]],
+        *,
+        quote_asset: str,
+        tolerance: str = "0.00000001",
+    ) -> list[str]:
+        current: dict[str, Decimal] = {}
+        for row in balances:
+            asset = str(row["asset"]).upper()
+            free = Decimal(str(row["free"]))
+            locked = Decimal(str(row["locked"]))
+            if not free.is_finite() or not locked.is_finite() or free < 0 or locked < 0:
+                raise OrderStoreError("Exchange returned an invalid balance during reconciliation.")
+            current[asset] = free + locked
+
+        deltas = self.trade_asset_deltas(quote_asset)
+        epsilon = Decimal(tolerance)
+        discrepancies: list[str] = []
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            baseline_rows = {
+                str(row["asset"]): Decimal(row["baseline_amount"])
+                for row in db.execute("SELECT asset,baseline_amount FROM spot_balance_baseline")
+            }
+            for asset in set(current) | set(deltas) | set(baseline_rows):
+                actual = current.get(asset, Decimal("0"))
+                delta = deltas.get(asset, Decimal("0"))
+                baseline = baseline_rows.get(asset)
+                if baseline is None:
+                    baseline = actual - delta
+                    if baseline < -epsilon:
+                        discrepancies.append(f"NEGATIVE_INFERRED_BASELINE:{asset}")
+                        continue
+                    baseline = max(Decimal("0"), baseline)
+                    db.execute(
+                        """INSERT INTO spot_balance_baseline(asset,baseline_amount,captured_at)
+                           VALUES (?,?,?)""",
+                        (asset, str(baseline), self._now()),
+                    )
+                expected = baseline + delta
+                if abs(actual - expected) > epsilon:
+                    discrepancies.append(
+                        f"BALANCE_MISMATCH:{asset}:exchange={actual}:ledger={expected}"
+                    )
+        return discrepancies
+
+    def trade_position_quantities(self, quote_asset: str) -> dict[str, Decimal]:
+        quote = quote_asset.upper()
+        deltas = self.trade_asset_deltas(quote)
+        return {asset: amount for asset, amount in deltas.items() if asset != quote}
 
     def record_reconciliation(
         self,
