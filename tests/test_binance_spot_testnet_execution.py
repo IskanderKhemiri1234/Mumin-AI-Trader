@@ -377,3 +377,59 @@ async def test_partial_fill_status_and_quantities_are_persisted(tmp_path) -> Non
         assert saved["cumulative_quote_quantity"] == "2.00"
     finally:
         await client.close()
+
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_persists_trade_fills_and_matches_account_balances(tmp_path) -> None:
+    trade = {
+        "id": 1,
+        "orderId": 12345,
+        "price": "50000.00",
+        "qty": "0.00010",
+        "quoteQty": "5.00",
+        "commission": "0.005",
+        "commissionAsset": "USDT",
+        "isBuyer": True,
+        "time": 1_700_000_000_000,
+    }
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/account":
+            account = account_info()
+            account["balances"] = [
+                {"asset": "USDT", "free": "94.995", "locked": "0"},
+                {"asset": "BTC", "free": "0.00010", "locked": "0"},
+            ]
+            return httpx.Response(200, json=account)
+        if request.url.path == "/api/v3/openOrders":
+            return httpx.Response(200, json=[])
+        if request.url.path == "/api/v3/ticker/price":
+            return httpx.Response(200, json={"symbol": "BTCUSDT", "price": "50000.00"})
+        if request.url.path == "/api/v3/myTrades":
+            return httpx.Response(200, json=[trade] if request.url.params.get("fromId") == "0" else [])
+        return httpx.Response(404, json={"code": -2013, "msg": "Order does not exist."})
+
+    store = SQLiteOrderStore(str(tmp_path / "orders.db"))
+    store.register_intent({
+        "symbol": "BTCUSDT", "side": "BUY", "type": "LIMIT", "timeInForce": "GTC",
+        "quantity": "0.00010", "price": "50000.00", "newClientOrderId": "mumin-test-filled-1",
+    })
+    store.update_order(
+        "mumin-test-filled-1", state="FILLED",
+        response={"orderId": 12345, "executedQty": "0.00010", "cummulativeQuoteQty": "5.00"},
+    )
+    client = BinanceSpotTestnetExecution(
+        settings(), store, transport=httpx.MockTransport(handler),
+    )
+    try:
+        report = await client.reconcile()
+        assert report["discrepancies"] == []
+        assert report["trade_positions"] == {"BTC": "0.00010"}
+        assert store.trade_position_quantities("USDT") == {"BTC": Decimal("0.00010")}
+        assert store.last_trade_id("BTCUSDT") == 1
+        assert store.is_halted() == (False, "")
+    finally:
+        await client.close()
