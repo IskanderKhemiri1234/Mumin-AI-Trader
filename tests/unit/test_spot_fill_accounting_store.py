@@ -94,7 +94,7 @@ def test_existing_fill_database_is_migrated_without_losing_rows(tmp_path):
             """INSERT INTO spot_trade_fills VALUES
                ('BTCUSDT',1,10,'100','1','100','0.01','USDT',1,1000,'{}')"""
         )
-    store = SQLiteOrderStore(str(database))
+    SQLiteOrderStore(str(database))
     with sqlite3.connect(database) as db:
         columns = {row[1] for row in db.execute("PRAGMA table_info(spot_trade_fills)")}
         row = db.execute(
