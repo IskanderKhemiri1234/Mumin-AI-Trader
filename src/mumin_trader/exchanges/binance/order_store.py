@@ -565,10 +565,16 @@ class SQLiteOrderStore:
                 """SELECT client_order_id,symbol,exchange_order_id,executed_quantity
                    FROM spot_order_intents WHERE exchange_order_id IS NOT NULL"""
             ).fetchall()
-            oco_rows = db.execute(
-                """SELECT list_client_order_id,symbol,above_order_id,below_order_id,response_json
-                   FROM spot_oco_order_lists"""
-            ).fetchall()
+            has_oco_table = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='spot_oco_order_lists'"
+            ).fetchone() is not None
+            oco_rows = (
+                db.execute(
+                    """SELECT list_client_order_id,symbol,above_order_id,below_order_id,response_json
+                       FROM spot_oco_order_lists"""
+                ).fetchall()
+                if has_oco_table else []
+            )
             fills = db.execute(
                 """SELECT symbol,order_id,quantity FROM spot_trade_fills"""
             ).fetchall()
@@ -617,17 +623,29 @@ class SQLiteOrderStore:
 
     def unmatched_trade_order_ids(self) -> list[str]:
         with self._connection() as db:
-            rows = db.execute(
-                """SELECT DISTINCT f.symbol || ':' || CAST(f.order_id AS TEXT) AS order_ref
-                   FROM spot_trade_fills AS f
-                   LEFT JOIN spot_order_intents AS o
-                     ON o.symbol=f.symbol AND CAST(o.exchange_order_id AS INTEGER)=f.order_id
-                   LEFT JOIN spot_oco_order_lists AS c
-                     ON c.symbol=f.symbol
-                     AND (CAST(c.above_order_id AS INTEGER)=f.order_id
-                          OR CAST(c.below_order_id AS INTEGER)=f.order_id)
-                   WHERE o.client_order_id IS NULL AND c.list_client_order_id IS NULL"""
-            ).fetchall()
+            has_oco_table = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='spot_oco_order_lists'"
+            ).fetchone() is not None
+            if has_oco_table:
+                rows = db.execute(
+                    """SELECT DISTINCT f.symbol || ':' || CAST(f.order_id AS TEXT) AS order_ref
+                       FROM spot_trade_fills AS f
+                       LEFT JOIN spot_order_intents AS o
+                         ON o.symbol=f.symbol AND CAST(o.exchange_order_id AS INTEGER)=f.order_id
+                       LEFT JOIN spot_oco_order_lists AS c
+                         ON c.symbol=f.symbol
+                         AND (CAST(c.above_order_id AS INTEGER)=f.order_id
+                              OR CAST(c.below_order_id AS INTEGER)=f.order_id)
+                       WHERE o.client_order_id IS NULL AND c.list_client_order_id IS NULL"""
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    """SELECT DISTINCT f.symbol || ':' || CAST(f.order_id AS TEXT) AS order_ref
+                       FROM spot_trade_fills AS f
+                       LEFT JOIN spot_order_intents AS o
+                         ON o.symbol=f.symbol AND CAST(o.exchange_order_id AS INTEGER)=f.order_id
+                       WHERE o.client_order_id IS NULL"""
+                ).fetchall()
             return [str(row["order_ref"]) for row in rows]
 
     def trade_position_quantities(self, quote_asset: str) -> dict[str, Decimal]:
