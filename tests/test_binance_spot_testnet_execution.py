@@ -667,3 +667,188 @@ async def test_incomplete_fee_and_fifo_ledger_blocks_order_before_network(tmp_pa
         assert store.is_halted() == (True, "PNL_LEDGER_INCOMPLETE")
     finally:
         await client.close()
+
+
+
+@pytest.mark.asyncio
+async def test_modern_oco_uses_order_list_endpoint_and_persists_both_legs(tmp_path) -> None:
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        assert str(request.url).startswith(TESTNET_REST_BASE_URL)
+        path = request.url.path
+        if path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if path == "/api/v3/exchangeInfo":
+            return httpx.Response(200, json=symbol_info())
+        if path == "/api/v3/ticker/price":
+            return httpx.Response(200, json={"symbol": "BTCUSDT", "price": "50000.00"})
+        if path == "/api/v3/account":
+            account = account_info()
+            account["balances"][1]["free"] = "0.00100"
+            return httpx.Response(200, json=account)
+        if path == "/api/v3/openOrders":
+            return httpx.Response(200, json=[])
+        if path == "/api/v3/myTrades":
+            return httpx.Response(200, json=[])
+        if path == "/api/v3/orderList/oco" and request.method == "POST":
+            params = request.url.params
+            assert params["aboveType"] == "LIMIT_MAKER"
+            assert params["abovePrice"] == "51000.00"
+            assert params["belowType"] == "STOP_LOSS"
+            assert params["belowStopPrice"] == "49000.00"
+            assert params["quantity"] == "0.00011"
+            return httpx.Response(200, json={
+                "orderListId": 88, "contingencyType": "OCO",
+                "listStatusType": "EXEC_STARTED", "listOrderStatus": "EXECUTING",
+                "listClientOrderId": "mumin-oco-001", "symbol": "BTCUSDT",
+                "orders": [
+                    {"symbol": "BTCUSDT", "orderId": 801, "clientOrderId": "tp-child"},
+                    {"symbol": "BTCUSDT", "orderId": 802, "clientOrderId": "sl-child"},
+                ],
+                "orderReports": [
+                    {"symbol": "BTCUSDT", "orderId": 801, "clientOrderId": "tp-child",
+                     "executedQty": "0", "status": "NEW"},
+                    {"symbol": "BTCUSDT", "orderId": 802, "clientOrderId": "sl-child",
+                     "executedQty": "0", "status": "NEW"},
+                ],
+            })
+        if path == "/api/v3/orderList" and request.method == "GET":
+            return httpx.Response(200, json={
+                "orderListId": 88, "contingencyType": "OCO",
+                "listStatusType": "EXEC_STARTED", "listOrderStatus": "EXECUTING",
+                "listClientOrderId": "mumin-oco-001", "symbol": "BTCUSDT",
+                "orders": [
+                    {"symbol": "BTCUSDT", "orderId": 801, "clientOrderId": "tp-child"},
+                    {"symbol": "BTCUSDT", "orderId": 802, "clientOrderId": "sl-child"},
+                ],
+            })
+        return httpx.Response(404, json={"code": -2013, "msg": "Order list does not exist."})
+
+    store = SQLiteOrderStore(str(tmp_path / "orders.db"))
+    client = BinanceSpotTestnetExecution(settings(), store, transport=httpx.MockTransport(handler))
+    try:
+        await client.reconcile()
+        result = await client.oco.place_sell_oco(
+            symbol="BTCUSDT", quantity="0.00011",
+            take_profit_price="51000.00", stop_price="49000.00",
+            list_client_order_id="mumin-oco-001",
+        )
+        assert result["orderListId"] == 88
+        assert client.oco.store.get("mumin-oco-001")["state"] == "EXECUTING"
+        assert client.oco.store.get("mumin-oco-001")["order_list_id"] == "88"
+        assert sum(req.method == "POST" and req.url.path == "/api/v3/orderList/oco" for req in seen) == 1
+        assert not any(req.url.path == "/api/v3/order/oco" for req in seen)
+        duplicate = await client.oco.place_sell_oco(
+            symbol="BTCUSDT", quantity="0.00011",
+            take_profit_price="51000.00", stop_price="49000.00",
+            list_client_order_id="mumin-oco-001",
+        )
+        assert duplicate["orderListId"] == 88
+        assert sum(req.method == "POST" and req.url.path == "/api/v3/orderList/oco" for req in seen) == 1
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_oco_cancellation_cancels_the_order_list_as_one_unit(tmp_path) -> None:
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/orderList" and request.method == "DELETE":
+            assert request.url.params["listClientOrderId"] == "mumin-oco-cancel"
+            return httpx.Response(200, json={
+                "orderListId": 90, "contingencyType": "OCO",
+                "listStatusType": "ALL_DONE", "listOrderStatus": "ALL_DONE",
+                "listClientOrderId": "mumin-oco-cancel", "symbol": "BTCUSDT",
+                "orderReports": [
+                    {"symbol": "BTCUSDT", "orderId": 901, "executedQty": "0", "status": "CANCELED"},
+                    {"symbol": "BTCUSDT", "orderId": 902, "executedQty": "0", "status": "CANCELED"},
+                ],
+            })
+        return httpx.Response(404, json={"code": -2013, "msg": "not found"})
+
+    client = BinanceSpotTestnetExecution(
+        settings(), SQLiteOrderStore(str(tmp_path / "orders.db")),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        client.oco.store.register({
+            "symbol": "BTCUSDT", "side": "SELL", "quantity": "0.00011",
+            "listClientOrderId": "mumin-oco-cancel", "aboveType": "LIMIT_MAKER",
+            "abovePrice": "51000.00", "belowType": "STOP_LOSS",
+            "belowStopPrice": "49000.00", "newOrderRespType": "RESULT",
+        })
+        result = await client.oco.cancel_order_list(
+            symbol="BTCUSDT", list_client_order_id="mumin-oco-cancel",
+        )
+        assert result["listOrderStatus"] == "ALL_DONE"
+        assert client.oco.store.get("mumin-oco-cancel")["state"] == "CANCELED"
+        assert sum(req.method == "DELETE" and req.url.path == "/api/v3/orderList" for req in seen) == 1
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_oco_partial_fill_syncs_real_exchange_trade_fills(tmp_path) -> None:
+    seen: list[httpx.Request] = []
+    trade = {
+        "id": 991, "orderId": 992, "price": "51000.00", "qty": "0.00005",
+        "quoteQty": "2.55", "commission": "0.00255", "commissionAsset": "USDT",
+        "isBuyer": False, "isMaker": True, "time": 1_700_000_000_000,
+    }
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/exchangeInfo":
+            return httpx.Response(200, json=symbol_info())
+        if request.url.path == "/api/v3/ticker/price":
+            return httpx.Response(200, json={"symbol": "BTCUSDT", "price": "50000.00"})
+        if request.url.path == "/api/v3/account":
+            account = account_info()
+            account["balances"][1]["free"] = "0.00100"
+            return httpx.Response(200, json=account)
+        if request.url.path == "/api/v3/openOrders":
+            return httpx.Response(200, json=[])
+        if request.url.path == "/api/v3/orderList/oco" and request.method == "POST":
+            return httpx.Response(200, json={
+                "orderListId": 91, "contingencyType": "OCO",
+                "listStatusType": "EXEC_STARTED", "listOrderStatus": "EXECUTING",
+                "listClientOrderId": "mumin-oco-partial", "symbol": "BTCUSDT",
+                "orders": [
+                    {"symbol": "BTCUSDT", "orderId": 911, "clientOrderId": "tp-partial"},
+                    {"symbol": "BTCUSDT", "orderId": 912, "clientOrderId": "sl-partial"},
+                ],
+                "orderReports": [
+                    {"symbol": "BTCUSDT", "orderId": 911, "clientOrderId": "tp-partial",
+                     "executedQty": "0.00005", "status": "PARTIALLY_FILLED"},
+                    {"symbol": "BTCUSDT", "orderId": 912, "clientOrderId": "sl-partial",
+                     "executedQty": "0", "status": "NEW"},
+                ],
+            })
+        if request.url.path == "/api/v3/myTrades":
+            return httpx.Response(200, json=[trade] if request.url.params.get("fromId") == "0" else [])
+        return httpx.Response(404, json={"code": -2013, "msg": "not found"})
+
+    client = BinanceSpotTestnetExecution(
+        settings(), SQLiteOrderStore(str(tmp_path / "orders.db")),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        await client.reconcile()
+        await client.oco.place_sell_oco(
+            symbol="BTCUSDT", quantity="0.00011",
+            take_profit_price="51000.00", stop_price="49000.00",
+            list_client_order_id="mumin-oco-partial",
+        )
+        assert client.store.last_trade_id("BTCUSDT") == 991
+        assert client.store.get_trade_fill("BTCUSDT", 991)["commission"] == "0.00255"
+        assert any(req.url.path == "/api/v3/myTrades" for req in seen)
+    finally:
+        await client.close()
