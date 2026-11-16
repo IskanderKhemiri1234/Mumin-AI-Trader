@@ -6,6 +6,7 @@ from scripts.binance_spot_testnet_lifecycle import (
     child_result,
     commission_asset_mismatches,
     json_safe,
+    opoco_capability,
     round_down_to_step,
 )
 from mumin_trader.exchanges.binance.spot_testnet_oco import (
@@ -136,3 +137,23 @@ def test_fee_asset_mismatch_rejects_non_decimal_commission():
         {"trade_id": 5, "commission": "not-a-number", "commission_asset": "BNB"},
     ])
     assert result[0]["reason"] == "invalid_commission_amount"
+
+
+
+def test_opoco_capability_requires_all_exchange_flags():
+    result = opoco_capability({
+        "otoAllowed": True,
+        "opoAllowed": True,
+        "ocoAllowed": True,
+    })
+    assert result["supported_by_exchange_info"] is True
+    assert result["evidence_scope"] == "EXCHANGE_INFO_CAPABILITY_ONLY"
+
+
+def test_opoco_capability_fails_closed_when_any_flag_is_missing_or_false():
+    for metadata in (
+        {"otoAllowed": True, "opoAllowed": True},
+        {"otoAllowed": True, "opoAllowed": True, "ocoAllowed": False},
+        {"otoAllowed": "true", "opoAllowed": True, "ocoAllowed": True},
+    ):
+        assert opoco_capability(metadata)["supported_by_exchange_info"] is False
