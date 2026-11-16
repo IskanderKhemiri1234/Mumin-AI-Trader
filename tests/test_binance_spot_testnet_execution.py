@@ -797,7 +797,7 @@ async def test_oco_cancellation_cancels_the_order_list_as_one_unit(tmp_path) -> 
 async def test_oco_partial_fill_syncs_real_exchange_trade_fills(tmp_path) -> None:
     seen: list[httpx.Request] = []
     trade = {
-        "id": 991, "orderId": 992, "price": "51000.00", "qty": "0.00005",
+        "id": 991, "orderId": 911, "price": "51000.00", "qty": "0.00005",
         "quoteQty": "2.55", "commission": "0.00255", "commissionAsset": "USDT",
         "isBuyer": False, "isMaker": True, "time": 1_700_000_000_000,
     }
