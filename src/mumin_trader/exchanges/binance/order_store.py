@@ -412,6 +412,23 @@ class SQLiteOrderStore:
             ).fetchone()
             return dict(row) if row else None
 
+    def trade_fills_for_order(self, symbol: str, order_id: int) -> list[dict[str, Any]]:
+        with self._connection() as db:
+            rows = db.execute(
+                """SELECT trade_id,order_id,price,quantity,quote_quantity,commission,
+                          commission_asset,is_buyer,is_maker,commission_quote_value,
+                          trade_time_ms,raw_json
+                   FROM spot_trade_fills WHERE symbol=? AND order_id=?
+                   ORDER BY trade_time_ms,trade_id""",
+                (symbol.upper(), int(order_id)),
+            ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            item["exchange_trade"] = json.loads(item.pop("raw_json"))
+            result.append(item)
+        return result
+
     def order_fill_summary(
         self, symbol: str, order_id: int, *, base_asset: str,
     ) -> dict[str, str]:
