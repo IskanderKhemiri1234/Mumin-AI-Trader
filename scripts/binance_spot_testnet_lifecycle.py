@@ -110,6 +110,20 @@ def round_down_to_step(quantity: Decimal, step: Decimal) -> Decimal:
     return (quantity / step).to_integral_value(rounding=ROUND_DOWN) * step
 
 
+def opoco_capability(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Report exchange-declared OPOCO eligibility without implying order acceptance."""
+    flags = {
+        "oto_allowed": metadata.get("otoAllowed") is True,
+        "opo_allowed": metadata.get("opoAllowed") is True,
+        "oco_allowed": metadata.get("ocoAllowed") is True,
+    }
+    return {
+        **flags,
+        "supported_by_exchange_info": all(flags.values()),
+        "evidence_scope": "EXCHANGE_INFO_CAPABILITY_ONLY",
+    }
+
+
 def commission_asset_mismatches(
     fills: list[dict[str, Any]], expected_asset: str = "BNB",
 ) -> list[dict[str, str]]:
@@ -569,6 +583,7 @@ async def inspect_market(args: argparse.Namespace) -> int:
             "quote_asset": metadata.get("quoteAsset"),
             "status": metadata.get("status"),
             "is_spot_trading_allowed": metadata.get("isSpotTradingAllowed"),
+            "opoco_capability": opoco_capability(metadata),
             "price_filter": filters.get("PRICE_FILTER"),
             "lot_size_filter": filters.get("LOT_SIZE"),
             "notional_filter": filters.get("NOTIONAL") or filters.get("MIN_NOTIONAL"),
