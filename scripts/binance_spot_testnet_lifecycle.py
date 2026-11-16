@@ -123,9 +123,20 @@ def child_result(list_response: dict[str, Any]) -> dict[str, Any]:
         })
     filled = [item for item in normalized if item["status"] == "FILLED"]
     siblings = [item for item in normalized if item["status"] in {"CANCELED", "EXPIRED"}]
-    mutual_cancel = len(normalized) == 2 and len(filled) == 1 and len(siblings) == 1
+    order_list_id = str(list_response.get("orderListId", ""))
+    list_status = str(list_response.get("listOrderStatus", "")).upper()
+    child_ids = {item["orderId"] for item in normalized}
+    mutual_cancel = (
+        bool(order_list_id)
+        and list_status == "ALL_DONE"
+        and len(normalized) == 2
+        and len(child_ids) == 2
+        and all(child_ids)
+        and len(filled) == 1
+        and len(siblings) == 1
+    )
     return {
-        "orderListId": str(list_response.get("orderListId", "")),
+        "orderListId": order_list_id,
         "listClientOrderId": str(list_response.get("listClientOrderId", "")),
         "listOrderStatus": str(list_response.get("listOrderStatus", "")).upper(),
         "children": normalized,
