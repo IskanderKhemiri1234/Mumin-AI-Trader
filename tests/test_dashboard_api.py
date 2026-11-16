@@ -238,9 +238,10 @@ def test_live_supervisor_allows_resume_without_worker_and_records_audit(
 
     assert response.status_code == 200
     assert response.json()["desired_state"] == "RUNNING"
-    audit = bot._connect().execute(
-        "SELECT event_type, desired_state FROM bot_runtime_audit ORDER BY audit_id DESC LIMIT 1"
-    ).fetchone()
+    with bot._connect() as connection:
+        audit = connection.execute(
+            "SELECT event_type, desired_state FROM bot_runtime_audit ORDER BY audit_id DESC LIMIT 1"
+        ).fetchone()
     assert audit["event_type"] == "CONTROL_REQUESTED"
     assert audit["desired_state"] == "RUNNING"
 
