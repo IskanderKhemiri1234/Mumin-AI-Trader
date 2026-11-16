@@ -32,8 +32,9 @@ def json_safe(value: Any) -> Any:
             str(key): json_safe(item)
             for key, item in value.items()
             if str(key).lower() not in {
-                "apikey", "api_key", "secret", "signature", "x-mbx-apikey",
-                "binance_api_key", "binance_api_secret",
+                "apikey", "api_key", "secret", "api_secret", "secret_key",
+                "signature", "x-mbx-apikey", "binance_api_key",
+                "binance_api_secret", "binance_secret",
             }
         }
     if isinstance(value, (list, tuple)):
