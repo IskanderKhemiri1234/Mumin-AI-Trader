@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import signal
 import subprocess
 import sys
@@ -31,7 +32,7 @@ class PaperWorkerSupervisor:
         self.restart_initial_seconds = restart_initial_seconds
         self.restart_max_seconds = restart_max_seconds
         self.bot = ContinuousPaperBot(database)
-        self.instance_id = f"paper-supervisor-{__import__('os').getpid()}"
+        self.instance_id = f"paper-supervisor-{os.getpid()}"
         self.child: subprocess.Popen[bytes] | None = None
         self.stop_requested = False
         self.restart_at = 0.0
@@ -110,7 +111,7 @@ class PaperWorkerSupervisor:
             "SUPERVISOR_STARTED",
             self.instance_id,
             desired_state=self._desired_state(),
-            detail=f"pid={__import__('os').getpid()}",
+            detail=f"pid={os.getpid()}",
         )
         print(
             f"Paper supervisor online; database={self.database}; "
