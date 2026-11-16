@@ -623,3 +623,47 @@ async def test_missing_account_permission_fields_fail_closed(tmp_path, overrides
             await client._account()
     finally:
         await client.close()
+
+
+
+@pytest.mark.asyncio
+async def test_incomplete_fee_and_fifo_ledger_blocks_order_before_network(tmp_path) -> None:
+    seen: list[httpx.Request] = []
+    store = SQLiteOrderStore(str(tmp_path / "orders.db"))
+    store.update_risk_state(
+        equity="100",
+        trading_day="2026-11-16",
+        max_daily_loss_percent="2",
+        max_drawdown_percent="5",
+    )
+    store.record_trade_fills(
+        "BTCUSDT",
+        [{
+            "id": 1,
+            "orderId": 1,
+            "price": "100",
+            "qty": "1",
+            "quoteQty": "100",
+            "commission": "0.01",
+            "commissionAsset": "BNB",
+            "isBuyer": True,
+            "isMaker": False,
+            "time": 1_700_000_000_000,
+        }],
+    )
+    client = BinanceSpotTestnetExecution(
+        settings(), store, transport=httpx.MockTransport(handler_for(seen)),
+    )
+    try:
+        with pytest.raises(SpotExecutionError, match="FIFO cost-basis ledger is incomplete"):
+            await client.submit_limit_order(
+                symbol="BTCUSDT",
+                side="BUY",
+                quantity=Decimal("0.00010"),
+                price=Decimal("50000"),
+                client_order_id="mumin-incomplete-ledger-block",
+            )
+        assert seen == []
+        assert store.is_halted() == (True, "PNL_LEDGER_INCOMPLETE")
+    finally:
+        await client.close()
