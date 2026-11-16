@@ -229,16 +229,28 @@ class BinanceSpotTestnetOCO:
         params["listClientOrderId"] = list_client_order_id
         intent, created = self.store.register(params)
         if not created:
-            if intent["state"] in {"EXECUTING", "ALL_DONE", "CANCELED"}:
-                return json.loads(intent["response_json"])
-            if intent["state"] in {"SUBMITTING", "UNKNOWN", "CANCEL_PENDING"}:
-                observed = await self.get_order_list(symbol=symbol, list_client_order_id=list_client_order_id)
+            if intent["state"] in {
+                "EXECUTING", "ALL_DONE", "CANCELED", "SUBMITTING",
+                "UNKNOWN", "CANCEL_PENDING", "PARTIAL_FILL_REVIEW",
+            }:
+                observed = await self.get_order_list(
+                    symbol=symbol, list_client_order_id=list_client_order_id,
+                )
                 if observed is not None:
-                    self.store.update(list_client_order_id, state=self._state(observed), response=observed)
+                    state = self._state(observed)
+                    self.store.update(list_client_order_id, state=state, response=observed)
+                    if state == "PARTIAL_FILL_REVIEW":
+                        api.store.halt("OCO_PARTIAL_FILL_REVIEW")
                     return observed
-                self.store.update(list_client_order_id, state="UNKNOWN",
-                                  error="Existing OCO list is not visible; automatic resubmission forbidden.")
-                raise SpotOrderOutcomeUnknown("OCO outcome is unresolved; it will not be resubmitted.")
+                if intent["state"] in {"ALL_DONE", "CANCELED"}:
+                    return json.loads(intent["response_json"])
+                self.store.update(
+                    list_client_order_id, state="UNKNOWN",
+                    error="Existing OCO list is not visible; automatic resubmission forbidden.",
+                )
+                raise SpotOrderOutcomeUnknown(
+                    "OCO outcome is unresolved; it will not be resubmitted.",
+                )
         if not self.store.claim(list_client_order_id):
             raise SpotOrderOutcomeUnknown("OCO submission is already claimed; reconcile before retry.")
         try:
