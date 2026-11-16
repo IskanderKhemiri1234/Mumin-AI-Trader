@@ -66,3 +66,13 @@ def test_sell_without_fifo_inventory_is_unresolved():
     report = build_realized_pnl_report([fill(1, "SELL", "110", "1", "110")])
     assert report["complete"] is False
     assert "sell_exceeds_FIFO_inventory" in report["unresolved"][0]
+
+
+
+def test_zero_bnb_commission_does_not_require_a_conversion_mark():
+    report = build_realized_pnl_report([
+        fill(1, "BUY", "100", "1", "100", "0", "BNB"),
+        fill(2, "SELL", "110", "1", "110", "0", "BNB"),
+    ])
+    assert report["complete"] is True
+    assert Decimal(report["realized_pnl_quote"]) == Decimal("10")
