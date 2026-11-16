@@ -1050,3 +1050,107 @@ async def test_oco_cancel_timeout_queries_exchange_before_retry(tmp_path) -> Non
         assert client.oco.store.get("mumin-oco-cancel-recovery")["state"] == "CANCELED"
     finally:
         await client.close()
+
+
+
+def bnb_commission_response(*, account_enabled: bool = True) -> dict[str, object]:
+    return {
+        "symbol": "BTCUSDT",
+        "standardCommission": {
+            "maker": "0.0010", "taker": "0.0012",
+            "buyer": "0.0001", "seller": "0.0001",
+        },
+        "taxCommission": {
+            "maker": "0.0001", "taker": "0.0002",
+            "buyer": "0", "seller": "0",
+        },
+        "specialCommission": {
+            "maker": "0", "taker": "0", "buyer": "0", "seller": "0",
+        },
+        "discount": {
+            "enabledForAccount": account_enabled,
+            "enabledForSymbol": True,
+            "discountAsset": "BNB",
+            "discount": "0.25",
+        },
+    }
+
+
+def bnb_fee_handler(*, free_bnb: str, account_enabled: bool = True):
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url).startswith(TESTNET_REST_BASE_URL)
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/account/commission":
+            return httpx.Response(200, json=bnb_commission_response(account_enabled=account_enabled))
+        if request.url.path == "/api/v3/ticker/price":
+            return httpx.Response(200, json={"symbol": "BNBUSDT", "price": "600.00"})
+        if request.url.path == "/api/v3/account":
+            account = account_info()
+            account["balances"].append({"asset": "BNB", "free": free_bnb, "locked": "0"})
+            return httpx.Response(200, json=account)
+        return httpx.Response(404, json={"code": -2013, "msg": "Not found."})
+    return handler
+
+
+@pytest.mark.asyncio
+async def test_bnb_fee_readiness_requires_enabled_discount_and_sufficient_free_reserve(tmp_path) -> None:
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return await bnb_fee_handler(free_bnb="0.01")(request)
+
+    client = BinanceSpotTestnetExecution(
+        settings(), SQLiteOrderStore(str(tmp_path / "bnb-ready.db")),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        result = await client._bnb_fee_readiness(
+            symbol="BTCUSDT",
+            buy_notional=Decimal("5.25"),
+            sell_notional=Decimal("5.35"),
+        )
+        assert result["discount_enabled_for_account"] == "true"
+        assert result["discount_enabled_for_symbol"] == "true"
+        assert Decimal(result["free_bnb"]) >= Decimal(result["required_bnb"]) > 0
+        assert result["reserve_factor"] == "1.50"
+        assert all(request.method == "GET" for request in seen)
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_bnb_fee_readiness_rejects_insufficient_free_bnb_before_any_order(tmp_path) -> None:
+    client = BinanceSpotTestnetExecution(
+        settings(), SQLiteOrderStore(str(tmp_path / "bnb-low.db")),
+        transport=httpx.MockTransport(bnb_fee_handler(free_bnb="0.00000001")),
+    )
+    try:
+        with pytest.raises(SpotExecutionError, match="Insufficient free BNB"):
+            await client._bnb_fee_readiness(
+                symbol="BTCUSDT",
+                buy_notional=Decimal("5.25"),
+                sell_notional=Decimal("5.35"),
+            )
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_bnb_fee_readiness_rejects_disabled_account_discount_before_any_order(tmp_path) -> None:
+    client = BinanceSpotTestnetExecution(
+        settings(), SQLiteOrderStore(str(tmp_path / "bnb-disabled.db")),
+        transport=httpx.MockTransport(
+            bnb_fee_handler(free_bnb="0.01", account_enabled=False)
+        ),
+    )
+    try:
+        with pytest.raises(SpotExecutionError, match="not explicitly enabled"):
+            await client._bnb_fee_readiness(
+                symbol="BTCUSDT",
+                buy_notional=Decimal("5.25"),
+                sell_notional=Decimal("5.35"),
+            )
+    finally:
+        await client.close()
