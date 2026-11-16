@@ -292,6 +292,7 @@ class BinanceSpotTestnetExecution:
         price: Decimal | str,
         client_order_id: str,
     ) -> dict[str, Any]:
+        self._assert_safety_gate(self.settings)
         halted, halt_reason = self.store.is_halted()
         if halted and not (side.strip().upper() == "SELL" and halt_reason in {"MAX_DAILY_LOSS", "MAX_DRAWDOWN"}):
             raise SpotExecutionError("Execution halt is active; new orders are blocked.")
@@ -368,6 +369,7 @@ class BinanceSpotTestnetExecution:
         return response
 
     async def cancel_order(self, *, symbol: str, client_order_id: str) -> dict[str, Any]:
+        self._assert_safety_gate(self.settings)
         local = self.store.get_order(client_order_id)
         if local is None or local["symbol"] != symbol.upper():
             raise SpotExecutionError("Cancellation requires a matching persisted local order intent.")
@@ -401,6 +403,7 @@ class BinanceSpotTestnetExecution:
         return response
 
     async def emergency_stop(self, reason: str = "MANUAL_EMERGENCY_STOP") -> dict[str, Any]:
+        self._assert_safety_gate(self.settings)
         self.store.halt(reason)
         try:
             open_orders = await self._request("GET", "/api/v3/openOrders", signed=True)
