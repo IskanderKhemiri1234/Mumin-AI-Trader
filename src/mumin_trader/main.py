@@ -59,7 +59,15 @@ def _dashboard_access_token(x_dashboard_token: str | None) -> str:
 def _paper_worker_snapshot() -> dict[str, Any]:
     database = _dashboard_database()
     if not database.is_file():
-        return {"status": "offline", "desired_state": "UNKNOWN", "heartbeat_at": None}
+        return {
+            "status": "offline",
+            "supervisor_status": "offline",
+            "worker_status": "offline",
+            "desired_state": "UNKNOWN",
+            "heartbeat_at": None,
+            "supervisor_heartbeat_at": None,
+            "audit": [],
+        }
     connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=3)
     connection.row_factory = sqlite3.Row
     try:
@@ -67,29 +75,106 @@ def _paper_worker_snapshot() -> dict[str, Any]:
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_runtime_control'"
         ).fetchone()
         if table is None:
-            return {"status": "unmanaged", "desired_state": "UNKNOWN", "heartbeat_at": None}
+            return {
+                "status": "unmanaged",
+                "supervisor_status": "unmanaged",
+                "worker_status": "unmanaged",
+                "desired_state": "UNKNOWN",
+                "heartbeat_at": None,
+                "supervisor_heartbeat_at": None,
+                "audit": [],
+            }
+        columns = {
+            row["name"] for row in connection.execute(
+                "PRAGMA table_info(bot_runtime_control)"
+            ).fetchall()
+        }
+        selected = [
+            name for name in (
+                "desired_state",
+                "heartbeat_at",
+                "worker_instance_id",
+                "supervisor_heartbeat_at",
+                "supervisor_instance_id",
+                "worker_pid",
+            ) if name in columns
+        ]
         row = connection.execute(
-            "SELECT desired_state, heartbeat_at FROM bot_runtime_control WHERE id=1"
+            "SELECT " + ", ".join(selected) + " FROM bot_runtime_control WHERE id=1"
         ).fetchone()
         if row is None:
-            return {"status": "unmanaged", "desired_state": "UNKNOWN", "heartbeat_at": None}
-        heartbeat = row["heartbeat_at"]
-        age_seconds = None
-        if heartbeat:
+            return {
+                "status": "unmanaged",
+                "supervisor_status": "unmanaged",
+                "worker_status": "unmanaged",
+                "desired_state": "UNKNOWN",
+                "heartbeat_at": None,
+                "supervisor_heartbeat_at": None,
+                "audit": [],
+            }
+
+        def heartbeat_age(value: str | None) -> float | None:
+            if not value:
+                return None
             try:
-                stamp = datetime.fromisoformat(heartbeat)
-                age_seconds = max(0.0, (datetime.now(timezone.utc) - stamp).total_seconds())
-            except ValueError:
-                age_seconds = None
-        online = age_seconds is not None and age_seconds <= 90
+                stamp = datetime.fromisoformat(value)
+                return (datetime.now(timezone.utc) - stamp).total_seconds()
+            except (TypeError, ValueError):
+                return None
+
+        worker_heartbeat = row["heartbeat_at"] if "heartbeat_at" in columns else None
+        supervisor_heartbeat = (
+            row["supervisor_heartbeat_at"]
+            if "supervisor_heartbeat_at" in columns else None
+        )
+        worker_age = heartbeat_age(worker_heartbeat)
+        supervisor_age = heartbeat_age(supervisor_heartbeat)
+        worker_online = worker_age is not None and -5 <= worker_age <= 90
+        supervisor_online = supervisor_age is not None and -5 <= supervisor_age <= 90
+        desired = str(row["desired_state"])
+        if desired == "PAUSED":
+            worker_status = "paused" if supervisor_online else "offline"
+        elif worker_online:
+            worker_status = "running"
+        elif supervisor_online:
+            worker_status = "starting"
+        else:
+            worker_status = "offline"
+
+        audit_table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_runtime_audit'"
+        ).fetchone()
+        audit = []
+        if audit_table is not None:
+            audit = [
+                dict(item)
+                for item in connection.execute(
+                    """SELECT event_type, actor, desired_state, detail, created_at
+                       FROM bot_runtime_audit ORDER BY audit_id DESC LIMIT 20"""
+                ).fetchall()
+            ]
         return {
-            "status": "online" if online else "offline",
-            "desired_state": row["desired_state"],
-            "heartbeat_at": heartbeat,
-            "heartbeat_age_seconds": age_seconds,
+            "status": "online" if supervisor_online or worker_online else "offline",
+            "supervisor_status": "online" if supervisor_online else "offline",
+            "worker_status": worker_status,
+            "desired_state": desired,
+            "heartbeat_at": worker_heartbeat,
+            "heartbeat_age_seconds": worker_age,
+            "supervisor_heartbeat_at": supervisor_heartbeat,
+            "supervisor_heartbeat_age_seconds": supervisor_age,
+            "supervisor_instance_id": (
+                row["supervisor_instance_id"]
+                if "supervisor_instance_id" in columns else None
+            ),
+            "worker_instance_id": (
+                row["worker_instance_id"] if "worker_instance_id" in columns else None
+            ),
+            "worker_pid": row["worker_pid"] if "worker_pid" in columns else None,
+            "audit": audit,
         }
     finally:
         connection.close()
+
 
 def _read_dashboard_snapshot() -> dict[str, Any]:
     database = _dashboard_database()
