@@ -440,6 +440,7 @@ async def run_cycle(args: argparse.Namespace) -> int:
         await client.close()
         print(json.dumps({
             "status": summary["status"],
+            "error": summary.get("error"),
             "run_id": run_id,
             "symbol": symbol,
             "buy_client_order_id": buy_client_id,
