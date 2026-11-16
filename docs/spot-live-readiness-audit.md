@@ -64,3 +64,12 @@ Scope: current `main` Paper engine plus the isolated Testnet implementation prop
 - Testnet adapter: isolated, opt-in, under review; has an explicit operator CLI, but is not connected to autonomous signals.
 - Mainnet: hard blocked.
 - Real-money trading: **not approved and not enabled**.
+
+
+### OCO recovery hardening (2026-11-16; branch-only)
+- OCO list queries now fetch each child order by its exchange `orderId` because the list-query response provides child IDs but not current child execution quantities/statuses. The child reports are then reconciled into the local response and actual `myTrades` fills are synchronized.
+- SQLite now stores the parent `orderListId` plus the above/below `orderId` and `clientOrderId` values in dedicated columns, while retaining the full exchange response JSON.
+- Any child reported as `PARTIALLY_FILLED` moves the list to `PARTIAL_FILL_REVIEW` and persists an execution halt (`OCO_PARTIAL_FILL_REVIEW`). The residual position is not declared protected and no new entries are permitted until manual/exchange reconciliation.
+- A previously persisted OCO list is queried again before returning its state; a stale local `EXECUTING` snapshot is not treated as current exchange truth.
+- Mocked tests added for create-response loss followed by list recovery without duplicate POST, cancel-response loss followed by exchange query before retry, partial-fill halt, and persistence of both child order identifiers.
+- These remain simulated transport tests. They do not establish that Binance Spot Testnet accepted an OCO, canceled its sibling, or produced the same fills/accounting as the local ledger.
