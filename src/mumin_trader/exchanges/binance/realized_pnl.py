@@ -86,11 +86,20 @@ def build_realized_pnl_report(
             "maker_fills": 0,
             "taker_fills": 0,
             "fees_quote_equivalent_mark": ZERO,
+            "entry_fee_quote_equivalent_mark": ZERO,
+            "exit_fee_quote_equivalent_mark": ZERO,
+            "gross_buy_quote": ZERO,
+            "gross_sell_quote": ZERO,
+            "gross_buy_quantity": ZERO,
+            "gross_sell_quantity": ZERO,
         })
         report["maker_fills" if is_maker else "taker_fills"] += 1
         report["fees_quote_equivalent_mark"] += fee_quote_value
 
         if is_buyer:
+            report["gross_buy_quote"] += quote_qty
+            report["gross_buy_quantity"] += qty
+            report["entry_fee_quote_equivalent_mark"] += fee_quote_value
             net_qty = qty - (commission if fee_asset == base else ZERO)
             if net_qty <= ZERO:
                 unresolved.append(f"{symbol}:{fill['trade_id']}:base_fee_consumes_buy_fill")
@@ -101,6 +110,9 @@ def build_realized_pnl_report(
             report["buy_fills"] += 1
             continue
 
+        report["gross_sell_quote"] += quote_qty
+        report["gross_sell_quantity"] += qty
+        report["exit_fee_quote_equivalent_mark"] += fee_quote_value
         disposed_qty = qty + (commission if fee_asset == base else ZERO)
         net_proceeds = quote_qty - (fee_quote_value if fee_asset in {quote, bnb} else ZERO)
         if net_proceeds < ZERO:
