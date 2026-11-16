@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from config.config import get_settings
+from mumin_trader.exchanges.binance.market_stream_service import MarketStreamService
 
 PROJECT_ROOT = (
     Path("/app")
@@ -27,6 +28,8 @@ app = FastAPI(
     version="0.2.0",
     description="Private, read-only trading operations dashboard and safety-first Spot research service.",
 )
+
+_market_stream = MarketStreamService()
 
 
 def _dashboard_database() -> Path:
@@ -260,6 +263,20 @@ async def dashboard() -> FileResponse:
     if not DASHBOARD_FILE.is_file():
         raise HTTPException(status_code=503, detail="Dashboard asset is missing.")
     return FileResponse(DASHBOARD_FILE, media_type="text/html")
+
+
+@app.get("/api/market")
+async def market_snapshot(
+    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+) -> dict[str, Any]:
+    _dashboard_access_token(x_dashboard_token)
+    await _market_stream.start()
+    return await _market_stream.snapshot()
+
+
+@app.on_event("shutdown")
+async def stop_market_stream() -> None:
+    await _market_stream.close()
 
 
 @app.get("/api/dashboard")
