@@ -28,6 +28,10 @@ class SQLiteOCOOrderStore:
                     quantity TEXT NOT NULL,
                     state TEXT NOT NULL,
                     order_list_id TEXT,
+                    above_order_id TEXT,
+                    below_order_id TEXT,
+                    above_client_order_id TEXT,
+                    below_client_order_id TEXT,
                     request_json TEXT NOT NULL,
                     response_json TEXT NOT NULL DEFAULT '{}',
                     last_error TEXT NOT NULL DEFAULT '',
@@ -35,6 +39,16 @@ class SQLiteOCOOrderStore:
                     updated_at TEXT NOT NULL
                 )"""
             )
+            columns = {
+                str(row["name"])
+                for row in db.execute("PRAGMA table_info(spot_oco_order_lists)").fetchall()
+            }
+            for name in (
+                "above_order_id", "below_order_id",
+                "above_client_order_id", "below_client_order_id",
+            ):
+                if name not in columns:
+                    db.execute(f"ALTER TABLE spot_oco_order_lists ADD COLUMN {name} TEXT")
             db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_spot_oco_state ON spot_oco_order_lists(state, updated_at)"
             )
@@ -100,12 +114,24 @@ class SQLiteOCOOrderStore:
             raise SpotExecutionError(f"Unsupported OCO list state: {state}")
         payload = response or {}
         list_id = payload.get("orderListId")
+        orders = payload.get("orders", [])
+        above = orders[0] if len(orders) > 0 else {}
+        below = orders[1] if len(orders) > 1 else {}
         with self._connect() as db:
             db.execute(
-                """UPDATE spot_oco_order_lists SET state=?,order_list_id=COALESCE(?,order_list_id),
-                   response_json=?,last_error=?,updated_at=? WHERE list_client_order_id=?""",
+                """UPDATE spot_oco_order_lists SET state=?,
+                   order_list_id=COALESCE(?,order_list_id),
+                   above_order_id=COALESCE(?,above_order_id),
+                   below_order_id=COALESCE(?,below_order_id),
+                   above_client_order_id=COALESCE(?,above_client_order_id),
+                   below_client_order_id=COALESCE(?,below_client_order_id),
+                   response_json=?,last_error=?,updated_at=?
+                   WHERE list_client_order_id=?""",
                 (
                     state, None if list_id is None else str(list_id),
+                    None if above.get("orderId") is None else str(above["orderId"]),
+                    None if below.get("orderId") is None else str(below["orderId"]),
+                    above.get("clientOrderId"), below.get("clientOrderId"),
                     json.dumps(payload, sort_keys=True, separators=(",", ":")),
                     error[:1000], self._now(), list_client_order_id,
                 ),
