@@ -110,6 +110,32 @@ def round_down_to_step(quantity: Decimal, step: Decimal) -> Decimal:
     return (quantity / step).to_integral_value(rounding=ROUND_DOWN) * step
 
 
+def commission_asset_mismatches(
+    fills: list[dict[str, Any]], expected_asset: str = "BNB",
+) -> list[dict[str, str]]:
+    """Return positive-fee fills charged in an asset other than the preflighted asset."""
+    expected = expected_asset.upper()
+    mismatches: list[dict[str, str]] = []
+    for fill in fills:
+        amount = Decimal(str(fill.get("commission", "0")))
+        asset = str(fill.get("commission_asset", "")).upper()
+        if not amount.is_finite() or amount < 0:
+            mismatches.append({
+                "trade_id": str(fill.get("trade_id", "")),
+                "commission": str(fill.get("commission", "")),
+                "commission_asset": asset,
+                "reason": "invalid_commission_amount",
+            })
+        elif amount > 0 and asset != expected:
+            mismatches.append({
+                "trade_id": str(fill.get("trade_id", "")),
+                "commission": str(amount),
+                "commission_asset": asset,
+                "reason": "unexpected_commission_asset",
+            })
+    return mismatches
+
+
 def child_result(list_response: dict[str, Any]) -> dict[str, Any]:
     reports = list_response.get("orderReports", [])
     normalized = []
@@ -295,8 +321,16 @@ async def run_cycle(args: argparse.Namespace) -> int:
             take_profit_price=take_profit, stop_price=stop_price,
             stop_limit_price=None, stop_type="STOP_LOSS",
         )
+        worst_oco_exit_notional = quantity * max(take_profit, stop_price)
+        bnb_fee_preflight = await client._bnb_fee_readiness(
+            symbol=symbol,
+            buy_notional=notional,
+            sell_notional=worst_oco_exit_notional,
+        )
         evidence.record("pre_submit_validation", {
-            "buy_order": buy_params, "oco_sell_template": oco_params,
+            "buy_order": buy_params,
+            "oco_sell_template": oco_params,
+            "bnb_fee_preflight": bnb_fee_preflight,
         })
 
         try:
@@ -336,7 +370,12 @@ async def run_cycle(args: argparse.Namespace) -> int:
             symbol, int(buy_order_id), base_asset=base_asset,
         )
         buy_fills = store.trade_fills_for_order(symbol, int(buy_order_id))
-        evidence.record("buy_fills_from_myTrades", {"summary": buy_summary, "fills": buy_fills})
+        buy_fee_asset_mismatches = commission_asset_mismatches(buy_fills, settings.BNB_FEE_ASSET)
+        evidence.record("buy_fills_from_myTrades", {
+            "summary": buy_summary,
+            "fills": buy_fills,
+            "fee_asset_mismatches": buy_fee_asset_mismatches,
+        })
         net_quantity = Decimal(buy_summary["net_base_quantity"])
         if net_quantity <= 0:
             raise SpotExecutionError("BUY produced no net base-asset fill; no OCO was submitted.")
@@ -349,6 +388,9 @@ async def run_cycle(args: argparse.Namespace) -> int:
         oco_quantity = round_down_to_step(net_quantity, step)
         if oco_quantity <= 0:
             raise SpotExecutionError("Net filled quantity is below the exchange OCO quantity step.")
+        sellable_net_quantity = round_down_to_step(net_quantity, step)
+        if oco_quantity != sellable_net_quantity:
+            raise SpotExecutionError("Protective OCO quantity does not cover the complete net sellable quantity.")
         unprotected_dust = net_quantity - oco_quantity
         if unprotected_dust > 0:
             evidence.record("base_fee_or_step_dust", {
@@ -386,13 +428,21 @@ async def run_cycle(args: argparse.Namespace) -> int:
             poll_seconds=args.poll_seconds, evidence=evidence,
         )
         evidence.record("oco_final_exchange_state", oco_final)
+        await client.sync_trade_history()
         ids = [str(item.get("orderId", "")) for item in oco_final.get("orders", [])]
         child_fills = {
             order_id: store.trade_fills_for_order(symbol, int(order_id))
             for order_id in ids if order_id.isdigit()
         }
-        evidence.record("oco_child_myTrades_fills", child_fills)
-        await client.sync_trade_history()
+        oco_fee_asset_mismatches = [
+            mismatch
+            for fills in child_fills.values()
+            for mismatch in commission_asset_mismatches(fills, settings.BNB_FEE_ASSET)
+        ]
+        evidence.record("oco_child_myTrades_fills", {
+            "fills_by_order_id": child_fills,
+            "fee_asset_mismatches": oco_fee_asset_mismatches,
+        })
         pnl = store.realized_pnl_report(settings.QUOTE_ASSET)
         evidence.record("fifo_realized_pnl_report", pnl)
         reconciliation = await client.reconcile()
@@ -400,6 +450,14 @@ async def run_cycle(args: argparse.Namespace) -> int:
         fill_discrepancies = store.order_fill_quantity_discrepancies()
         unmatched = store.unmatched_trade_order_ids()
         proof = child_result(oco_final)
+        oco_children_cover_quantity = (
+            len(proof["children"]) == 2
+            and all(
+                Decimal(str(item["origQty"])) == oco_quantity
+                for item in proof["children"]
+            )
+        )
+        all_fee_asset_mismatches = buy_fee_asset_mismatches + oco_fee_asset_mismatches
         fifo_complete = bool(pnl.get("complete"))
         open_inventory_quantity = Decimal(
             str(pnl.get("symbols", {}).get(symbol, {}).get("open_quantity", "0"))
@@ -409,6 +467,13 @@ async def run_cycle(args: argparse.Namespace) -> int:
             "buy_order_id": str(buy_order_id),
             "buy_status": str(buy_order.get("status", "")).upper(),
             "buy_fill_summary": buy_summary,
+            "bnb_fee_preflight": bnb_fee_preflight,
+            "buy_fee_asset_mismatches": buy_fee_asset_mismatches,
+            "oco_fee_asset_mismatches": oco_fee_asset_mismatches,
+            "all_fee_asset_mismatches": all_fee_asset_mismatches,
+            "oco_protected_quantity": str(oco_quantity),
+            "net_sellable_quantity": str(sellable_net_quantity),
+            "oco_children_cover_quantity": oco_children_cover_quantity,
             "order_list_id": str(oco_final.get("orderListId", oco_response.get("orderListId", ""))),
             "oco_children": proof["children"],
             "mutual_cancel_proven": proof["mutual_cancel_proven"],
@@ -424,6 +489,8 @@ async def run_cycle(args: argparse.Namespace) -> int:
                 "TESTNET_CYCLE_VERIFIED"
                 if proof["mutual_cancel_proven"] and fifo_complete
                 and open_inventory_quantity == 0 and unprotected_dust == 0
+                and oco_children_cover_quantity
+                and not all_fee_asset_mismatches
                 and not fill_discrepancies and not unmatched and reconciliation_clean
                 else "TESTNET_CYCLE_INCOMPLETE"
             ),
