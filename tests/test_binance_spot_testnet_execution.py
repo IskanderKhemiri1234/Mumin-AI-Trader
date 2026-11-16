@@ -715,6 +715,11 @@ async def test_modern_oco_uses_order_list_endpoint_and_persists_both_legs(tmp_pa
                      "executedQty": "0", "status": "NEW"},
                 ],
             })
+        if path == "/api/v3/order" and request.method == "GET":
+            return httpx.Response(200, json={
+                "symbol": "BTCUSDT", "orderId": int(request.url.params["orderId"]),
+                "status": "NEW", "executedQty": "0",
+            })
         if path == "/api/v3/orderList" and request.method == "GET":
             return httpx.Response(200, json={
                 "orderListId": 88, "contingencyType": "OCO",
@@ -920,6 +925,11 @@ async def test_oco_create_timeout_recovers_existing_list_without_duplicate_post(
         if path == "/api/v3/orderList/oco" and request.method == "POST":
             post_attempts += 1
             raise httpx.ReadTimeout("response lost after exchange accepted OCO", request=request)
+        if path == "/api/v3/order" and request.method == "GET":
+            return httpx.Response(200, json={
+                "symbol": "BTCUSDT", "orderId": int(request.url.params["orderId"]),
+                "status": "NEW", "executedQty": "0",
+            })
         if path == "/api/v3/orderList" and request.method == "GET":
             return httpx.Response(200, json=list_payload)
         return httpx.Response(404, json={"code": -2013, "msg": "not found"})
@@ -973,6 +983,11 @@ async def test_oco_cancel_timeout_queries_exchange_before_retry(tmp_path) -> Non
         seen.append(request)
         if request.url.path == "/api/v3/time":
             return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/order" and request.method == "GET":
+            return httpx.Response(200, json={
+                "symbol": "BTCUSDT", "orderId": int(request.url.params["orderId"]),
+                "status": "NEW", "executedQty": "0",
+            })
         if request.url.path == "/api/v3/orderList" and request.method == "GET":
             return httpx.Response(200, json=active)
         if request.url.path == "/api/v3/orderList" and request.method == "DELETE":
