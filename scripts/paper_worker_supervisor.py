@@ -38,6 +38,7 @@ class PaperWorkerSupervisor:
         self.bot = ContinuousPaperBot(database)
         self.instance_id = f"paper-supervisor-{os.getpid()}"
         self.child: subprocess.Popen[bytes] | None = None
+        self.child_started_at: float | None = None
         self.stop_requested = False
         self.restart_at = 0.0
         self.restart_delay = restart_initial_seconds
@@ -78,6 +79,7 @@ class PaperWorkerSupervisor:
         if self.cycles is not None:
             command.extend(("--cycles", str(self.cycles)))
         self.child = subprocess.Popen(command, cwd=PROJECT_ROOT)
+        self.child_started_at = time.monotonic()
         self.bot.supervisor_heartbeat(self.instance_id, self.child.pid)
         self._record("WORKER_STARTED", desired_state, f"pid={self.child.pid}")
         print(
@@ -99,6 +101,7 @@ class PaperWorkerSupervisor:
                 child.wait(timeout=5)
         return_code = child.returncode
         self.child = None
+        self.child_started_at = None
         self.bot.supervisor_heartbeat(self.instance_id, None)
         self._record(
             "WORKER_STOPPED",
@@ -135,9 +138,21 @@ class PaperWorkerSupervisor:
                 desired = self._desired_state()
                 if self.child is not None and self.child.poll() is not None:
                     exit_code = self.child.returncode
-                    self._record("WORKER_EXITED", desired, f"exit_code={exit_code}")
+                    now = time.monotonic()
+                    runtime = (
+                        now - self.child_started_at
+                        if self.child_started_at is not None else 0.0
+                    )
+                    self._record(
+                        "WORKER_EXITED",
+                        desired,
+                        f"exit_code={exit_code}; runtime_seconds={runtime:.1f}",
+                    )
                     self.child = None
-                    self.restart_at = time.monotonic() + self.restart_delay
+                    self.child_started_at = None
+                    if runtime >= 60.0:
+                        self.restart_delay = self.restart_initial_seconds
+                    self.restart_at = now + self.restart_delay
                     self.restart_delay = min(
                         self.restart_delay * 2, self.restart_max_seconds
                     )
@@ -153,7 +168,6 @@ class PaperWorkerSupervisor:
                 elif desired == "RUNNING" and self.child is None:
                     if time.monotonic() >= self.restart_at:
                         self._start_child(desired)
-                        self.restart_delay = self.restart_initial_seconds
 
                 self.bot.supervisor_heartbeat(
                     self.instance_id,
