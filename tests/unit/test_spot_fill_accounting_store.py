@@ -127,7 +127,7 @@ def test_order_fill_summary_nets_base_asset_commission(tmp_path):
         "fill_count": "2",
         "gross_quantity": "0.00015",
         "net_base_quantity": "0.00014990",
-        "quote_quantity": "7.50",
+        "quote_quantity": "7.5",
         "base_commission": "1.0E-7",
     }
     assert len(store.trade_fills_for_order("BTCUSDT", 301)) == 2
