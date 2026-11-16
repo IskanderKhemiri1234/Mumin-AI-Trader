@@ -223,10 +223,26 @@ class BinanceSpotTestnetOCO:
             raise SpotExecutionError("SELL OCO requires take-profit price > last price > stop trigger.")
         if stop_limit is not None and stop_limit > stop:
             raise SpotExecutionError("SELL stop-limit price must not exceed its stop trigger.")
-        min_notional = filters.get("NOTIONAL", filters.get("MIN_NOTIONAL", {}))
-        minimum = Decimal(str(min_notional.get("minNotional", "0")))
-        if minimum > 0 and qty * min(tp, stop_limit or stop) < minimum:
-            raise SpotExecutionError("OCO notional is below the symbol minimum-notional filter.")
+        # Validate each OCO leg independently. Apply the minimum conservatively
+        # even when the stop leg is a stop-market order.
+        notional_filters = [
+            item for item in (filters.get("NOTIONAL"), filters.get("MIN_NOTIONAL"))
+            if isinstance(item, dict)
+        ]
+        leg_prices = [("take-profit", tp), ("stop", stop_limit or stop)]
+        for notional_filter in notional_filters:
+            minimum = Decimal(str(notional_filter.get("minNotional", "0")))
+            maximum = Decimal(str(notional_filter.get("maxNotional", "0")))
+            for leg_name, leg_price in leg_prices:
+                leg_notional = qty * leg_price
+                if minimum > 0 and leg_notional < minimum:
+                    raise SpotExecutionError(
+                        f"OCO {leg_name} leg notional is below the symbol minimum-notional filter."
+                    )
+                if maximum > 0 and leg_notional > maximum:
+                    raise SpotExecutionError(
+                        f"OCO {leg_name} leg notional exceeds the symbol maximum-notional filter."
+                    )
         if stop_type == "TAKE_PROFIT_LIMIT":
             raise SpotExecutionError("The supported protective OCO uses LIMIT_MAKER for the take-profit leg.")
         return {
