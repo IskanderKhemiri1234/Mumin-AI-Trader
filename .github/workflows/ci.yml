@@ -74,6 +74,12 @@ jobs:
           docker compose run --name mumin-paper-bot-smoke --no-deps --entrypoint python mumin-paper-bot scripts/run_continuous_paper.py --db /app/data/mumin_public_paper.db --interval-seconds 0.01 --cycles 40 --data-source MOCK_SYNTHETIC
           docker cp mumin-paper-bot-smoke:/app/data/mumin_public_paper.db data/mumin_public_paper.db
           docker rm mumin-paper-bot-smoke
+      - name: Verify persistent Paper supervisor restart and audit
+        run: |
+          docker compose run --name mumin-supervisor-smoke --no-deps --entrypoint python mumin-paper-bot scripts/paper_worker_supervisor.py --db /app/data/mumin_supervisor_paper.db --interval-seconds 0.01 --cycles 2 --run-for-seconds 8 --data-source MOCK_SYNTHETIC
+          docker cp mumin-supervisor-smoke:/app/data/mumin_supervisor_paper.db data/mumin_supervisor_paper.db
+          docker rm mumin-supervisor-smoke
+          python -c "import sqlite3; db=sqlite3.connect('data/mumin_supervisor_paper.db'); assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'; events={r[0] for r in db.execute('SELECT event_type FROM bot_runtime_audit')}; assert {'SUPERVISOR_STARTED','WORKER_STARTED','WORKER_EXITED','SUPERVISOR_STOPPED'} <= events, events"
       - name: Run one-time offline synthetic Paper trade
         run: |
           docker compose run --name mumin-paper-smoke --entrypoint python mumin-ai-trader scripts/run_mock_paper.py
