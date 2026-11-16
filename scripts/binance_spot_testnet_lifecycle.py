@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -80,6 +81,21 @@ def require_testnet(settings: Settings) -> None:
         )
     if not settings.BINANCE_API_KEY.get_secret_value() or not settings.BINANCE_API_SECRET.get_secret_value():
         raise SpotExecutionError("Spot Testnet API credentials are missing from the private environment.")
+
+
+def safe_error_message(exc: Exception, settings: Settings) -> str:
+    message = str(exc)
+    for secret in (
+        settings.BINANCE_API_KEY.get_secret_value(),
+        settings.BINANCE_API_SECRET.get_secret_value(),
+    ):
+        if secret:
+            message = message.replace(secret, "[REDACTED]")
+    return re.sub(
+        r"(?i)(signature|api[_-]?key|secret)=([^&\\s]+)",
+        r"\\1=[REDACTED]",
+        message,
+    )
 
 
 def make_run_id() -> str:
@@ -287,6 +303,11 @@ async def run_cycle(args: argparse.Namespace) -> int:
             evidence.record("buy_cancel_after_timeout", buy_order)
             buy_order = await client.get_order(symbol=symbol, client_order_id=buy_client_id) or buy_order
         evidence.record("buy_final_order", buy_order)
+        buy_status = str(buy_order.get("status", "")).upper()
+        if buy_status not in {"FILLED", "CANCELED", "REJECTED", "EXPIRED"}:
+            raise SpotOrderOutcomeUnknown(
+                "BUY may still be active after cancellation attempt; do not place OCO or another BUY."
+            )
         buy_order_id = buy_order.get("orderId")
         if buy_order_id is None:
             raise SpotOrderOutcomeUnknown("BUY response has no exchange orderId; do not retry.")
@@ -308,11 +329,12 @@ async def run_cycle(args: argparse.Namespace) -> int:
         oco_quantity = round_down_to_step(net_quantity, step)
         if oco_quantity <= 0:
             raise SpotExecutionError("Net filled quantity is below the exchange OCO quantity step.")
-        if oco_quantity < net_quantity:
+        unprotected_dust = net_quantity - oco_quantity
+        if unprotected_dust > 0:
             evidence.record("base_fee_or_step_dust", {
                 "net_bought_quantity": net_quantity,
                 "oco_protected_quantity": oco_quantity,
-                "unprotected_dust": net_quantity - oco_quantity,
+                "unprotected_dust": unprotected_dust,
             })
 
         # Revalidate against the current Testnet ticker immediately before OCO.
@@ -359,6 +381,9 @@ async def run_cycle(args: argparse.Namespace) -> int:
         unmatched = store.unmatched_trade_order_ids()
         proof = child_result(oco_final)
         fifo_complete = bool(pnl.get("complete"))
+        open_inventory_quantity = Decimal(
+            str(pnl.get("symbols", {}).get(symbol, {}).get("open_quantity", "0"))
+        )
         reconciliation_clean = not reconciliation["discrepancies"] and not reconciliation["halted"]
         summary.update({
             "buy_order_id": str(buy_order_id),
@@ -368,6 +393,8 @@ async def run_cycle(args: argparse.Namespace) -> int:
             "oco_children": proof["children"],
             "mutual_cancel_proven": proof["mutual_cancel_proven"],
             "fifo_complete": fifo_complete,
+            "fifo_open_inventory_quantity": str(open_inventory_quantity),
+            "unprotected_dust_quantity": str(unprotected_dust),
             "fifo_realized_pnl": pnl,
             "fill_discrepancies": fill_discrepancies,
             "unmatched_trade_orders": unmatched,
@@ -376,6 +403,7 @@ async def run_cycle(args: argparse.Namespace) -> int:
             "status": (
                 "TESTNET_CYCLE_VERIFIED"
                 if proof["mutual_cancel_proven"] and fifo_complete
+                and open_inventory_quantity == 0 and unprotected_dust == 0
                 and not fill_discrepancies and not unmatched and reconciliation_clean
                 else "TESTNET_CYCLE_INCOMPLETE"
             ),
@@ -387,10 +415,13 @@ async def run_cycle(args: argparse.Namespace) -> int:
         summary.update({
             "status": "TESTNET_LIFECYCLE_INCOMPLETE",
             "error_type": type(exc).__name__,
-            "error": str(exc),
+            "error": safe_error_message(exc, settings),
             "finished_at": utc_now(),
         })
-        evidence.record("run_error", {"type": type(exc).__name__, "message": str(exc)})
+        evidence.record("run_error", {
+            "type": type(exc).__name__,
+            "message": safe_error_message(exc, settings),
+        })
         return 2
     finally:
         evidence.summary(summary)
@@ -472,6 +503,9 @@ async def watch_existing(args: argparse.Namespace) -> int:
             "oco_children": proof["children"],
             "mutual_cancel_proven": proof["mutual_cancel_proven"],
             "fifo_complete": bool(pnl.get("complete")),
+            "fifo_open_inventory_quantity": str(
+                Decimal(str(pnl.get("symbols", {}).get(args.symbol.upper(), {}).get("open_quantity", "0")))
+            ),
             "fifo_realized_pnl": pnl,
             "fill_discrepancies": store.order_fill_quantity_discrepancies(),
             "unmatched_trade_orders": store.unmatched_trade_order_ids(),
@@ -479,6 +513,7 @@ async def watch_existing(args: argparse.Namespace) -> int:
             "reconciliation_clean": not reconciliation["discrepancies"] and not reconciliation["halted"],
             "status": "TESTNET_CYCLE_VERIFIED" if (
                 proof["mutual_cancel_proven"] and pnl.get("complete")
+                and Decimal(str(pnl.get("symbols", {}).get(args.symbol.upper(), {}).get("open_quantity", "0"))) == 0
                 and not store.order_fill_quantity_discrepancies()
                 and not store.unmatched_trade_order_ids()
                 and not reconciliation["discrepancies"] and not reconciliation["halted"]
