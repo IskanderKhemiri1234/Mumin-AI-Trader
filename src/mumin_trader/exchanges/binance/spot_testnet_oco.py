@@ -316,8 +316,13 @@ class BinanceSpotTestnetOCO:
         # Do not label the remainder protected until both child orders and the
         # exchange account have been reconciled after the partial fill.
         if any(
-            str(item.get("status", "")).upper() == "PARTIALLY_FILLED"
-            and Decimal(str(item.get("executedQty", "0"))) > 0
+            (
+                str(item.get("status", "")).upper() == "PARTIALLY_FILLED"
+                or (
+                    Decimal(str(item.get("executedQty", "0"))) > 0
+                    and str(item.get("status", "")).upper() != "FILLED"
+                )
+            )
             for item in reports
         ):
             return "PARTIAL_FILL_REVIEW"
