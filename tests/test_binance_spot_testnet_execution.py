@@ -920,15 +920,28 @@ async def test_oco_create_timeout_recovers_existing_list_without_duplicate_post(
             account = account_info()
             account["balances"][1]["free"] = "0.00100"
             return httpx.Response(200, json=account)
-        if path == "/api/v3/openOrders" or path == "/api/v3/myTrades":
+        if path == "/api/v3/openOrders":
             return httpx.Response(200, json=[])
+        if path == "/api/v3/myTrades":
+            trade = {
+                "id": 1701, "orderId": 1501, "price": "51000.00",
+                "qty": "0.00005", "quoteQty": "2.55",
+                "commission": "0.00255", "commissionAsset": "USDT",
+                "isBuyer": False, "isMaker": True, "time": 1_700_000_000_000,
+            }
+            return httpx.Response(
+                200, json=[trade] if request.url.params.get("fromId") == "0" else [],
+            )
         if path == "/api/v3/orderList/oco" and request.method == "POST":
             post_attempts += 1
             raise httpx.ReadTimeout("response lost after exchange accepted OCO", request=request)
         if path == "/api/v3/order" and request.method == "GET":
+            order_id = int(request.url.params["orderId"])
             return httpx.Response(200, json={
-                "symbol": "BTCUSDT", "orderId": int(request.url.params["orderId"]),
-                "status": "NEW", "executedQty": "0",
+                "symbol": "BTCUSDT", "orderId": order_id,
+                "status": "PARTIALLY_FILLED" if order_id == 1501 else "CANCELED",
+                "origQty": "0.00011",
+                "executedQty": "0.00005" if order_id == 1501 else "0",
             })
         if path == "/api/v3/orderList" and request.method == "GET":
             return httpx.Response(200, json=list_payload)
@@ -952,7 +965,10 @@ async def test_oco_create_timeout_recovers_existing_list_without_duplicate_post(
         assert recovered["orderListId"] == 501
         assert [item["orderId"] for item in recovered["orders"]] == [1501, 1502]
         assert post_attempts == 1
-        assert client.oco.store.get("mumin-oco-create-recovery")["state"] == "EXECUTING"
+        assert client.oco.store.get("mumin-oco-create-recovery")["state"] == "PARTIAL_FILL_REVIEW"
+        assert client.store.is_halted() == (True, "OCO_PARTIAL_FILL_REVIEW")
+        assert client.store.last_trade_id("BTCUSDT") == 1701
+        assert client.store.get_trade_fill("BTCUSDT", 1701)["order_id"] == 1501
     finally:
         await client.close()
 
