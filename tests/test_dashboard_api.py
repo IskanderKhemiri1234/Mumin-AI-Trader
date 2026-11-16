@@ -61,3 +61,21 @@ def test_dashboard_api_reads_paper_ledger_without_mutating_it(monkeypatch, tmp_p
     assert isinstance(payload["positions"], list)
     assert isinstance(payload["fills"], list)
     assert bot.report()["tick"] == before
+
+def test_dashboard_page_exposes_readiness_gate_center():
+    response = TestClient(app).get("/dashboard")
+
+    assert response.status_code == 200
+    page = response.text
+    assert 'id="readiness"' in page
+    assert "0 / 5" in page
+    assert "NO-GO" in page
+    for gate in (
+        "gate1Title",
+        "gate2Title",
+        "gate3Title",
+        "gate4Title",
+        "gate5Title",
+    ):
+        assert gate in page
+    assert 'data-page="readiness"' in page
