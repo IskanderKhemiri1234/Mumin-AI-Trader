@@ -5,7 +5,6 @@ import hashlib
 import hmac
 import json
 import sys
-import time
 from decimal import Decimal
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
