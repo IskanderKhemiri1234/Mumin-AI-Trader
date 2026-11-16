@@ -219,4 +219,13 @@ async def dashboard_snapshot(
         )
     if not x_dashboard_token or not hmac.compare_digest(x_dashboard_token, access_token):
         raise HTTPException(status_code=401, detail="Dashboard access token is invalid.")
-    return _read_dashboard_snapshot()
+    snapshot = _read_dashboard_snapshot()
+    snapshot["control_plane"] = {
+        "read_only": True,
+        "paper_engine_control": "EXTERNAL_SCHEDULER_NO_REMOTE_CONTROL",
+        "testnet_order_submission": "DISABLED",
+        "mainnet_order_submission": "BLOCKED",
+        "execution_authorized": False,
+        "available_actions": [],
+    }
+    return snapshot
