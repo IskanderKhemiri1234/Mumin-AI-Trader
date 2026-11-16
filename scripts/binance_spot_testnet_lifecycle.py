@@ -93,8 +93,8 @@ def safe_error_message(exc: Exception, settings: Settings) -> str:
         if secret:
             message = message.replace(secret, "[REDACTED]")
     return re.sub(
-        r"(?i)(signature|api[_-]?key|secret)=([^&\\s]+)",
-        r"\\1=[REDACTED]",
+        r"(?i)(signature|api[_-]?key|secret)=([^&\s]+)",
+        r"\1=[REDACTED]",
         message,
     )
 
