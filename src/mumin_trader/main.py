@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from config.config import get_settings
-from mumin_trader.exchanges.binance.market_stream_service import MarketStreamService
+from mumin_trader.exchanges.binance.market_stream_service import MarketStreamService, WATCH_SYMBOLS
 
 PROJECT_ROOT = (
     Path("/app")
@@ -174,6 +174,37 @@ def _paper_worker_snapshot() -> dict[str, Any]:
         }
     finally:
         connection.close()
+
+
+def _strategy_settings_snapshot() -> dict[str, Any]:
+    return {
+        "symbols": list(WATCH_SYMBOLS),
+        "strategy": {
+            "profile": "MUMIN_3_OF_3_SWARM",
+            "entry_consensus": "3/3",
+            "required_agents": [
+                "Liquidity Sweep",
+                "Depth Imbalance",
+                "Micro-Alpha Filter",
+            ],
+            "direction": "LONG_ONLY",
+        },
+        "risk_limits": {
+            "initial_capital_usdt": "70.00",
+            "max_trade_usdt": "5.00",
+            "reserve_percent": "20.00",
+            "max_open_positions": 2,
+            "max_daily_loss_percent": "2.00",
+            "max_drawdown_percent": "5.00",
+            "stop_loss_percent": "0.50",
+            "take_profit_percent": "1.25",
+            "max_spread_bps": "8.00",
+        },
+        "risk_limits_locked": True,
+        "approval_required_for_changes": True,
+        "settings_mutation_enabled": False,
+        "execution_authorized": False,
+    }
 
 
 def _read_dashboard_snapshot() -> dict[str, Any]:
@@ -371,6 +402,7 @@ async def dashboard_snapshot(
     _dashboard_access_token(x_dashboard_token)
     snapshot = _read_dashboard_snapshot()
     snapshot["paper_worker"] = _paper_worker_snapshot()
+    snapshot["strategy_settings"] = _strategy_settings_snapshot()
     snapshot["control_plane"] = {
         "read_only": True,
         "paper_engine_control": "AUTHENTICATED_PAUSE_RESUME_ONLY",
