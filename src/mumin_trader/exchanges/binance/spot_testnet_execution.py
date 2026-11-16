@@ -126,6 +126,86 @@ class BinanceSpotTestnetExecution:
         # This adapter has no withdrawal endpoint; key scopes are verified separately.
         return payload
 
+    async def _bnb_fee_readiness(
+        self,
+        *,
+        symbol: str,
+        buy_notional: Decimal,
+        sell_notional: Decimal,
+    ) -> dict[str, str]:
+        """Fail closed unless BNB fee discount and a conservative fee reserve are proven."""
+        if not self.settings.ENABLE_BNB_FEE_DISCOUNT:
+            raise SpotExecutionError("BNB fee discount is disabled in configuration.")
+        if not self.settings.REQUIRE_BNB_BALANCE_FOR_DISCOUNT:
+            raise SpotExecutionError("BNB fee balance is not mandatory; refusing lifecycle execution.")
+        bnb_asset = self.settings.BNB_FEE_ASSET.upper()
+        if bnb_asset != "BNB" or self.settings.QUOTE_ASSET.upper() != "USDT":
+            raise SpotExecutionError("Conservative BNB fee preflight currently requires BNB and USDT.")
+
+        commission = await self._request(
+            "GET", "/api/v3/account/commission", {"symbol": symbol.upper()}, signed=True,
+        )
+        discount = commission.get("discount")
+        if not isinstance(discount, dict):
+            raise SpotExecutionError("Binance did not return symbol-specific BNB discount settings.")
+        if (
+            discount.get("enabledForAccount") is not True
+            or discount.get("enabledForSymbol") is not True
+            or str(discount.get("discountAsset", "")).upper() != bnb_asset
+        ):
+            raise SpotExecutionError("BNB fee discount is not explicitly enabled for this account and symbol.")
+        discount_multiplier = Decimal(str(discount.get("discount", "0")))
+        if not discount_multiplier.is_finite() or not (Decimal("0") < discount_multiplier <= Decimal("1")):
+            raise SpotExecutionError("Binance returned an invalid BNB commission multiplier.")
+
+        def conservative_component(name: str, *, required: bool) -> Decimal:
+            rates = commission.get(name)
+            if not isinstance(rates, dict):
+                if required:
+                    raise SpotExecutionError(f"Binance commission response is missing {name}.")
+                return Decimal("0")
+            values: dict[str, Decimal] = {}
+            for key in ("maker", "taker", "buyer", "seller"):
+                raw = rates.get(key, "0")
+                value = Decimal(str(raw))
+                if not value.is_finite() or value < 0:
+                    raise SpotExecutionError(f"Binance returned an invalid {name}.{key} rate.")
+                values[key] = value
+            return max(values["maker"], values["taker"]) + values["buyer"] + values["seller"]
+
+        standard_rate = conservative_component("standardCommission", required=True)
+        tax_rate = conservative_component("taxCommission", required=True)
+        special_rate = conservative_component("specialCommission", required=False)
+        effective_rate = standard_rate * discount_multiplier + tax_rate + special_rate
+        if effective_rate <= 0:
+            raise SpotExecutionError("Commission rates do not provide a provable positive BNB fee reserve.")
+
+        bnb_price = await self._ticker_price("BNBUSDT")
+        account = await self._account()
+        balances = self._balance_map(account)
+        bnb_free = balances.get(bnb_asset, (Decimal("0"), Decimal("0")))[0]
+        # Cover the BUY and the worst-priced single OCO exit, with an additional 50% reserve.
+        reserve_factor = Decimal("1.50")
+        required_bnb = ((buy_notional + sell_notional) * effective_rate / bnb_price) * reserve_factor
+        if not required_bnb.is_finite() or required_bnb <= 0 or bnb_free < required_bnb:
+            raise SpotExecutionError(
+                "Insufficient free BNB for the conservative BUY plus protective OCO commission reserve."
+            )
+        return {
+            "symbol": symbol.upper(),
+            "discount_asset": bnb_asset,
+            "discount_enabled_for_account": "true",
+            "discount_enabled_for_symbol": "true",
+            "discount_multiplier": str(discount_multiplier),
+            "effective_fee_rate_upper_bound": str(effective_rate),
+            "bnbusdt_price": str(bnb_price),
+            "buy_notional_usdt": str(buy_notional),
+            "worst_oco_exit_notional_usdt": str(sell_notional),
+            "reserve_factor": str(reserve_factor),
+            "required_bnb": str(required_bnb),
+            "free_bnb": str(bnb_free),
+        }
+
     async def _exchange_symbol(self, symbol: str) -> dict[str, Any]:
         payload = await self._request("GET", "/api/v3/exchangeInfo", {"symbol": symbol})
         symbols = payload.get("symbols", [])
