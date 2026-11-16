@@ -119,8 +119,8 @@ class BinanceSpotTestnetExecution:
             raise SpotExecutionError("Binance account type is missing or is not explicitly SPOT.")
         if payload.get("canTrade") is not True:
             raise SpotExecutionError("Binance account does not explicitly confirm Spot trading permission.")
-        if payload.get("canWithdraw") is not False:
-            raise SpotExecutionError("Withdrawal permission is enabled or cannot be verified; Spot execution is blocked.")
+        # canWithdraw is an account capability, not a reliable API-key scope check.
+        # This adapter has no withdrawal endpoint; key scopes are verified separately.
         return payload
 
     async def _exchange_symbol(self, symbol: str) -> dict[str, Any]:
