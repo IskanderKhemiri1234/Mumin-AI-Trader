@@ -104,6 +104,8 @@ class SQLiteOrderStore:
                     commission TEXT NOT NULL,
                     commission_asset TEXT NOT NULL,
                     is_buyer INTEGER NOT NULL,
+                    is_maker INTEGER NOT NULL DEFAULT 0,
+                    commission_quote_value TEXT,
                     trade_time_ms INTEGER NOT NULL,
                     raw_json TEXT NOT NULL,
                     PRIMARY KEY(symbol, trade_id)
@@ -125,6 +127,18 @@ class SQLiteOrderStore:
                 VALUES (1, 0, '', '1970-01-01T00:00:00+00:00');
                 """
             )
+            columns = {
+                str(row["name"])
+                for row in db.execute("PRAGMA table_info(spot_trade_fills)").fetchall()
+            }
+            if "is_maker" not in columns:
+                db.execute(
+                    "ALTER TABLE spot_trade_fills ADD COLUMN is_maker INTEGER NOT NULL DEFAULT 0"
+                )
+            if "commission_quote_value" not in columns:
+                db.execute(
+                    "ALTER TABLE spot_trade_fills ADD COLUMN commission_quote_value TEXT"
+                )
 
     @staticmethod
     def _now() -> str:
@@ -330,26 +344,43 @@ class SQLiteOrderStore:
             ).fetchone()
             return int(row["last_trade_id"]) if row else None
 
-    def record_trade_fills(self, symbol: str, fills: list[dict[str, Any]]) -> int | None:
+    def record_trade_fills(
+        self,
+        symbol: str,
+        fills: list[dict[str, Any]],
+        *,
+        commission_quote_values: dict[int, str] | None = None,
+    ) -> int | None:
         normalized = symbol.upper()
+        values = commission_quote_values or {}
         latest: int | None = None
         with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             for fill in fills:
                 trade_id = int(fill["id"])
                 latest = trade_id if latest is None else max(latest, trade_id)
+                fee_value = values.get(trade_id)
                 db.execute(
                     """INSERT OR IGNORE INTO spot_trade_fills
                        (symbol,trade_id,order_id,price,quantity,quote_quantity,commission,
-                        commission_asset,is_buyer,trade_time_ms,raw_json)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                        commission_asset,is_buyer,is_maker,commission_quote_value,
+                        trade_time_ms,raw_json)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         normalized, trade_id, int(fill["orderId"]), str(fill["price"]),
                         str(fill["qty"]), str(fill["quoteQty"]), str(fill["commission"]),
                         str(fill["commissionAsset"]).upper(), int(bool(fill["isBuyer"])),
+                        int(bool(fill.get("isMaker", False))),
+                        None if fee_value is None else str(fee_value),
                         int(fill["time"]), json.dumps(fill, sort_keys=True),
                     ),
                 )
+                if fee_value is not None:
+                    db.execute(
+                        """UPDATE spot_trade_fills SET commission_quote_value=?
+                           WHERE symbol=? AND trade_id=? AND commission_quote_value IS NULL""",
+                        (str(fee_value), normalized, trade_id),
+                    )
             if latest is not None:
                 db.execute(
                     """INSERT INTO spot_trade_sync_state(symbol,last_trade_id,updated_at)
@@ -360,6 +391,46 @@ class SQLiteOrderStore:
                     (normalized, latest, self._now()),
                 )
         return latest
+
+    def unvalued_bnb_fills(self) -> list[dict[str, Any]]:
+        with self._connection() as db:
+            rows = db.execute(
+                """SELECT symbol,trade_id,trade_time_ms
+                   FROM spot_trade_fills
+                   WHERE commission_asset='BNB' AND commission_quote_value IS NULL
+                     AND CAST(commission AS REAL)>0
+                   ORDER BY trade_time_ms,trade_id"""
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def set_commission_quote_value(self, symbol: str, trade_id: int, value: str) -> None:
+        amount = Decimal(value)
+        if not amount.is_finite() or amount < 0:
+            raise OrderStoreError("Commission quote valuation must be a finite non-negative amount.")
+        with self._connection() as db:
+            result = db.execute(
+                """UPDATE spot_trade_fills SET commission_quote_value=?
+                   WHERE symbol=? AND trade_id=? AND commission_quote_value IS NULL""",
+                (str(amount), symbol.upper(), int(trade_id)),
+            )
+            if result.rowcount != 1:
+                row = db.execute(
+                    "SELECT commission_quote_value FROM spot_trade_fills WHERE symbol=? AND trade_id=?",
+                    (symbol.upper(), int(trade_id)),
+                ).fetchone()
+                if row is None or row["commission_quote_value"] is None:
+                    raise OrderStoreError("Could not persist historical BNB commission valuation.")
+
+    def realized_pnl_report(self, quote_asset: str = "USDT") -> dict[str, Any]:
+        from mumin_trader.exchanges.binance.realized_pnl import build_realized_pnl_report
+
+        with self._connection() as db:
+            rows = db.execute(
+                """SELECT symbol,trade_id,price,quantity,quote_quantity,commission,
+                          commission_asset,is_buyer,is_maker,commission_quote_value,trade_time_ms
+                   FROM spot_trade_fills ORDER BY trade_time_ms,trade_id"""
+            ).fetchall()
+        return build_realized_pnl_report([dict(row) for row in rows], quote_asset=quote_asset)
 
     def trade_asset_deltas(self, quote_asset: str) -> dict[str, Decimal]:
         quote = quote_asset.upper()
