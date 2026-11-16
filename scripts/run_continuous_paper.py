@@ -43,6 +43,16 @@ MAX_DRAWDOWN_PERCENT = Decimal(os.getenv("MAX_DRAWDOWN_PERCENT", "5.00"))
 # weaken the agreed risk policy.
 if INITIAL_CASH != Decimal("70.00"):
     raise RuntimeError("Paper engine requires the configured 70.00 USDT starting capital.")
+if MAX_TRADE != Decimal("5.00"):
+    raise RuntimeError("Paper maximum trade allocation is fixed at 5.00 USDT.")
+if RESERVE_PERCENT != Decimal("20"):
+    raise RuntimeError("Paper capital reserve is fixed at 20%.")
+if MAX_CAPITAL != Decimal("70.00"):
+    raise RuntimeError("Paper maximum capital allocation is fixed at 70.00 USDT.")
+if MAX_OPEN_POSITIONS != 2:
+    raise RuntimeError("Paper maximum open positions is fixed at two.")
+if MAX_DRAWDOWN_PERCENT != Decimal("5.00"):
+    raise RuntimeError("Paper maximum drawdown limit is fixed at 5.00%.")
 if STOP_LOSS_PERCENT != Decimal("0.50"):
     raise RuntimeError("Paper maximum stop-loss cap is fixed at 0.50%.")
 if TAKE_PROFIT_PERCENT != Decimal("1.25"):
