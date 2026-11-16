@@ -15,6 +15,7 @@ on:
       - "dashboard/**"
       - ".github/workflows/clean-profit-core.yml"
       - ".github/workflows/build-apk.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
