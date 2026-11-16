@@ -412,6 +412,34 @@ class SQLiteOrderStore:
             ).fetchone()
             return dict(row) if row else None
 
+    def order_fill_summary(
+        self, symbol: str, order_id: int, *, base_asset: str,
+    ) -> dict[str, str]:
+        with self._connection() as db:
+            rows = db.execute(
+                """SELECT quantity,quote_quantity,commission,commission_asset
+                   FROM spot_trade_fills WHERE symbol=? AND order_id=?
+                   ORDER BY trade_time_ms,trade_id""",
+                (symbol.upper(), int(order_id)),
+            ).fetchall()
+        gross = sum((Decimal(row["quantity"]) for row in rows), Decimal("0"))
+        quote = sum((Decimal(row["quote_quantity"]) for row in rows), Decimal("0"))
+        base_fee = sum(
+            (
+                Decimal(row["commission"])
+                for row in rows
+                if str(row["commission_asset"]).upper() == base_asset.upper()
+            ),
+            Decimal("0"),
+        )
+        return {
+            "fill_count": str(len(rows)),
+            "gross_quantity": str(gross),
+            "net_base_quantity": str(gross - base_fee),
+            "quote_quantity": str(quote),
+            "base_commission": str(base_fee),
+        }
+
     def set_commission_quote_value(self, symbol: str, trade_id: int, value: str) -> None:
         amount = Decimal(value)
         if not amount.is_finite() or amount < 0:
@@ -520,6 +548,10 @@ class SQLiteOrderStore:
                 """SELECT client_order_id,symbol,exchange_order_id,executed_quantity
                    FROM spot_order_intents WHERE exchange_order_id IS NOT NULL"""
             ).fetchall()
+            oco_rows = db.execute(
+                """SELECT list_client_order_id,symbol,above_order_id,below_order_id,response_json
+                   FROM spot_oco_order_lists"""
+            ).fetchall()
             fills = db.execute(
                 """SELECT symbol,order_id,quantity FROM spot_trade_fills"""
             ).fetchall()
@@ -537,6 +569,33 @@ class SQLiteOrderStore:
                     f"ORDER_FILL_MISMATCH:{order['client_order_id']}:"
                     f"exchange={exchange_reported}:ledger={ledger_filled}"
                 )
+        for row in oco_rows:
+            try:
+                response = json.loads(str(row["response_json"]))
+            except (TypeError, ValueError):
+                discrepancies.append(f"OCO_RESPONSE_INVALID:{row['list_client_order_id']}")
+                continue
+            reports = response.get("orderReports", [])
+            for child_id in (row["above_order_id"], row["below_order_id"]):
+                if child_id is None:
+                    continue
+                report = next(
+                    (item for item in reports if str(item.get("orderId")) == str(child_id)),
+                    None,
+                )
+                if report is None:
+                    discrepancies.append(
+                        f"OCO_CHILD_STATUS_MISSING:{row['list_client_order_id']}:{child_id}"
+                    )
+                    continue
+                key = (str(row["symbol"]), int(child_id))
+                exchange_reported = Decimal(str(report.get("executedQty", "0")))
+                ledger_filled = totals.get(key, Decimal("0"))
+                if abs(exchange_reported - ledger_filled) > epsilon:
+                    discrepancies.append(
+                        f"OCO_FILL_MISMATCH:{row['list_client_order_id']}:{child_id}:"
+                        f"exchange={exchange_reported}:ledger={ledger_filled}"
+                    )
         return discrepancies
 
     def unmatched_trade_order_ids(self) -> list[str]:
@@ -546,7 +605,11 @@ class SQLiteOrderStore:
                    FROM spot_trade_fills AS f
                    LEFT JOIN spot_order_intents AS o
                      ON o.symbol=f.symbol AND CAST(o.exchange_order_id AS INTEGER)=f.order_id
-                   WHERE o.client_order_id IS NULL"""
+                   LEFT JOIN spot_oco_order_lists AS c
+                     ON c.symbol=f.symbol
+                     AND (CAST(c.above_order_id AS INTEGER)=f.order_id
+                          OR CAST(c.below_order_id AS INTEGER)=f.order_id)
+                   WHERE o.client_order_id IS NULL AND c.list_client_order_id IS NULL"""
             ).fetchall()
             return [str(row["order_ref"]) for row in rows]
 
