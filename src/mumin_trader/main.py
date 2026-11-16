@@ -3,11 +3,13 @@ from __future__ import annotations
 import hmac
 import os
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from config.config import get_settings
 
@@ -32,6 +34,59 @@ def _dashboard_database() -> Path:
     path = Path(configured)
     return path if path.is_absolute() else PROJECT_ROOT / path
 
+
+
+
+class PaperControlRequest(BaseModel):
+    action: Literal["pause", "resume"]
+
+
+def _dashboard_access_token(x_dashboard_token: str | None) -> str:
+    access_token = os.getenv("DASHBOARD_ACCESS_TOKEN", "")
+    if not access_token:
+        raise HTTPException(
+            status_code=503,
+            detail="Dashboard access is not configured. Set DASHBOARD_ACCESS_TOKEN on the server.",
+        )
+    if not x_dashboard_token or not hmac.compare_digest(x_dashboard_token, access_token):
+        raise HTTPException(status_code=401, detail="Dashboard access token is invalid.")
+    return access_token
+
+
+def _paper_worker_snapshot() -> dict[str, Any]:
+    database = _dashboard_database()
+    if not database.is_file():
+        return {"status": "offline", "desired_state": "UNKNOWN", "heartbeat_at": None}
+    connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=3)
+    connection.row_factory = sqlite3.Row
+    try:
+        table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_runtime_control'"
+        ).fetchone()
+        if table is None:
+            return {"status": "unmanaged", "desired_state": "UNKNOWN", "heartbeat_at": None}
+        row = connection.execute(
+            "SELECT desired_state, heartbeat_at FROM bot_runtime_control WHERE id=1"
+        ).fetchone()
+        if row is None:
+            return {"status": "unmanaged", "desired_state": "UNKNOWN", "heartbeat_at": None}
+        heartbeat = row["heartbeat_at"]
+        age_seconds = None
+        if heartbeat:
+            try:
+                stamp = datetime.fromisoformat(heartbeat)
+                age_seconds = max(0.0, (datetime.now(timezone.utc) - stamp).total_seconds())
+            except ValueError:
+                age_seconds = None
+        online = age_seconds is not None and age_seconds <= 90
+        return {
+            "status": "online" if online else "offline",
+            "desired_state": row["desired_state"],
+            "heartbeat_at": heartbeat,
+            "heartbeat_age_seconds": age_seconds,
+        }
+    finally:
+        connection.close()
 
 def _read_dashboard_snapshot() -> dict[str, Any]:
     database = _dashboard_database()
@@ -219,7 +274,9 @@ async def dashboard_snapshot(
         )
     if not x_dashboard_token or not hmac.compare_digest(x_dashboard_token, access_token):
         raise HTTPException(status_code=401, detail="Dashboard access token is invalid.")
+    _dashboard_access_token(x_dashboard_token)
     snapshot = _read_dashboard_snapshot()
+    snapshot["paper_worker"] = _paper_worker_snapshot()
     snapshot["control_plane"] = {
         "read_only": True,
         "paper_engine_control": "EXTERNAL_SCHEDULER_NO_REMOTE_CONTROL",
@@ -229,3 +286,60 @@ async def dashboard_snapshot(
         "available_actions": [],
     }
     return snapshot
+
+
+@app.post("/api/paper-control")
+async def control_paper_worker(
+    request: PaperControlRequest,
+    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+) -> dict[str, Any]:
+    _dashboard_access_token(x_dashboard_token)
+    if os.getenv("TRADING_MODE", "PAPER").upper() != "PAPER":
+        raise HTTPException(status_code=409, detail="Paper controls require TRADING_MODE=PAPER.")
+    if os.getenv("TRADING_ENV", "TESTNET").upper() != "TESTNET":
+        raise HTTPException(status_code=409, detail="Paper controls require TRADING_ENV=TESTNET.")
+    if os.getenv("ALLOW_MAINNET", "false").lower() == "true" or os.getenv(
+        "LIVE_TRADING_ENABLED", "false"
+    ).lower() == "true":
+        raise HTTPException(status_code=409, detail="Paper controls refuse live-enabled environments.")
+
+    database = _dashboard_database()
+    if not database.is_file():
+        raise HTTPException(status_code=409, detail="Paper ledger is unavailable; worker is not running.")
+    connection = sqlite3.connect(database, timeout=3)
+    connection.row_factory = sqlite3.Row
+    try:
+        row = connection.execute(
+            """SELECT desired_state, heartbeat_at FROM bot_runtime_control WHERE id=1"""
+        ).fetchone()
+        if row is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Paper worker does not support remote pause/resume yet.",
+            )
+        heartbeat = row["heartbeat_at"]
+        try:
+            stamp = datetime.fromisoformat(heartbeat) if heartbeat else None
+            age = (datetime.now(timezone.utc) - stamp).total_seconds() if stamp else None
+        except ValueError:
+            age = None
+        if age is None or age > 90 or age < -5:
+            raise HTTPException(
+                status_code=409,
+                detail="Paper worker heartbeat is stale; refusing to queue a control request.",
+            )
+        desired = "PAUSED" if request.action == "pause" else "RUNNING"
+        now = datetime.now(timezone.utc).isoformat()
+        connection.execute(
+            """UPDATE bot_runtime_control SET desired_state=?, requested_at=? WHERE id=1""",
+            (desired, now),
+        )
+        connection.commit()
+        return {
+            "status": "accepted",
+            "desired_state": desired,
+            "message": "Paper worker will apply this request at its next safe cycle boundary.",
+            "execution_authorized": False,
+        }
+    finally:
+        connection.close()
