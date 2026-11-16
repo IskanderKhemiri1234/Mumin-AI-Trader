@@ -35,7 +35,7 @@ Scope: current `main` Paper engine plus the isolated Testnet implementation prop
 - Testnet credentials are represented as Pydantic `SecretStr` and are sent only in the API-key header; secrets are not part of the Android app.
 - The isolated adapter pins its REST base URL to `https://testnet.binance.vision`; no caller-supplied host is accepted.
 - Mainnet is unconditionally blocked by the current Settings validator. Margin, Futures, withdrawals, and Mainnet order paths are not implemented in the Testnet adapter.
-- The account response must explicitly report `accountType=SPOT`, `canTrade=true`, and `canWithdraw=false`; missing permission fields, any non-Spot account type, or enabled withdrawals are rejected. Binance's account payload does not prove every API-key scope: an operator must still manually verify Spot-only trading, withdrawals disabled, Margin/Futures disabled, and IP restrictions where supported. No real API key has been supplied or tested.
+- The execution adapter requires `accountType=SPOT` and `canTrade=true`. Binance's `canWithdraw` field is an account capability in the account response, not a reliable assertion of the API key's withdrawal scope; it is not used as an order-authorization gate. The adapter exposes no withdrawal endpoint. API-key scopes must still be verified independently in Testnet key management (Spot trading and User Data only, with withdrawal/Margin/Futures permissions absent where configurable). No key or secret is stored in the app or included in source.
 
 ## Testnet execution safeguards added in PR #37
 
