@@ -158,6 +158,8 @@ python scripts/binance_spot_testnet_lifecycle.py run \
   --confirm-testnet-cycle TESTNET_ONLY
 ```
 
+The default Testnet per-order cap remains the configured value (currently 5 USDT). Some symbols require the protective OCO stop leg to remain above the exchange minimum notional after fees and price rounding; in that case the pre-validation safely refuses before sending the BUY. If the inspected filters prove it is necessary, an operator may explicitly use the one-run `--testnet-max-order-usdt 6.00` override. It is hard-limited to 6 USDT, applies only to this Testnet process, and does not edit `.env`, Paper strategy limits, or any Mainnet setting.
+
 The runner performs a clean initial reconciliation, validates BUY and protective OCO parameters before the BUY, submits one LIMIT BUY, synchronizes actual `myTrades`, computes the net base quantity after base-asset commission, and places a protective SELL OCO. It polls both OCO child orders and records `orderListId`, each child `orderId`/client ID, exchange statuses, exact fills, FIFO report, and final account reconciliation.
 
 If neither OCO leg fills before the default 15-minute watch window, the runner deliberately leaves the protective OCO active rather than canceling protection. It prints the database path, evidence directory and `listClientOrderId`. Continue monitoring that same list without placing another order:
