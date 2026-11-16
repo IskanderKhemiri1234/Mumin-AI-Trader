@@ -263,10 +263,18 @@ async def run_cycle(args: argparse.Namespace) -> int:
             "buy_order": buy_params, "oco_sell_template": oco_params,
         })
 
-        buy_response = await client.submit_limit_order(
-            symbol=symbol, side="BUY", quantity=quantity,
-            price=buy_price, client_order_id=buy_client_id,
-        )
+        try:
+            buy_response = await client.submit_limit_order(
+                symbol=symbol, side="BUY", quantity=quantity,
+                price=buy_price, client_order_id=buy_client_id,
+            )
+        except SpotOrderOutcomeUnknown:
+            # Resolve by the same durable client ID; never create a replacement ID.
+            buy_response = await client.get_order(
+                symbol=symbol, client_order_id=buy_client_id,
+            )
+            if buy_response is None:
+                raise
         evidence.record("buy_submission_response", buy_response)
         buy_order = await wait_for_order(
             client, symbol=symbol, client_order_id=buy_client_id,
@@ -313,11 +321,20 @@ async def run_cycle(args: argparse.Namespace) -> int:
             take_profit_price=take_profit, stop_price=stop_price,
             stop_limit_price=None, stop_type="STOP_LOSS",
         )
-        oco_response = await client.oco.place_sell_oco(
-            symbol=symbol, quantity=oco_quantity,
-            take_profit_price=take_profit, stop_price=stop_price,
-            list_client_order_id=list_client_id,
-        )
+        try:
+            oco_response = await client.oco.place_sell_oco(
+                symbol=symbol, quantity=oco_quantity,
+                take_profit_price=take_profit, stop_price=stop_price,
+                list_client_order_id=list_client_id,
+            )
+        except SpotOrderOutcomeUnknown:
+            # Query the existing list by its original listClientOrderId.
+            # The adapter never retries an ambiguous OCO POST.
+            oco_response = await client.oco.get_order_list(
+                symbol=symbol, list_client_order_id=list_client_id,
+            )
+            if oco_response is None:
+                raise
         evidence.record("oco_submission_response", oco_response)
         if not oco_response.get("orderListId") or len(oco_response.get("orders", [])) != 2:
             raise SpotOrderOutcomeUnknown("OCO response lacks its parent or two child order IDs.")
@@ -384,6 +401,7 @@ async def run_cycle(args: argparse.Namespace) -> int:
             "symbol": symbol,
             "buy_client_order_id": buy_client_id,
             "oco_list_client_order_id": list_client_id,
+            "database": str(database),
             "evidence_directory": str(directory),
             "summary_file": str(evidence.summary_path),
             "mainnet_used": False,
@@ -396,6 +414,7 @@ async def watch_existing(args: argparse.Namespace) -> int:
     require_testnet(settings)
     directory = Path(args.evidence_dir).expanduser()
     evidence = Evidence(directory)
+    evidence.summary_path = directory / "watch-summary.json"
     store = SQLiteOrderStore(args.database)
     client = BinanceSpotTestnetExecution(settings, store)
     try:
