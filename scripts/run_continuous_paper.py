@@ -253,7 +253,34 @@ class ContinuousPaperBot:
                     desired_state TEXT NOT NULL CHECK(desired_state IN ('RUNNING','PAUSED')),
                     requested_at TEXT NOT NULL,
                     heartbeat_at TEXT,
-                    worker_instance_id TEXT
+                    worker_instance_id TEXT,
+                    supervisor_heartbeat_at TEXT,
+                    supervisor_instance_id TEXT,
+                    worker_pid INTEGER
+                )"""
+            )
+            runtime_columns = {
+                row[1] for row in db.execute("PRAGMA table_info(bot_runtime_control)")
+            }
+            runtime_migrations = {
+                "supervisor_heartbeat_at": "TEXT",
+                "supervisor_instance_id": "TEXT",
+                "worker_pid": "INTEGER",
+            }
+            for name, definition in runtime_migrations.items():
+                if name not in runtime_columns:
+                    db.execute(
+                        f"ALTER TABLE bot_runtime_control ADD COLUMN {name} {definition}"
+                    )
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS bot_runtime_audit (
+                    audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_type TEXT NOT NULL,
+                    actor TEXT NOT NULL,
+                    desired_state TEXT,
+                    worker_instance_id TEXT,
+                    detail TEXT,
+                    created_at TEXT NOT NULL
                 )"""
             )
             db.execute(
@@ -290,6 +317,41 @@ class ContinuousPaperBot:
                 (worker_id, now),
             )
             return str(row["desired_state"])
+
+    def supervisor_heartbeat(self, supervisor_id: str, worker_pid: int | None) -> None:
+        """Refresh the always-on supervisor heartbeat independently of its child worker."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as db:
+            db.execute(
+                """UPDATE bot_runtime_control
+                   SET supervisor_instance_id=?, supervisor_heartbeat_at=?, worker_pid=?
+                   WHERE id=1""",
+                (supervisor_id, now, worker_pid),
+            )
+
+    def record_runtime_audit(
+        self,
+        event_type: str,
+        actor: str,
+        desired_state: str | None = None,
+        worker_instance_id: str | None = None,
+        detail: str | None = None,
+    ) -> None:
+        """Append a durable, credential-free worker lifecycle audit event."""
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO bot_runtime_audit
+                   (event_type, actor, desired_state, worker_instance_id, detail, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    event_type,
+                    actor,
+                    desired_state,
+                    worker_instance_id,
+                    detail,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
 
     def finalize_database_batch(self) -> dict[str, object]:
         """Verify SQLite integrity and flush the WAL after a completed cycle batch."""
