@@ -1,4 +1,5 @@
 from decimal import Decimal
+import sqlite3
 
 from mumin_trader.exchanges.binance.order_store import SQLiteOrderStore
 
@@ -67,3 +68,37 @@ def test_store_reports_unvalued_bnb_fee_as_incomplete_until_backfilled(tmp_path)
     store.set_commission_quote_value("BTCUSDT", 3, "2.75")
     assert store.unvalued_bnb_fills() == []
     assert store.realized_pnl_report("USDT")["complete"] is True
+
+
+
+def test_existing_fill_database_is_migrated_without_losing_rows(tmp_path):
+    database = tmp_path / "legacy.db"
+    with sqlite3.connect(database) as db:
+        db.execute(
+            """CREATE TABLE spot_trade_fills (
+                symbol TEXT NOT NULL,
+                trade_id INTEGER NOT NULL,
+                order_id INTEGER NOT NULL,
+                price TEXT NOT NULL,
+                quantity TEXT NOT NULL,
+                quote_quantity TEXT NOT NULL,
+                commission TEXT NOT NULL,
+                commission_asset TEXT NOT NULL,
+                is_buyer INTEGER NOT NULL,
+                trade_time_ms INTEGER NOT NULL,
+                raw_json TEXT NOT NULL,
+                PRIMARY KEY(symbol, trade_id)
+            )"""
+        )
+        db.execute(
+            """INSERT INTO spot_trade_fills VALUES
+               ('BTCUSDT',1,10,'100','1','100','0.01','USDT',1,1000,'{}')"""
+        )
+    store = SQLiteOrderStore(str(database))
+    with sqlite3.connect(database) as db:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(spot_trade_fills)")}
+        row = db.execute(
+            "SELECT symbol,trade_id,is_maker,commission_quote_value FROM spot_trade_fills"
+        ).fetchone()
+    assert {"is_maker", "commission_quote_value"}.issubset(columns)
+    assert row == ("BTCUSDT", 1, 0, None)
