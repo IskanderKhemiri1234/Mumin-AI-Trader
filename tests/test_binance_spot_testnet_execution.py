@@ -930,7 +930,8 @@ async def test_oco_create_timeout_recovers_existing_list_without_duplicate_post(
                 "isBuyer": False, "isMaker": True, "time": 1_700_000_000_000,
             }
             return httpx.Response(
-                200, json=[trade] if request.url.params.get("fromId") == "0" else [],
+                200,
+                json=[trade] if post_attempts > 0 and request.url.params.get("fromId") == "0" else [],
             )
         if path == "/api/v3/orderList/oco" and request.method == "POST":
             post_attempts += 1
