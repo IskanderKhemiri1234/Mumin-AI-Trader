@@ -879,6 +879,14 @@ def test_oco_partial_fill_is_never_reported_as_fully_protected() -> None:
         ],
     }
     assert BinanceSpotTestnetOCO._state(partial) == "PARTIAL_FILL_REVIEW"
+    partially_filled_then_canceled = {
+        "listOrderStatus": "ALL_DONE",
+        "orderReports": [
+            {"status": "CANCELED", "origQty": "0.00011", "executedQty": "0.00005"},
+            {"status": "CANCELED", "origQty": "0.00011", "executedQty": "0"},
+        ],
+    }
+    assert BinanceSpotTestnetOCO._state(partially_filled_then_canceled) == "PARTIAL_FILL_REVIEW"
 
 
 def test_oco_all_done_without_any_fill_is_canceled() -> None:
