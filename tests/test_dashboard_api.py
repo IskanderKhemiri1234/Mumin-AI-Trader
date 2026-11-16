@@ -215,3 +215,55 @@ def test_market_api_returns_shared_server_stream(monkeypatch):
     assert started == [True]
     assert response.json()["source"] == "BINANCE_PUBLIC_SERVER_STREAM"
     assert response.json()["assets"][0]["symbol"] == "BTCUSDT"
+
+
+def test_live_supervisor_allows_resume_without_worker_and_records_audit(
+    monkeypatch, tmp_path
+):
+    database = tmp_path / "paper.sqlite3"
+    bot = ContinuousPaperBot(str(database))
+    bot.supervisor_heartbeat("test-supervisor", None)
+    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
+    monkeypatch.setenv("TRADING_MODE", "PAPER")
+    monkeypatch.setenv("TRADING_ENV", "TESTNET")
+    monkeypatch.setenv("ALLOW_MAINNET", "false")
+    monkeypatch.setenv("LIVE_TRADING_ENABLED", "false")
+
+    response = TestClient(app).post(
+        "/api/paper-control",
+        json={"action": "resume"},
+        headers={"X-Dashboard-Token": "server-only-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["desired_state"] == "RUNNING"
+    audit = bot._connect().execute(
+        "SELECT event_type, desired_state FROM bot_runtime_audit ORDER BY audit_id DESC LIMIT 1"
+    ).fetchone()
+    assert audit["event_type"] == "CONTROL_REQUESTED"
+    assert audit["desired_state"] == "RUNNING"
+
+
+def test_dashboard_reports_supervisor_and_worker_audit(monkeypatch, tmp_path):
+    database = tmp_path / "paper.sqlite3"
+    bot = ContinuousPaperBot(str(database))
+    bot.supervisor_heartbeat("test-supervisor", 12345)
+    bot.record_runtime_audit(
+        "WORKER_STARTED",
+        "test-supervisor",
+        desired_state="RUNNING",
+        detail="pid=12345",
+    )
+    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
+
+    response = TestClient(app).get(
+        "/api/dashboard", headers={"X-Dashboard-Token": "server-only-token"}
+    )
+
+    assert response.status_code == 200
+    worker = response.json()["paper_worker"]
+    assert worker["supervisor_status"] == "online"
+    assert worker["worker_status"] == "starting"
+    assert worker["audit"][0]["event_type"] == "WORKER_STARTED"
