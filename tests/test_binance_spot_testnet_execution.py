@@ -534,7 +534,7 @@ async def test_emergency_stop_cancels_exchange_open_orders_and_keeps_halt(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_account_with_withdrawal_permission_is_rejected(tmp_path) -> None:
+async def test_account_with_can_withdraw_true_is_not_misclassified_as_key_scope(tmp_path) -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/v3/time":
             return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
@@ -547,8 +547,10 @@ async def test_account_with_withdrawal_permission_is_rejected(tmp_path) -> None:
         transport=httpx.MockTransport(handler),
     )
     try:
-        with pytest.raises(SpotExecutionError, match="(?i)withdrawal permission"):
-            await client._account()
+        account = await client._account()
+        assert account["accountType"] == "SPOT"
+        assert account["canTrade"] is True
+        assert account["canWithdraw"] is True
     finally:
         await client.close()
 
@@ -601,7 +603,7 @@ async def test_cancel_api_error_marks_order_unknown_without_retry(tmp_path) -> N
     ("overrides", "message"),
     [
         ({"accountType": None}, "account type"),
-        ({"canWithdraw": None}, "Withdrawal permission"),
+        ({"canTrade": None}, "Spot trading permission"),
     ],
 )
 async def test_missing_account_permission_fields_fail_closed(tmp_path, overrides, message) -> None:
