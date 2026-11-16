@@ -129,3 +129,10 @@ def test_fee_asset_mismatch_rejects_invalid_negative_commission():
         {"trade_id": 4, "commission": "-0.1", "commission_asset": "BNB"},
     ])
     assert result[0]["reason"] == "invalid_commission_amount"
+
+
+def test_fee_asset_mismatch_rejects_non_decimal_commission():
+    result = commission_asset_mismatches([
+        {"trade_id": 5, "commission": "not-a-number", "commission_asset": "BNB"},
+    ])
+    assert result[0]["reason"] == "invalid_commission_amount"
