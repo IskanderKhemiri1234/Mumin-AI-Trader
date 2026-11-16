@@ -7,6 +7,7 @@ import pytest
 
 from config.config import Settings, TradingEnvironment, TradingMode
 from mumin_trader.exchanges.binance.order_store import OrderStoreError, SQLiteOrderStore
+from mumin_trader.exchanges.binance.spot_testnet_oco import BinanceSpotTestnetOCO
 from mumin_trader.exchanges.binance.spot_testnet_execution import (
     BinanceSpotTestnetExecution,
     SpotExecutionError,
@@ -852,6 +853,30 @@ async def test_oco_partial_fill_syncs_real_exchange_trade_fills(tmp_path) -> Non
         )
         assert client.store.last_trade_id("BTCUSDT") == 991
         assert client.store.get_trade_fill("BTCUSDT", 991)["commission"] == "0.00255"
+        assert client.oco.store.get("mumin-oco-partial")["state"] == "PARTIAL_FILL_REVIEW"
+        assert client.store.is_halted() == (True, "OCO_PARTIAL_FILL_REVIEW")
         assert any(req.url.path == "/api/v3/myTrades" for req in seen)
     finally:
         await client.close()
+
+
+def test_oco_partial_fill_is_never_reported_as_fully_protected() -> None:
+    partial = {
+        "listOrderStatus": "EXECUTING",
+        "orderReports": [
+            {"status": "PARTIALLY_FILLED", "executedQty": "0.00005"},
+            {"status": "CANCELED", "executedQty": "0"},
+        ],
+    }
+    assert BinanceSpotTestnetOCO._state(partial) == "PARTIAL_FILL_REVIEW"
+
+
+def test_oco_all_done_without_any_fill_is_canceled() -> None:
+    canceled = {
+        "listOrderStatus": "ALL_DONE",
+        "orderReports": [
+            {"status": "CANCELED", "executedQty": "0"},
+            {"status": "EXPIRED", "executedQty": "0"},
+        ],
+    }
+    assert BinanceSpotTestnetOCO._state(canceled) == "CANCELED"
