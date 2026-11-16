@@ -540,6 +540,7 @@ class BinanceSpotTestnetExecution:
                 )
             local_unresolved = self.store.unresolved_orders()
             local_ids = {str(order["client_order_id"]) for order in local_unresolved}
+            local_ids.update(self.oco.store.child_client_order_ids())
 
             for local in local_unresolved:
                 client_id = str(local["client_order_id"])
