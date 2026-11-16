@@ -267,3 +267,27 @@ def test_dashboard_reports_supervisor_and_worker_audit(monkeypatch, tmp_path):
     assert worker["supervisor_status"] == "online"
     assert worker["worker_status"] == "starting"
     assert worker["audit"][0]["event_type"] == "WORKER_STARTED"
+
+
+def test_dashboard_exposes_locked_strategy_and_risk_settings(monkeypatch, tmp_path):
+    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(tmp_path / "ledger.sqlite3"))
+    response = TestClient(app).get(
+        "/api/dashboard", headers={"X-Dashboard-Token": "server-only-token"}
+    )
+
+    assert response.status_code == 200
+    settings = response.json()["strategy_settings"]
+    assert settings["symbols"] == [
+        "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
+        "XRPUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT",
+    ]
+    assert settings["strategy"]["entry_consensus"] == "3/3"
+    assert settings["risk_limits"]["max_trade_usdt"] == "5.00"
+    assert settings["risk_limits"]["reserve_percent"] == "20.00"
+    assert settings["risk_limits"]["max_daily_loss_percent"] == "2.00"
+    assert settings["risk_limits"]["max_drawdown_percent"] == "5.00"
+    assert settings["risk_limits"]["max_spread_bps"] == "8.00"
+    assert settings["risk_limits_locked"] is True
+    assert settings["approval_required_for_changes"] is True
+    assert settings["settings_mutation_enabled"] is False
