@@ -292,7 +292,16 @@ class BinanceSpotTestnetOCO:
             if "(-2013)" in str(exc):
                 return None
             raise
-        return response if isinstance(response, dict) else None
+        if not isinstance(response, dict):
+            return None
+        local = self.store.get(list_client_order_id)
+        if local is not None:
+            self.store.update(
+                list_client_order_id, state=self._state(response), response=response,
+            )
+        for order in response.get("orderReports", []):
+            await self.execution._sync_fills_if_needed(order)
+        return response
 
     async def cancel_order_list(
         self, *, symbol: str, list_client_order_id: str,
@@ -302,6 +311,21 @@ class BinanceSpotTestnetOCO:
             raise SpotExecutionError("OCO cancellation requires a matching persisted list intent.")
         if local["state"] in {"ALL_DONE", "CANCELED", "REJECT"}:
             return json.loads(local["response_json"])
+        if local["state"] in {"UNKNOWN", "CANCEL_PENDING", "SUBMITTING"}:
+            observed = await self.get_order_list(
+                symbol=symbol, list_client_order_id=list_client_order_id,
+            )
+            if observed is None:
+                self.store.update(
+                    list_client_order_id, state="UNKNOWN",
+                    error="Order list not visible during recovery; cancellation is not resubmitted.",
+                )
+                raise SpotOrderOutcomeUnknown(
+                    "OCO list outcome remains unknown; no cancellation retry was sent.",
+                )
+            observed_state = self._state(observed)
+            if observed_state in {"ALL_DONE", "CANCELED"}:
+                return observed
         self.store.update(list_client_order_id, state="CANCEL_PENDING")
         try:
             response = await self.execution._request(
