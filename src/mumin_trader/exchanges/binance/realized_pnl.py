@@ -33,6 +33,7 @@ def build_realized_pnl_report(
     total_realized = ZERO
     total_fee_quote_mark = ZERO
     maker_count = taker_count = 0
+    maker_fees_quote = taker_fees_quote = ZERO
 
     for fill in ordered:
         symbol = str(fill["symbol"]).upper()
@@ -70,8 +71,10 @@ def build_realized_pnl_report(
 
         if is_maker:
             maker_count += 1
+            maker_fees_quote += fee_quote_value
         else:
             taker_count += 1
+            taker_fees_quote += fee_quote_value
         total_fee_quote_mark += fee_quote_value
         report = summaries.setdefault(symbol, {
             "realized_pnl_quote": ZERO,
@@ -140,6 +143,8 @@ def build_realized_pnl_report(
         "fee_valuation": "quote/base exact arithmetic; BNB uses stored historical 1m candle close mark",
         "realized_pnl_quote": str(total_realized),
         "fees_quote_equivalent_mark": str(total_fee_quote_mark),
+        "maker_fees_quote_equivalent_mark": str(maker_fees_quote),
+        "taker_fees_quote_equivalent_mark": str(taker_fees_quote),
         "maker_fills": maker_count,
         "taker_fills": taker_count,
         "symbols": summaries,
