@@ -452,7 +452,7 @@ async def control_paper_worker(
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    "Paper supervisor and worker heartbeats are stale; "
+                    "Paper worker heartbeat is stale and supervisor heartbeat is stale; "
                     "refusing to queue a control request."
                 ),
             )
