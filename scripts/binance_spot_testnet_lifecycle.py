@@ -409,6 +409,42 @@ async def run_cycle(args: argparse.Namespace) -> int:
         }, indent=2))
 
 
+async def inspect_market(args: argparse.Namespace) -> int:
+    settings = Settings()
+    require_testnet(settings)
+    symbol = args.symbol.upper()
+    if symbol not in settings.watchlist_symbols:
+        raise SpotExecutionError("The selected symbol is not in the configured watchlist.")
+    store = SQLiteOrderStore(args.database)
+    client = BinanceSpotTestnetExecution(settings, store)
+    try:
+        ticker = await client._ticker_price(symbol)
+        metadata = await client._exchange_symbol(symbol)
+        filters = {item.get("filterType"): item for item in metadata.get("filters", [])}
+        result = {
+            "environment": "BINANCE_SPOT_TESTNET",
+            "rest_base_url": TESTNET_REST_BASE_URL,
+            "symbol": symbol,
+            "last_price": str(ticker),
+            "base_asset": metadata.get("baseAsset"),
+            "quote_asset": metadata.get("quoteAsset"),
+            "status": metadata.get("status"),
+            "is_spot_trading_allowed": metadata.get("isSpotTradingAllowed"),
+            "price_filter": filters.get("PRICE_FILTER"),
+            "lot_size_filter": filters.get("LOT_SIZE"),
+            "notional_filter": filters.get("NOTIONAL") or filters.get("MIN_NOTIONAL"),
+            "configured_min_trade_usdt": str(settings.MIN_TRADE_ALLOCATION_USD),
+            "configured_max_trade_usdt": str(settings.MAX_TRADE_ALLOCATION_USD),
+            "matching_engine_order_sent": False,
+            "mainnet_used": False,
+            "secrets_written": False,
+        }
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+    finally:
+        await client.close()
+
+
 async def watch_existing(args: argparse.Namespace) -> int:
     settings = Settings()
     require_testnet(settings)
@@ -481,6 +517,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--evidence-root", default="artifacts/binance-spot-testnet-evidence")
     run.add_argument("--confirm-testnet-cycle", required=True, choices=("TESTNET_ONLY",))
 
+    inspect = commands.add_parser("inspect", help="Read the current Testnet price and filters; sends no orders.")
+    inspect.add_argument("--symbol", default="BTCUSDT")
+    inspect.add_argument("--database", default="data/testnet-inspect.sqlite3")
+
     watch = commands.add_parser("watch", help="Continue monitoring a previously placed OCO; sends no orders.")
     watch.add_argument("--symbol", required=True)
     watch.add_argument("--list-client-order-id", required=True)
@@ -496,6 +536,8 @@ def main() -> None:
     try:
         if args.command == "run":
             code = asyncio.run(run_cycle(args))
+        elif args.command == "inspect":
+            code = asyncio.run(inspect_market(args))
         else:
             code = asyncio.run(watch_existing(args))
     except Exception as exc:
