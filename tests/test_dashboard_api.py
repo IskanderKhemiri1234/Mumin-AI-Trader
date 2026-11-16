@@ -79,3 +79,30 @@ def test_dashboard_page_exposes_readiness_gate_center():
     ):
         assert gate in page
     assert 'data-page="readiness"' in page
+
+
+
+def test_dashboard_api_exposes_read_only_control_plane(monkeypatch, tmp_path):
+    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(tmp_path / "ledger.sqlite3"))
+    response = TestClient(app).get(
+        "/api/dashboard", headers={"X-Dashboard-Token": "server-only-token"}
+    )
+    assert response.status_code == 200
+    control = response.json()["control_plane"]
+    assert control["read_only"] is True
+    assert control["execution_authorized"] is False
+    assert control["testnet_order_submission"] == "DISABLED"
+    assert control["mainnet_order_submission"] == "BLOCKED"
+    assert control["available_actions"] == []
+
+
+def test_dashboard_page_exposes_live_control_center():
+    response = TestClient(app).get("/dashboard")
+    assert response.status_code == 200
+    page = response.text
+    assert 'id="control"' in page
+    assert 'id="marketRows"' in page
+    assert 'id="marketReconnect"' in page
+    assert "wss://stream.binance.com:9443/stream" in page
+    assert "no fake browser-only start button" in page
