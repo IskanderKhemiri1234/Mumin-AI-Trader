@@ -266,24 +266,16 @@ async def dashboard() -> FileResponse:
 async def dashboard_snapshot(
     x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
 ) -> dict[str, Any]:
-    access_token = os.getenv("DASHBOARD_ACCESS_TOKEN", "")
-    if not access_token:
-        raise HTTPException(
-            status_code=503,
-            detail="Dashboard access is not configured. Set DASHBOARD_ACCESS_TOKEN on the server.",
-        )
-    if not x_dashboard_token or not hmac.compare_digest(x_dashboard_token, access_token):
-        raise HTTPException(status_code=401, detail="Dashboard access token is invalid.")
     _dashboard_access_token(x_dashboard_token)
     snapshot = _read_dashboard_snapshot()
     snapshot["paper_worker"] = _paper_worker_snapshot()
     snapshot["control_plane"] = {
         "read_only": True,
-        "paper_engine_control": "EXTERNAL_SCHEDULER_NO_REMOTE_CONTROL",
+        "paper_engine_control": "AUTHENTICATED_PAUSE_RESUME_ONLY",
         "testnet_order_submission": "DISABLED",
         "mainnet_order_submission": "BLOCKED",
         "execution_authorized": False,
-        "available_actions": [],
+        "available_actions": ["PAPER_PAUSE", "PAPER_RESUME"],
     }
     return snapshot
 
