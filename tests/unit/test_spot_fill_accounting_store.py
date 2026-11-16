@@ -102,3 +102,67 @@ def test_existing_fill_database_is_migrated_without_losing_rows(tmp_path):
         ).fetchone()
     assert {"is_maker", "commission_quote_value"}.issubset(columns)
     assert row == ("BTCUSDT", 1, 0, None)
+
+
+
+def test_order_fill_summary_nets_base_asset_commission(tmp_path):
+    store = SQLiteOrderStore(str(tmp_path / "net-quantity.db"))
+    store.record_trade_fills(
+        "BTCUSDT",
+        [
+            {
+                "id": 31, "orderId": 301, "price": "50000", "qty": "0.00010",
+                "quoteQty": "5", "commission": "0.00000010",
+                "commissionAsset": "BTC", "isBuyer": True, "isMaker": False, "time": 31000,
+            },
+            {
+                "id": 32, "orderId": 301, "price": "50000", "qty": "0.00005",
+                "quoteQty": "2.5", "commission": "0.0025",
+                "commissionAsset": "USDT", "isBuyer": True, "isMaker": True, "time": 32000,
+            },
+        ],
+    )
+    summary = store.order_fill_summary("BTCUSDT", 301, base_asset="BTC")
+    assert summary == {
+        "fill_count": "2",
+        "gross_quantity": "0.00015",
+        "net_base_quantity": "0.00014990",
+        "quote_quantity": "7.50",
+        "base_commission": "1.0E-7",
+    }
+    assert len(store.trade_fills_for_order("BTCUSDT", 301)) == 2
+
+
+def test_oco_child_fills_are_matched_to_fifo_ledger(tmp_path):
+    store = SQLiteOrderStore(str(tmp_path / "oco-ledger.db"))
+    store.record_trade_fills(
+        "BTCUSDT",
+        [{
+            "id": 41, "orderId": 401, "price": "51000", "qty": "0.00010",
+            "quoteQty": "5.1", "commission": "0.0051",
+            "commissionAsset": "USDT", "isBuyer": False, "isMaker": True, "time": 41000,
+        }],
+    )
+    with sqlite3.connect(tmp_path / "oco-ledger.db") as db:
+        db.execute(
+            """CREATE TABLE spot_oco_order_lists (
+                list_client_order_id TEXT PRIMARY KEY,
+                symbol TEXT NOT NULL,
+                above_order_id TEXT,
+                below_order_id TEXT,
+                response_json TEXT NOT NULL
+            )"""
+        )
+        db.execute(
+            """INSERT INTO spot_oco_order_lists
+               (list_client_order_id,symbol,above_order_id,below_order_id,response_json)
+               VALUES (?,?,?,?,?)""",
+            (
+                "mumin-oco-test", "BTCUSDT", "401", "402",
+                '{"orderReports":['
+                '{"orderId":401,"executedQty":"0.00010","status":"FILLED"},'
+                '{"orderId":402,"executedQty":"0","status":"CANCELED"}]}',
+            ),
+        )
+    assert store.unmatched_trade_order_ids() == []
+    assert store.order_fill_quantity_discrepancies() == []
