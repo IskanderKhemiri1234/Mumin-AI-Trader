@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+import mumin_trader.main as main_module
 from mumin_trader.main import app
 from scripts.run_continuous_paper import ContinuousPaperBot
 
@@ -104,7 +105,8 @@ def test_dashboard_page_exposes_live_control_center():
     assert 'id="control"' in page
     assert 'id="marketRows"' in page
     assert 'id="marketReconnect"' in page
-    assert "wss://stream.binance.com:9443/stream" in page
+    assert "/api/market" in page
+    assert "new WebSocket(" not in page
     assert "no fake browser-only start button" in page
 
 
@@ -176,3 +178,40 @@ def test_paper_worker_snapshot_reports_desired_state(monkeypatch, tmp_path):
     assert response.status_code == 200
     assert response.json()["paper_worker"]["status"] == "online"
     assert response.json()["paper_worker"]["desired_state"] == "RUNNING"
+
+
+
+def test_market_api_requires_dashboard_token(monkeypatch):
+    monkeypatch.delenv("DASHBOARD_ACCESS_TOKEN", raising=False)
+    response = TestClient(app).get("/api/market")
+    assert response.status_code == 503
+
+
+def test_market_api_returns_shared_server_stream(monkeypatch):
+    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    started = []
+
+    async def fake_start():
+        started.append(True)
+
+    async def fake_snapshot():
+        return {
+            "status": "live",
+            "source": "BINANCE_PUBLIC_SERVER_STREAM",
+            "updated_at": "2026-11-16T23:00:00+00:00",
+            "age_seconds": 0.1,
+            "assets": [
+                {"symbol": "BTCUSDT", "price": 90000.0, "change": 1.25}
+            ],
+        }
+
+    monkeypatch.setattr(main_module._market_stream, "start", fake_start)
+    monkeypatch.setattr(main_module._market_stream, "snapshot", fake_snapshot)
+    response = TestClient(app).get(
+        "/api/market", headers={"X-Dashboard-Token": "server-only-token"}
+    )
+
+    assert response.status_code == 200
+    assert started == [True]
+    assert response.json()["source"] == "BINANCE_PUBLIC_SERVER_STREAM"
+    assert response.json()["assets"][0]["symbol"] == "BTCUSDT"
