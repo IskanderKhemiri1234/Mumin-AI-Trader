@@ -1,9 +1,6 @@
 package com.mumin.aitrader
 
 import android.app.Activity
-import android.app.AlertDialog
-import android.app.DownloadManager
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -191,7 +188,8 @@ class UnifiedDashboardActivity : Activity() {
         if (uri.scheme != "https" || uri.host.isNullOrBlank()) return null
         if (uri.userInfo != null || uri.query != null || uri.fragment != null) return null
         if (uri.port != -1 && uri.port != 443) return null
-        if (uri.path.isNotBlank() && uri.path != "/") return null
+        val path = uri.path.orEmpty()
+        if (path.isNotBlank() && path != "/") return null
         return "https://${uri.host}"
     }
 
