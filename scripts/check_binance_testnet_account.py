@@ -4,7 +4,7 @@ import asyncio
 from decimal import Decimal
 
 from config.config import Settings, TradingEnvironment, TradingMode
-from mumin_trader.exchanges.binance.rest_client import BinanceSpotRESTClient
+from mumin_trader.exchanges.binance.rest_client import BinanceAPIError, BinanceSpotRESTClient
 
 
 async def main() -> None:
@@ -20,7 +20,8 @@ async def main() -> None:
 
     client = BinanceSpotRESTClient(settings)
     try:
-        await client.ping()
+        # Verify credentials with the signed, read-only account endpoint directly.
+        # A public ping can be blocked independently by Binance location eligibility.
         account = await client.account()
         balances = {
             str(item.get("asset", "")).upper(): (
@@ -31,7 +32,7 @@ async def main() -> None:
         }
         free, locked = balances.get("USDT", (Decimal("0"), Decimal("0")))
         total = free + locked
-        print("Binance Spot TESTNET account connection: OK")
+        print("Binance Spot TESTNET signed account verification: OK")
         print(f"Configured strategy capital ceiling: {settings.MAX_CAPITAL_ALLOCATION_USD} USDT")
         print(f"USDT free: {free}")
         print(f"USDT locked: {locked}")
@@ -39,6 +40,24 @@ async def main() -> None:
         print("Order submission: NOT ATTEMPTED (read-only verification)")
         if total < settings.MAX_CAPITAL_ALLOCATION_USD:
             print("NOTICE: Testnet USDT balance is below the configured 70 USDT ceiling.")
+    except BinanceAPIError as exc:
+        if exc.status_code == 451:
+            message = (
+                "Binance rejected this runner with HTTP 451 (restricted-location eligibility). "
+                "The signed account check did not complete; this result does not establish "
+                "whether the API credentials are valid. No order was submitted."
+            )
+        elif exc.status_code == 401:
+            message = (
+                "Binance rejected the signed account request with HTTP 401. Check the "
+                "Testnet API key/secret and USER DATA permission. No order was submitted."
+            )
+        else:
+            message = (
+                f"Binance signed account verification failed with HTTP {exc.status_code}. "
+                "No order was submitted."
+            )
+        raise SystemExit(message) from None
     finally:
         await client.close()
 
