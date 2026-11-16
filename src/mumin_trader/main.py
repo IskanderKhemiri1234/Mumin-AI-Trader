@@ -309,6 +309,14 @@ async def control_paper_worker(
     connection = sqlite3.connect(database, timeout=3)
     connection.row_factory = sqlite3.Row
     try:
+        table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_runtime_control'"
+        ).fetchone()
+        if table is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Paper worker does not support remote pause/resume yet.",
+            )
         row = connection.execute(
             """SELECT desired_state, heartbeat_at FROM bot_runtime_control WHERE id=1"""
         ).fetchone()
