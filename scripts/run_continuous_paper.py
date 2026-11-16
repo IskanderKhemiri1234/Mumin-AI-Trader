@@ -247,6 +247,20 @@ class ContinuousPaperBot:
             for name in ("candle_open", "candle_high", "candle_low", "candle_volume", "bid_depth_qty", "ask_depth_qty"):
                 if name not in market_columns:
                     db.execute(f"ALTER TABLE bot_market_ticks ADD COLUMN {name} TEXT NOT NULL DEFAULT '0'")
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS bot_runtime_control (
+                    id INTEGER PRIMARY KEY CHECK(id=1),
+                    desired_state TEXT NOT NULL CHECK(desired_state IN ('RUNNING','PAUSED')),
+                    requested_at TEXT NOT NULL,
+                    heartbeat_at TEXT,
+                    worker_instance_id TEXT
+                )"""
+            )
+            db.execute(
+                """INSERT OR IGNORE INTO bot_runtime_control
+                   (id, desired_state, requested_at) VALUES (1, 'RUNNING', ?)""",
+                (datetime.now(timezone.utc).isoformat(),),
+            )
             row = db.execute("SELECT initial_cash FROM bot_account WHERE id=1").fetchone()
             if row is None:
                 db.execute(
@@ -260,6 +274,22 @@ class ContinuousPaperBot:
                 raise RuntimeError(
                     "Configured initial capital differs from stored ledger; refusing reset."
                 )
+
+    def heartbeat(self, worker_id: str) -> str:
+        """Refresh the Paper worker heartbeat and return its durable desired state."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT desired_state FROM bot_runtime_control WHERE id=1"
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("Paper runtime control row is missing.")
+            db.execute(
+                """UPDATE bot_runtime_control
+                   SET worker_instance_id=?, heartbeat_at=? WHERE id=1""",
+                (worker_id, now),
+            )
+            return str(row["desired_state"])
 
     def finalize_database_batch(self) -> dict[str, object]:
         """Verify SQLite integrity and flush the WAL after a completed cycle batch."""
@@ -756,7 +786,17 @@ async def run_bot(
     last_report = loop.time()
     completed = 0
     try:
+        worker_id = f"paper-{os.getpid()}"
         while not stop.is_set() and (cycles is None or completed < cycles):
+            desired_state = bot.heartbeat(worker_id)
+            while desired_state == "PAUSED" and not stop.is_set():
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    pass
+                desired_state = bot.heartbeat(worker_id)
+            if stop.is_set():
+                break
             completed += 1
             if feed is None:
                 result = bot.step()
