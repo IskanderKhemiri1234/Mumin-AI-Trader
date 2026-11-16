@@ -34,6 +34,7 @@ def build_realized_pnl_report(
     total_fee_quote_mark = ZERO
     maker_count = taker_count = 0
     maker_fees_quote = taker_fees_quote = ZERO
+    maker_notional_quote = taker_notional_quote = ZERO
 
     for fill in ordered:
         symbol = str(fill["symbol"]).upper()
@@ -72,9 +73,11 @@ def build_realized_pnl_report(
         if is_maker:
             maker_count += 1
             maker_fees_quote += fee_quote_value
+            maker_notional_quote += quote_qty
         else:
             taker_count += 1
             taker_fees_quote += fee_quote_value
+            taker_notional_quote += quote_qty
         total_fee_quote_mark += fee_quote_value
         report = summaries.setdefault(symbol, {
             "realized_pnl_quote": ZERO,
@@ -145,6 +148,14 @@ def build_realized_pnl_report(
         open_cost = sum((lot["quantity"] * lot["unit_cost"] for lot in lots[base]), ZERO)
         report["open_quantity"] = open_qty
         report["open_cost_basis_quote"] = open_cost
+        report["average_entry_price"] = (
+            report["gross_buy_quote"] / report["gross_buy_quantity"]
+            if report["gross_buy_quantity"] > ZERO else ZERO
+        )
+        report["average_exit_price"] = (
+            report["gross_sell_quote"] / report["gross_sell_quantity"]
+            if report["gross_sell_quantity"] > ZERO else ZERO
+        )
         for key, value in list(report.items()):
             if isinstance(value, Decimal):
                 report[key] = str(value)
@@ -157,6 +168,14 @@ def build_realized_pnl_report(
         "fees_quote_equivalent_mark": str(total_fee_quote_mark),
         "maker_fees_quote_equivalent_mark": str(maker_fees_quote),
         "taker_fees_quote_equivalent_mark": str(taker_fees_quote),
+        "maker_notional_quote": str(maker_notional_quote),
+        "taker_notional_quote": str(taker_notional_quote),
+        "maker_effective_fee_rate_mark": str(
+            maker_fees_quote / maker_notional_quote if maker_notional_quote > ZERO else ZERO
+        ),
+        "taker_effective_fee_rate_mark": str(
+            taker_fees_quote / taker_notional_quote if taker_notional_quote > ZERO else ZERO
+        ),
         "maker_fills": maker_count,
         "taker_fills": taker_count,
         "symbols": summaries,
