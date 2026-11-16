@@ -411,36 +411,83 @@ async def control_paper_worker(
                 status_code=409,
                 detail="Paper worker does not support remote pause/resume yet.",
             )
+        columns = {
+            item["name"] for item in connection.execute(
+                "PRAGMA table_info(bot_runtime_control)"
+            ).fetchall()
+        }
+        selected = [
+            name for name in ("desired_state", "heartbeat_at", "supervisor_heartbeat_at",
+                              "worker_instance_id")
+            if name in columns
+        ]
         row = connection.execute(
-            """SELECT desired_state, heartbeat_at FROM bot_runtime_control WHERE id=1"""
+            "SELECT " + ", ".join(selected) + " FROM bot_runtime_control WHERE id=1"
         ).fetchone()
         if row is None:
             raise HTTPException(
                 status_code=409,
-                detail="Paper worker does not support remote pause/resume yet.",
+                detail="Paper worker manager does not support remote control yet.",
             )
-        heartbeat = row["heartbeat_at"]
-        try:
-            stamp = datetime.fromisoformat(heartbeat) if heartbeat else None
-            age = (datetime.now(timezone.utc) - stamp).total_seconds() if stamp else None
-        except ValueError:
-            age = None
-        if age is None or age > 90 or age < -5:
+
+        def heartbeat_is_live(value: str | None) -> bool:
+            if not value:
+                return False
+            try:
+                stamp = datetime.fromisoformat(value)
+                age = (datetime.now(timezone.utc) - stamp).total_seconds()
+                return -5 <= age <= 90
+            except (TypeError, ValueError):
+                return False
+
+        worker_live = (
+            heartbeat_is_live(row["heartbeat_at"])
+            if "heartbeat_at" in columns else False
+        )
+        supervisor_live = (
+            heartbeat_is_live(row["supervisor_heartbeat_at"])
+            if "supervisor_heartbeat_at" in columns else False
+        )
+        if not supervisor_live and not worker_live:
             raise HTTPException(
                 status_code=409,
-                detail="Paper worker heartbeat is stale; refusing to queue a control request.",
+                detail=(
+                    "Paper supervisor and worker heartbeats are stale; "
+                    "refusing to queue a control request."
+                ),
             )
+
         desired = "PAUSED" if request.action == "pause" else "RUNNING"
         now = datetime.now(timezone.utc).isoformat()
         connection.execute(
             """UPDATE bot_runtime_control SET desired_state=?, requested_at=? WHERE id=1""",
             (desired, now),
         )
+        audit_table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_runtime_audit'"
+        ).fetchone()
+        if audit_table is not None:
+            connection.execute(
+                """INSERT INTO bot_runtime_audit
+                   (event_type, actor, desired_state, worker_instance_id, detail, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    "CONTROL_REQUESTED",
+                    "dashboard_authenticated",
+                    desired,
+                    row["worker_instance_id"] if "worker_instance_id" in columns else None,
+                    f"action={request.action}",
+                    now,
+                ),
+            )
         connection.commit()
         return {
             "status": "accepted",
             "desired_state": desired,
-            "message": "Paper worker will apply this request at its next safe cycle boundary.",
+            "message": (
+                "Persistent supervisor will start or stop the Paper worker "
+                "at its next process-control interval."
+            ),
             "execution_authorized": False,
         }
     finally:
