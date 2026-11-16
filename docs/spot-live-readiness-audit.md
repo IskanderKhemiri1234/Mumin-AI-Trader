@@ -73,3 +73,14 @@ Scope: current `main` Paper engine plus the isolated Testnet implementation prop
 - A previously persisted OCO list is queried again before returning its state; a stale local `EXECUTING` snapshot is not treated as current exchange truth.
 - Mocked tests added for create-response loss followed by list recovery without duplicate POST, cancel-response loss followed by exchange query before retry, partial-fill halt, and persistence of both child order identifiers.
 - These remain simulated transport tests. They do not establish that Binance Spot Testnet accepted an OCO, canceled its sibling, or produced the same fills/accounting as the local ledger.
+
+
+### Supervised Testnet lifecycle runner (2026-11-16; branch-only)
+- Added `scripts/binance_spot_testnet_lifecycle.py` with read-only `inspect`, explicitly confirmed `run`, and read-only `watch` commands.
+- The run is pinned to the Spot Testnet REST base URL, requires both Testnet execution gates and both Mainnet/live flags false, uses a per-run SQLite ledger, and requires the literal `TESTNET_ONLY` confirmation.
+- The runner pre-validates the BUY and protective SELL OCO before placing the BUY; after execution it sizes OCO from actual `myTrades` net base quantity, accounting for base-asset commissions and LOT_SIZE step rounding.
+- It records the BUY order ID, OCO `orderListId`, both child order IDs/client IDs, child status reports, exact `myTrades` fills, FIFO realized-PnL report, and final account reconciliation. Evidence is stored locally with restrictive directory/file permissions; credential/signature fields and known credential values are redacted.
+- An OCO that has not triggered by the watch timeout is deliberately left active as protection and can be monitored using the `watch` command; it is not canceled merely to make a test appear complete. A partial fill is a review/NO-GO state. Residual unprotected dust or open FIFO inventory prevents a verified result.
+- OCO child order IDs are now included in unmatched-fill and executed-quantity reconciliation, rather than being incorrectly classified as trades without local intents.
+- CI on commit `60dcca3271bc020f7e019680bf3f6fed841a2425`: 126 tests passed and Ruff passed. This is software/MockTransport evidence only.
+- **No real Spot Testnet BUY, SELL, or OCO has been submitted by this work.** Operator execution and exchange-generated evidence are still pending; Mainnet remains NO-GO.
