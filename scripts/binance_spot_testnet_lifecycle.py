@@ -549,6 +549,17 @@ async def inspect_market(args: argparse.Namespace) -> int:
         ticker = await client._ticker_price(symbol)
         metadata = await client._exchange_symbol(symbol)
         filters = {item.get("filterType"): item for item in metadata.get("filters", [])}
+        fee_readiness = None
+        if args.fee_buy_notional_usdt is not None or args.fee_sell_notional_usdt is not None:
+            if args.fee_buy_notional_usdt is None or args.fee_sell_notional_usdt is None:
+                raise SpotExecutionError(
+                    "Both --fee-buy-notional-usdt and --fee-sell-notional-usdt are required together."
+                )
+            fee_readiness = await client._bnb_fee_readiness(
+                symbol=symbol,
+                buy_notional=Decimal(args.fee_buy_notional_usdt),
+                sell_notional=Decimal(args.fee_sell_notional_usdt),
+            )
         result = {
             "environment": "BINANCE_SPOT_TESTNET",
             "rest_base_url": TESTNET_REST_BASE_URL,
@@ -563,6 +574,7 @@ async def inspect_market(args: argparse.Namespace) -> int:
             "notional_filter": filters.get("NOTIONAL") or filters.get("MIN_NOTIONAL"),
             "configured_min_trade_usdt": str(settings.MIN_TRADE_ALLOCATION_USD),
             "configured_max_trade_usdt": str(settings.MAX_TRADE_ALLOCATION_USD),
+            "bnb_fee_readiness": fee_readiness,
             "matching_engine_order_sent": False,
             "mainnet_used": False,
             "secrets_written": False,
@@ -656,6 +668,14 @@ def build_parser() -> argparse.ArgumentParser:
     inspect = commands.add_parser("inspect", help="Read the current Testnet price and filters; sends no orders.")
     inspect.add_argument("--symbol", default="BTCUSDT")
     inspect.add_argument("--database", default="data/testnet-inspect.sqlite3")
+    inspect.add_argument(
+        "--fee-buy-notional-usdt",
+        help="Optional read-only BNB fee preflight BUY notional; must be paired with --fee-sell-notional-usdt.",
+    )
+    inspect.add_argument(
+        "--fee-sell-notional-usdt",
+        help="Optional read-only BNB fee preflight worst OCO exit notional; sends no orders.",
+    )
 
     watch = commands.add_parser("watch", help="Continue monitoring a previously placed OCO; sends no orders.")
     watch.add_argument("--symbol", required=True)
