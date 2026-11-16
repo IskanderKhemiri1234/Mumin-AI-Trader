@@ -403,6 +403,15 @@ class SQLiteOrderStore:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def get_trade_fill(self, symbol: str, trade_id: int) -> dict[str, Any] | None:
+        with self._connection() as db:
+            row = db.execute(
+                """SELECT symbol,trade_id,commission,commission_asset,commission_quote_value
+                   FROM spot_trade_fills WHERE symbol=? AND trade_id=?""",
+                (symbol.upper(), int(trade_id)),
+            ).fetchone()
+            return dict(row) if row else None
+
     def set_commission_quote_value(self, symbol: str, trade_id: int, value: str) -> None:
         amount = Decimal(value)
         if not amount.is_finite() or amount < 0:
