@@ -13,6 +13,26 @@ from mumin_trader.exchanges.binance.spot_testnet_execution import (
 )
 
 
+def validate_oco_leg_notionals(
+    quantity: Decimal,
+    take_profit_price: Decimal,
+    stop_price: Decimal,
+    minimum: Decimal,
+    maximum: Decimal = Decimal("0"),
+) -> None:
+    """Validate both OCO child notionals independently against symbol limits."""
+    for leg_name, price in (("take-profit", take_profit_price), ("stop", stop_price)):
+        notional = quantity * price
+        if minimum > 0 and notional < minimum:
+            raise SpotExecutionError(
+                f"OCO {leg_name} leg notional is below the symbol minimum-notional filter."
+            )
+        if maximum > 0 and notional > maximum:
+            raise SpotExecutionError(
+                f"OCO {leg_name} leg notional exceeds the symbol maximum-notional filter."
+            )
+
+
 class SQLiteOCOOrderStore:
     """Durable OCO list intents, exchange IDs, and lifecycle state."""
 
@@ -223,26 +243,20 @@ class BinanceSpotTestnetOCO:
             raise SpotExecutionError("SELL OCO requires take-profit price > last price > stop trigger.")
         if stop_limit is not None and stop_limit > stop:
             raise SpotExecutionError("SELL stop-limit price must not exceed its stop trigger.")
-        # Validate each OCO leg independently. Apply the minimum conservatively
-        # even when the stop leg is a stop-market order.
+        # Validate both child legs independently, conservatively applying the
+        # minimum even when the stop leg is a stop-market order.
         notional_filters = [
             item for item in (filters.get("NOTIONAL"), filters.get("MIN_NOTIONAL"))
             if isinstance(item, dict)
         ]
-        leg_prices = [("take-profit", tp), ("stop", stop_limit or stop)]
         for notional_filter in notional_filters:
-            minimum = Decimal(str(notional_filter.get("minNotional", "0")))
-            maximum = Decimal(str(notional_filter.get("maxNotional", "0")))
-            for leg_name, leg_price in leg_prices:
-                leg_notional = qty * leg_price
-                if minimum > 0 and leg_notional < minimum:
-                    raise SpotExecutionError(
-                        f"OCO {leg_name} leg notional is below the symbol minimum-notional filter."
-                    )
-                if maximum > 0 and leg_notional > maximum:
-                    raise SpotExecutionError(
-                        f"OCO {leg_name} leg notional exceeds the symbol maximum-notional filter."
-                    )
+            validate_oco_leg_notionals(
+                qty,
+                tp,
+                stop_limit or stop,
+                Decimal(str(notional_filter.get("minNotional", "0"))),
+                Decimal(str(notional_filter.get("maxNotional", "0"))),
+            )
         if stop_type == "TAKE_PROFIT_LIMIT":
             raise SpotExecutionError("The supported protective OCO uses LIMIT_MAKER for the take-profit leg.")
         return {
