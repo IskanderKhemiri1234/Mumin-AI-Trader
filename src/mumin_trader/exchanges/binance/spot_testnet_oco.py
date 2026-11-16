@@ -345,16 +345,36 @@ class BinanceSpotTestnetOCO:
             raise
         if not isinstance(response, dict):
             return None
+
+        # GET /api/v3/orderList returns the parent list and child order IDs,
+        # but not live child execution quantities/statuses. Query each child
+        # order independently before deciding whether the residual is protected.
+        child_reports: list[dict[str, Any]] = []
+        for child in response.get("orders", []):
+            order_id = child.get("orderId")
+            if order_id is None:
+                raise SpotOrderOutcomeUnknown(
+                    "OCO list response omitted a child orderId; protection state is unresolved.",
+                )
+            report = await self.execution._request(
+                "GET", "/api/v3/order",
+                {"symbol": symbol.upper(), "orderId": str(order_id)},
+                signed=True,
+            )
+            if not isinstance(report, dict):
+                raise SpotOrderOutcomeUnknown(
+                    "OCO child order query returned an invalid response.",
+                )
+            child_reports.append(report)
+            await self.execution._sync_fills_if_needed(report)
+        response["orderReports"] = child_reports
+
+        state = self._state(response)
         local = self.store.get(list_client_order_id)
         if local is not None:
-            state = self._state(response)
             self.store.update(
                 list_client_order_id, state=state, response=response,
             )
-        else:
-            state = self._state(response)
-        for order in response.get("orderReports", []):
-            await self.execution._sync_fills_if_needed(order)
         if state == "PARTIAL_FILL_REVIEW":
             self.execution.store.halt("OCO_PARTIAL_FILL_REVIEW")
         return response
