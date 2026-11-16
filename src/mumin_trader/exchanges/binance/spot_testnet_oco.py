@@ -145,6 +145,19 @@ class SQLiteOCOOrderStore:
             ).fetchone()
             return dict(row) if row else None
 
+    def child_client_order_ids(self) -> set[str]:
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT above_client_order_id,below_client_order_id
+                   FROM spot_oco_order_lists"""
+            ).fetchall()
+        return {
+            str(value)
+            for row in rows
+            for value in (row["above_client_order_id"], row["below_client_order_id"])
+            if value
+        }
+
 
 class BinanceSpotTestnetOCO:
     """Narrow, fail-closed SELL protective OCO adapter for Binance Spot Testnet."""
@@ -341,7 +354,7 @@ class BinanceSpotTestnetOCO:
         try:
             response = await self.execution._request(
                 "GET", "/api/v3/orderList",
-                {"symbol": symbol.upper(), "origClientOrderId": list_client_order_id},
+                {"origClientOrderId": list_client_order_id},
                 signed=True,
             )
         except SpotExecutionError as exc:
