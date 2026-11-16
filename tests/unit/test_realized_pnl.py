@@ -32,6 +32,8 @@ def test_fifo_realized_pnl_includes_quote_and_base_fees_and_maker_taker():
     assert report["taker_fills"] == 1
     assert Decimal(report["maker_effective_fee_rate_mark"]) == Decimal("0.001")
     assert Decimal(report["taker_effective_fee_rate_mark"]) == Decimal("0.002")
+    assert Decimal(report["symbols"]["BTCUSDT"]["average_entry_price"]) == Decimal("100")
+    assert Decimal(report["symbols"]["BTCUSDT"]["average_exit_price"]) == Decimal("120")
     assert report["complete"] is True
 
 
