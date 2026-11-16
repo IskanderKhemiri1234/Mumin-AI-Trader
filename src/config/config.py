@@ -85,11 +85,15 @@ class Settings(BaseSettings):
 
     @property
     def rest_base_url(self) -> str:
-        return "https://testnet.binance.vision" if self.TRADING_ENV == TradingEnvironment.TESTNET else "https://api.binance.com"
+        if self.TRADING_ENV is not TradingEnvironment.TESTNET:
+            raise ValueError("Binance Mainnet REST access is hard-blocked in this release.")
+        return "https://testnet.binance.vision"
 
     @property
     def websocket_base_url(self) -> str:
-        return "wss://stream.testnet.binance.vision/ws" if self.TRADING_ENV == TradingEnvironment.TESTNET else "wss://stream.binance.com:9443/ws"
+        if self.TRADING_ENV is not TradingEnvironment.TESTNET:
+            raise ValueError("Binance Mainnet WebSocket access is hard-blocked in this release.")
+        return "wss://stream.testnet.binance.vision/ws"
 
     @property
     def watchlist_symbols(self) -> list[str]:
