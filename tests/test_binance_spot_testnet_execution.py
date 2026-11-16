@@ -801,8 +801,10 @@ async def test_oco_partial_fill_syncs_real_exchange_trade_fills(tmp_path) -> Non
         "quoteQty": "2.55", "commission": "0.00255", "commissionAsset": "USDT",
         "isBuyer": False, "isMaker": True, "time": 1_700_000_000_000,
     }
+    oco_submitted = False
 
     async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal oco_submitted
         seen.append(request)
         if request.url.path == "/api/v3/time":
             return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
@@ -817,6 +819,7 @@ async def test_oco_partial_fill_syncs_real_exchange_trade_fills(tmp_path) -> Non
         if request.url.path == "/api/v3/openOrders":
             return httpx.Response(200, json=[])
         if request.url.path == "/api/v3/orderList/oco" and request.method == "POST":
+            oco_submitted = True
             return httpx.Response(200, json={
                 "orderListId": 91, "contingencyType": "OCO",
                 "listStatusType": "EXEC_STARTED", "listOrderStatus": "EXECUTING",
@@ -833,7 +836,7 @@ async def test_oco_partial_fill_syncs_real_exchange_trade_fills(tmp_path) -> Non
                 ],
             })
         if request.url.path == "/api/v3/myTrades":
-            return httpx.Response(200, json=[trade] if request.url.params.get("fromId") == "0" else [])
+            return httpx.Response(200, json=[trade] if oco_submitted and request.url.params.get("fromId") == "0" else [])
         return httpx.Response(404, json={"code": -2013, "msg": "not found"})
 
     client = BinanceSpotTestnetExecution(
