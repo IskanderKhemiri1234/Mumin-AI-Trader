@@ -106,3 +106,73 @@ def test_dashboard_page_exposes_live_control_center():
     assert 'id="marketReconnect"' in page
     assert "wss://stream.binance.com:9443/stream" in page
     assert "no fake browser-only start button" in page
+
+
+
+def test_paper_worker_pause_and_resume_require_live_heartbeat(monkeypatch, tmp_path):
+    database = tmp_path / "paper.sqlite3"
+    bot = ContinuousPaperBot(str(database))
+    bot.heartbeat("test-paper-worker")
+    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
+    monkeypatch.setenv("TRADING_MODE", "PAPER")
+    monkeypatch.setenv("TRADING_ENV", "TESTNET")
+    monkeypatch.setenv("ALLOW_MAINNET", "false")
+    monkeypatch.setenv("LIVE_TRADING_ENABLED", "false")
+    client = TestClient(app)
+    headers = {"X-Dashboard-Token": "server-only-token"}
+
+    paused = client.post("/api/paper-control", json={"action": "pause"}, headers=headers)
+    assert paused.status_code == 200
+    assert paused.json()["desired_state"] == "PAUSED"
+    assert paused.json()["execution_authorized"] is False
+
+    assert bot.heartbeat("test-paper-worker") == "PAUSED"
+    resumed = client.post("/api/paper-control", json={"action": "resume"}, headers=headers)
+    assert resumed.status_code == 200
+    assert resumed.json()["desired_state"] == "RUNNING"
+    assert bot.heartbeat("test-paper-worker") == "RUNNING"
+
+
+def test_paper_worker_controls_reject_stale_or_missing_heartbeat(monkeypatch, tmp_path):
+    database = tmp_path / "paper.sqlite3"
+    ContinuousPaperBot(str(database))
+    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
+    response = TestClient(app).post(
+        "/api/paper-control",
+        json={"action": "pause"},
+        headers={"X-Dashboard-Token": "server-only-token"},
+    )
+    assert response.status_code == 409
+    assert "heartbeat is stale" in response.json()["detail"]
+
+
+def test_paper_worker_controls_reject_live_or_mainnet_configuration(monkeypatch, tmp_path):
+    database = tmp_path / "paper.sqlite3"
+    bot = ContinuousPaperBot(str(database))
+    bot.heartbeat("test-paper-worker")
+    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
+    monkeypatch.setenv("TRADING_MODE", "LIVE")
+    response = TestClient(app).post(
+        "/api/paper-control",
+        json={"action": "pause"},
+        headers={"X-Dashboard-Token": "server-only-token"},
+    )
+    assert response.status_code == 409
+    assert "TRADING_MODE=PAPER" in response.json()["detail"]
+
+
+def test_paper_worker_snapshot_reports_desired_state(monkeypatch, tmp_path):
+    database = tmp_path / "paper.sqlite3"
+    bot = ContinuousPaperBot(str(database))
+    bot.heartbeat("test-paper-worker")
+    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
+    response = TestClient(app).get(
+        "/api/dashboard", headers={"X-Dashboard-Token": "server-only-token"}
+    )
+    assert response.status_code == 200
+    assert response.json()["paper_worker"]["status"] == "online"
+    assert response.json()["paper_worker"]["desired_state"] == "RUNNING"
