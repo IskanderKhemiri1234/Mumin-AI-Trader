@@ -200,7 +200,13 @@ async def watch_oco(
 
 
 async def run_cycle(args: argparse.Namespace) -> int:
-    settings = Settings()
+    if args.testnet_max_order_usdt is None:
+        settings = Settings()
+    else:
+        testnet_cap = Decimal(args.testnet_max_order_usdt)
+        if not testnet_cap.is_finite() or testnet_cap <= 0 or testnet_cap > Decimal("6.00"):
+            raise SpotExecutionError("The Testnet-only order-cap override must be between 0 and 6.00 USDT.")
+        settings = Settings(MAX_TRADE_ALLOCATION_USD=testnet_cap)
     require_testnet(settings)
     if args.confirm_testnet_cycle != "TESTNET_ONLY":
         raise SpotExecutionError("Explicit TESTNET_ONLY confirmation is required.")
@@ -234,6 +240,8 @@ async def run_cycle(args: argparse.Namespace) -> int:
         "environment": "BINANCE_SPOT_TESTNET",
         "rest_base_url": TESTNET_REST_BASE_URL,
         "symbol": symbol,
+        "testnet_max_order_usdt": str(settings.MAX_TRADE_ALLOCATION_USD),
+        "testnet_cap_override_used": args.testnet_max_order_usdt is not None,
         "buy_client_order_id": buy_client_id,
         "oco_list_client_order_id": list_client_id,
         "database": str(database),
@@ -562,6 +570,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--buy-timeout-seconds", type=int, default=120)
     run.add_argument("--oco-timeout-seconds", type=int, default=900)
     run.add_argument("--poll-seconds", type=float, default=2)
+    run.add_argument(
+        "--testnet-max-order-usdt",
+        help="Optional one-run Testnet-only cap override, hard-limited to 6.00 USDT; does not change .env or Paper limits.",
+    )
     run.add_argument("--evidence-root", default="artifacts/binance-spot-testnet-evidence")
     run.add_argument("--confirm-testnet-cycle", required=True, choices=("TESTNET_ONLY",))
 
