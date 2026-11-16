@@ -53,7 +53,9 @@ def build_realized_pnl_report(
         values = (price, qty, quote_qty, commission)
         if any(not value.is_finite() or value < ZERO for value in values) or price <= ZERO or qty <= ZERO:
             raise RealizedPnLError(f"{symbol}:{fill['trade_id']}: invalid fill amount")
-        if fee_asset == quote:
+        if commission == ZERO:
+            fee_quote_value = ZERO
+        elif fee_asset == quote:
             fee_quote_value = commission
         elif fee_asset == base:
             fee_quote_value = commission * price
@@ -63,8 +65,6 @@ def build_realized_pnl_report(
             if fee_quote_value is None or not fee_quote_value.is_finite() or fee_quote_value < ZERO:
                 unresolved.append(f"{symbol}:{fill['trade_id']}:missing_historical_BNB_fee_valuation")
                 continue
-        elif commission == ZERO:
-            fee_quote_value = ZERO
         else:
             unresolved.append(f"{symbol}:{fill['trade_id']}:unsupported_fee_asset:{fee_asset}")
             continue
