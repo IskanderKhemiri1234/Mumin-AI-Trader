@@ -28,7 +28,7 @@ def report_geo_block_skip() -> None:
                 "### Binance Spot Testnet account check: skipped (HTTP 451)\n\n"
                 "- Reason: GitHub-hosted runner rejected by Binance restricted-location eligibility.\n"
                 "- Credential validity: **not established by this run**.\n"
-                "- Order submission: **not attempted**.\n"
+                "- Order submission: **not attempted; no order was submitted**.\n"
                 "- Required CI compile, tests, lint and Paper smoke remain independent and mandatory.\n"
             )
 
