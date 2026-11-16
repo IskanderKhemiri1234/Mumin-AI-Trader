@@ -121,3 +121,55 @@ The project is **not approved for real-money trading**. Mainnet is hard-blocked 
 3. Review the log for the connection result and Testnet USDT free/locked balance.
 
 This workflow calls Spot Testnet ping and signed account-read endpoints only. It never submits an order. Keep withdrawals, margin, futures, and Mainnet disabled. Do not paste credentials into issues, pull requests, source files, or chat.
+
+
+### Supervised BUY → OCO → FIFO Testnet evidence runner
+
+The lifecycle runner is a manual, one-cycle operator tool. It is not connected to the strategy loop and cannot select a Mainnet host.
+
+Before using it, install the project in Termux with Python 3.11+ and configure the private environment with dedicated Spot Testnet credentials. Set these non-secret switches in the private `.env` file:
+
+```dotenv
+TRADING_ENV=TESTNET
+TRADING_MODE=TESTNET
+ALLOW_MAINNET=false
+LIVE_TRADING_ENABLED=false
+TESTNET_ORDER_PREFLIGHT_ENABLED=true
+TESTNET_SPOT_EXECUTION_ENABLED=true
+```
+
+Keep `BINANCE_API_KEY` and `BINANCE_API_SECRET` in that private environment only. Never paste them into a command, source file, GitHub issue, or chat. Restrict the file with `chmod 600 .env`.
+
+First inspect the live Spot Testnet price and symbol filters. This is read-only:
+
+```bash
+python scripts/binance_spot_testnet_lifecycle.py inspect --symbol BTCUSDT
+```
+
+Then run one explicitly confirmed cycle. Supply a quantity and prices that satisfy the returned LOT_SIZE, PRICE_FILTER and NOTIONAL filters and the configured 5 USDT per-trade ceiling:
+
+```bash
+python scripts/binance_spot_testnet_lifecycle.py run \
+  --symbol BTCUSDT \
+  --quantity YOUR_VALID_QUANTITY \
+  --buy-price YOUR_BUY_LIMIT_PRICE \
+  --take-profit-price YOUR_TAKE_PROFIT_PRICE \
+  --stop-price YOUR_STOP_TRIGGER_PRICE \
+  --confirm-testnet-cycle TESTNET_ONLY
+```
+
+The runner performs a clean initial reconciliation, validates BUY and protective OCO parameters before the BUY, submits one LIMIT BUY, synchronizes actual `myTrades`, computes the net base quantity after base-asset commission, and places a protective SELL OCO. It polls both OCO child orders and records `orderListId`, each child `orderId`/client ID, exchange statuses, exact fills, FIFO report, and final account reconciliation.
+
+If neither OCO leg fills before the default 15-minute watch window, the runner deliberately leaves the protective OCO active rather than canceling protection. It prints the database path, evidence directory and `listClientOrderId`. Continue monitoring that same list without placing another order:
+
+```bash
+python scripts/binance_spot_testnet_lifecycle.py watch \
+  --symbol BTCUSDT \
+  --list-client-order-id THE_PRINTED_LIST_CLIENT_ORDER_ID \
+  --database THE_PRINTED_DATABASE_PATH \
+  --evidence-dir THE_PRINTED_EVIDENCE_DIRECTORY
+```
+
+Evidence is saved locally under `artifacts/binance-spot-testnet-evidence/` with restrictive directory/file permissions. The evidence contains exchange account balances, order responses and trade fills; treat it as private account data and do not commit or upload it publicly. API key/secret/signature fields are explicitly excluded from evidence and console output.
+
+A run is marked `TESTNET_CYCLE_VERIFIED` only when one OCO child is FILLED, its sibling is CANCELED/EXPIRED, both child fill totals match the exchange reports, FIFO is complete, and final reconciliation has no discrepancies. A timeout, partial fill, unresolved response, or accounting mismatch remains NO-GO and requires operator review. The runner never enables Mainnet or clears a persistent halt. A successful Testnet cycle is evidence for this test only, not permission to trade real funds or a guarantee of future performance.
