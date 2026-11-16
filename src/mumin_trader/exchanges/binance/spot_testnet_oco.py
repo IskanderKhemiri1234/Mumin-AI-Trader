@@ -94,7 +94,7 @@ class SQLiteOCOOrderStore:
     ) -> None:
         allowed = {
             "SUBMITTING", "UNKNOWN", "EXECUTING", "ALL_DONE", "CANCEL_PENDING",
-            "CANCELED", "REJECT", "PREPARED",
+            "CANCELED", "REJECT", "PREPARED", "PARTIAL_FILL_REVIEW",
         }
         if state not in allowed:
             raise SpotExecutionError(f"Unsupported OCO list state: {state}")
@@ -263,16 +263,29 @@ class BinanceSpotTestnetOCO:
             self.store.update(list_client_order_id, state="UNKNOWN", response=response if isinstance(response, dict) else {},
                               error="OCO response omitted order-list or child-order identifiers.")
             raise SpotOrderOutcomeUnknown("OCO response is incomplete; reconcile order list before any retry.")
-        self.store.update(list_client_order_id, state=self._state(response), response=response)
+        state = self._state(response)
+        self.store.update(list_client_order_id, state=state, response=response)
         for order in response.get("orderReports", []):
             await api._sync_fills_if_needed(order)
+        if state == "PARTIAL_FILL_REVIEW":
+            api.store.halt("OCO_PARTIAL_FILL_REVIEW")
         return response
 
     @staticmethod
     def _state(response: dict[str, Any]) -> str:
+        reports = response.get("orderReports", [])
+        # A partial execution changes the amount of base asset still exposed.
+        # Do not label the remainder protected until both child orders and the
+        # exchange account have been reconciled after the partial fill.
+        if any(
+            str(item.get("status", "")).upper() == "PARTIALLY_FILLED"
+            and Decimal(str(item.get("executedQty", "0"))) > 0
+            for item in reports
+        ):
+            return "PARTIAL_FILL_REVIEW"
+
         status = str(response.get("listOrderStatus", "")).upper()
         if status == "ALL_DONE":
-            reports = response.get("orderReports", [])
             child_states = {str(item.get("status", "")).upper() for item in reports}
             if child_states and child_states <= {"CANCELED", "EXPIRED", "REJECTED"}:
                 return "CANCELED"
@@ -296,11 +309,16 @@ class BinanceSpotTestnetOCO:
             return None
         local = self.store.get(list_client_order_id)
         if local is not None:
+            state = self._state(response)
             self.store.update(
-                list_client_order_id, state=self._state(response), response=response,
+                list_client_order_id, state=state, response=response,
             )
+        else:
+            state = self._state(response)
         for order in response.get("orderReports", []):
             await self.execution._sync_fills_if_needed(order)
+        if state == "PARTIAL_FILL_REVIEW":
+            self.execution.store.halt("OCO_PARTIAL_FILL_REVIEW")
         return response
 
     async def cancel_order_list(
@@ -337,7 +355,10 @@ class BinanceSpotTestnetOCO:
             self.store.update(list_client_order_id, state="UNKNOWN",
                               error="OCO cancel outcome uncertain; query order list before retry.")
             raise SpotOrderOutcomeUnknown("OCO cancellation outcome is unknown; query before retry.") from exc
-        self.store.update(list_client_order_id, state=self._state(response), response=response)
+        state = self._state(response)
+        self.store.update(list_client_order_id, state=state, response=response)
         for order in response.get("orderReports", []):
             await self.execution._sync_fills_if_needed(order)
+        if state == "PARTIAL_FILL_REVIEW":
+            self.execution.store.halt("OCO_PARTIAL_FILL_REVIEW")
         return response
