@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+from contextlib import asynccontextmanager
 import os
 import sqlite3
 from datetime import datetime, timezone
@@ -23,13 +24,23 @@ DASHBOARD_FILE = PROJECT_ROOT / "dashboard" / "index.html"
 DEFAULT_PAPER_DB = PROJECT_ROOT / "data" / "mumin_public_paper.db"
 
 
+_market_stream = MarketStreamService()
+
+
+@asynccontextmanager
+async def app_lifespan(_app: FastAPI):
+    try:
+        yield
+    finally:
+        await _market_stream.close()
+
+
 app = FastAPI(
     title="Mumin AI Trader",
     version="0.2.0",
     description="Private, read-only trading operations dashboard and safety-first Spot research service.",
+    lifespan=app_lifespan,
 )
-
-_market_stream = MarketStreamService()
 
 
 def _dashboard_database() -> Path:
@@ -388,11 +399,6 @@ async def market_snapshot(
     _dashboard_access_token(x_dashboard_token)
     await _market_stream.start()
     return await _market_stream.snapshot()
-
-
-@app.on_event("shutdown")
-async def stop_market_stream() -> None:
-    await _market_stream.close()
 
 
 @app.get("/api/dashboard")
