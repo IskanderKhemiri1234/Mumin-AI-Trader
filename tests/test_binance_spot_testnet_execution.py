@@ -738,7 +738,12 @@ async def test_modern_oco_uses_order_list_endpoint_and_persists_both_legs(tmp_pa
         )
         assert result["orderListId"] == 88
         assert client.oco.store.get("mumin-oco-001")["state"] == "EXECUTING"
-        assert client.oco.store.get("mumin-oco-001")["order_list_id"] == "88"
+        saved_oco = client.oco.store.get("mumin-oco-001")
+        assert saved_oco["order_list_id"] == "88"
+        assert saved_oco["above_order_id"] == "801"
+        assert saved_oco["below_order_id"] == "802"
+        assert saved_oco["above_client_order_id"] == "tp-child"
+        assert saved_oco["below_client_order_id"] == "sl-child"
         assert sum(req.method == "POST" and req.url.path == "/api/v3/orderList/oco" for req in seen) == 1
         assert not any(req.url.path == "/api/v3/order/oco" for req in seen)
         duplicate = await client.oco.place_sell_oco(
