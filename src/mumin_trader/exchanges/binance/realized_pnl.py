@@ -35,6 +35,7 @@ def build_realized_pnl_report(
     maker_count = taker_count = 0
     maker_fees_quote = taker_fees_quote = ZERO
     maker_notional_quote = taker_notional_quote = ZERO
+    commission_amounts_by_asset: dict[str, Decimal] = defaultdict(lambda: ZERO)
 
     for fill in ordered:
         symbol = str(fill["symbol"]).upper()
@@ -54,6 +55,7 @@ def build_realized_pnl_report(
         values = (price, qty, quote_qty, commission)
         if any(not value.is_finite() or value < ZERO for value in values) or price <= ZERO or qty <= ZERO:
             raise RealizedPnLError(f"{symbol}:{fill['trade_id']}: invalid fill amount")
+        commission_amounts_by_asset[fee_asset] += commission
         if commission == ZERO:
             fee_quote_value = ZERO
         elif fee_asset == quote:
@@ -166,6 +168,9 @@ def build_realized_pnl_report(
         "fee_valuation": "quote/base exact arithmetic; BNB uses stored historical 1m candle close mark",
         "realized_pnl_quote": str(total_realized),
         "fees_quote_equivalent_mark": str(total_fee_quote_mark),
+        "commission_amounts_by_asset": {
+            asset: str(amount) for asset, amount in sorted(commission_amounts_by_asset.items())
+        },
         "maker_fees_quote_equivalent_mark": str(maker_fees_quote),
         "taker_fees_quote_equivalent_mark": str(taker_fees_quote),
         "maker_notional_quote": str(maker_notional_quote),
