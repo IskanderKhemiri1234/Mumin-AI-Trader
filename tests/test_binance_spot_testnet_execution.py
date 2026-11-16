@@ -880,3 +880,128 @@ def test_oco_all_done_without_any_fill_is_canceled() -> None:
         ],
     }
     assert BinanceSpotTestnetOCO._state(canceled) == "CANCELED"
+
+
+@pytest.mark.asyncio
+async def test_oco_create_timeout_recovers_existing_list_without_duplicate_post(tmp_path) -> None:
+    seen: list[httpx.Request] = []
+    post_attempts = 0
+    list_payload = {
+        "orderListId": 501, "contingencyType": "OCO",
+        "listStatusType": "EXEC_STARTED", "listOrderStatus": "EXECUTING",
+        "listClientOrderId": "mumin-oco-create-recovery", "symbol": "BTCUSDT",
+        "orders": [
+            {"symbol": "BTCUSDT", "orderId": 1501, "clientOrderId": "tp-recovery"},
+            {"symbol": "BTCUSDT", "orderId": 1502, "clientOrderId": "sl-recovery"},
+        ],
+    }
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal post_attempts
+        seen.append(request)
+        path = request.url.path
+        if path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if path == "/api/v3/exchangeInfo":
+            return httpx.Response(200, json=symbol_info())
+        if path == "/api/v3/ticker/price":
+            return httpx.Response(200, json={"symbol": "BTCUSDT", "price": "50000.00"})
+        if path == "/api/v3/account":
+            account = account_info()
+            account["balances"][1]["free"] = "0.00100"
+            return httpx.Response(200, json=account)
+        if path == "/api/v3/openOrders" or path == "/api/v3/myTrades":
+            return httpx.Response(200, json=[])
+        if path == "/api/v3/orderList/oco" and request.method == "POST":
+            post_attempts += 1
+            raise httpx.ReadTimeout("response lost after exchange accepted OCO", request=request)
+        if path == "/api/v3/orderList" and request.method == "GET":
+            return httpx.Response(200, json=list_payload)
+        return httpx.Response(404, json={"code": -2013, "msg": "not found"})
+
+    store = SQLiteOrderStore(str(tmp_path / "orders.db"))
+    client = BinanceSpotTestnetExecution(settings(), store, transport=httpx.MockTransport(handler))
+    try:
+        await client.reconcile()
+        with pytest.raises(SpotOrderOutcomeUnknown):
+            await client.oco.place_sell_oco(
+                symbol="BTCUSDT", quantity="0.00011",
+                take_profit_price="51000.00", stop_price="49000.00",
+                list_client_order_id="mumin-oco-create-recovery",
+            )
+        recovered = await client.oco.place_sell_oco(
+            symbol="BTCUSDT", quantity="0.00011",
+            take_profit_price="51000.00", stop_price="49000.00",
+            list_client_order_id="mumin-oco-create-recovery",
+        )
+        assert recovered["orderListId"] == 501
+        assert [item["orderId"] for item in recovered["orders"]] == [1501, 1502]
+        assert post_attempts == 1
+        assert client.oco.store.get("mumin-oco-create-recovery")["state"] == "EXECUTING"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_oco_cancel_timeout_queries_exchange_before_retry(tmp_path) -> None:
+    seen: list[httpx.Request] = []
+    delete_attempts = 0
+    active = {
+        "orderListId": 502, "contingencyType": "OCO",
+        "listStatusType": "EXEC_STARTED", "listOrderStatus": "EXECUTING",
+        "listClientOrderId": "mumin-oco-cancel-recovery", "symbol": "BTCUSDT",
+        "orders": [
+            {"symbol": "BTCUSDT", "orderId": 1601, "clientOrderId": "tp-cancel"},
+            {"symbol": "BTCUSDT", "orderId": 1602, "clientOrderId": "sl-cancel"},
+        ],
+    }
+    canceled = {
+        **active, "listStatusType": "ALL_DONE", "listOrderStatus": "ALL_DONE",
+        "orderReports": [
+            {"symbol": "BTCUSDT", "orderId": 1601, "executedQty": "0", "status": "CANCELED"},
+            {"symbol": "BTCUSDT", "orderId": 1602, "executedQty": "0", "status": "CANCELED"},
+        ],
+    }
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal delete_attempts
+        seen.append(request)
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/orderList" and request.method == "GET":
+            return httpx.Response(200, json=active)
+        if request.url.path == "/api/v3/orderList" and request.method == "DELETE":
+            delete_attempts += 1
+            if delete_attempts == 1:
+                raise httpx.ReadTimeout("cancel response lost", request=request)
+            return httpx.Response(200, json=canceled)
+        return httpx.Response(404, json={"code": -2013, "msg": "not found"})
+
+    client = BinanceSpotTestnetExecution(
+        settings(), SQLiteOrderStore(str(tmp_path / "orders.db")),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        client.oco.store.register({
+            "symbol": "BTCUSDT", "side": "SELL", "quantity": "0.00011",
+            "listClientOrderId": "mumin-oco-cancel-recovery",
+            "aboveType": "LIMIT_MAKER", "abovePrice": "51000.00",
+            "belowType": "STOP_LOSS", "belowStopPrice": "49000.00",
+            "newOrderRespType": "RESULT",
+        })
+        client.oco.store.update(
+            "mumin-oco-cancel-recovery", state="EXECUTING", response=active,
+        )
+        with pytest.raises(SpotOrderOutcomeUnknown):
+            await client.oco.cancel_order_list(
+                symbol="BTCUSDT", list_client_order_id="mumin-oco-cancel-recovery",
+            )
+        result = await client.oco.cancel_order_list(
+            symbol="BTCUSDT", list_client_order_id="mumin-oco-cancel-recovery",
+        )
+        assert result["listOrderStatus"] == "ALL_DONE"
+        assert delete_attempts == 2
+        assert sum(req.method == "GET" and req.url.path == "/api/v3/orderList" for req in seen) == 1
+        assert client.oco.store.get("mumin-oco-cancel-recovery")["state"] == "CANCELED"
+    finally:
+        await client.close()
