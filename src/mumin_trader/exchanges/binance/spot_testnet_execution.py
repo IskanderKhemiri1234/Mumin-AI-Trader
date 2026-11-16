@@ -142,9 +142,16 @@ class BinanceSpotTestnetExecution:
         if bnb_asset != "BNB" or self.settings.QUOTE_ASSET.upper() != "USDT":
             raise SpotExecutionError("Conservative BNB fee preflight currently requires BNB and USDT.")
 
+        if (
+            not buy_notional.is_finite() or buy_notional <= 0
+            or not sell_notional.is_finite() or sell_notional <= 0
+        ):
+            raise SpotExecutionError("BUY and protective OCO notionals must be finite and positive.")
         commission = await self._request(
             "GET", "/api/v3/account/commission", {"symbol": symbol.upper()}, signed=True,
         )
+        if not isinstance(commission, dict) or str(commission.get("symbol", "")).upper() != symbol.upper():
+            raise SpotExecutionError("Binance commission response is missing or for a different symbol.")
         discount = commission.get("discount")
         if not isinstance(discount, dict):
             raise SpotExecutionError("Binance did not return symbol-specific BNB discount settings.")
@@ -175,7 +182,7 @@ class BinanceSpotTestnetExecution:
 
         standard_rate = conservative_component("standardCommission", required=True)
         tax_rate = conservative_component("taxCommission", required=True)
-        special_rate = conservative_component("specialCommission", required=False)
+        special_rate = conservative_component("specialCommission", required=True)
         effective_rate = standard_rate * discount_multiplier + tax_rate + special_rate
         if effective_rate <= 0:
             raise SpotExecutionError("Commission rates do not provide a provable positive BNB fee reserve.")
