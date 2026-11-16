@@ -50,3 +50,25 @@ def test_evidence_sanitizer_removes_secret_fields_recursively():
         "order": {"orderId": 12},
         "fills": [{"commission": "0.01"}],
     }
+
+
+
+def test_child_result_requires_terminal_list_and_two_distinct_exchange_ids():
+    active = child_result({
+        "orderListId": 79,
+        "listOrderStatus": "EXECUTING",
+        "orderReports": [
+            {"orderId": 721, "status": "FILLED", "executedQty": "0.001"},
+            {"orderId": 722, "status": "CANCELED", "executedQty": "0"},
+        ],
+    })
+    missing_id = child_result({
+        "orderListId": 80,
+        "listOrderStatus": "ALL_DONE",
+        "orderReports": [
+            {"orderId": 0, "status": "FILLED", "executedQty": "0.001"},
+            {"orderId": 0, "status": "CANCELED", "executedQty": "0"},
+        ],
+    })
+    assert active["mutual_cancel_proven"] is False
+    assert missing_id["mutual_cancel_proven"] is False
