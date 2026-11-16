@@ -117,8 +117,17 @@ def commission_asset_mismatches(
     expected = expected_asset.upper()
     mismatches: list[dict[str, str]] = []
     for fill in fills:
-        amount = Decimal(str(fill.get("commission", "0")))
         asset = str(fill.get("commission_asset", "")).upper()
+        try:
+            amount = Decimal(str(fill.get("commission", "0")))
+        except (InvalidOperation, ValueError):
+            mismatches.append({
+                "trade_id": str(fill.get("trade_id", "")),
+                "commission": str(fill.get("commission", "")),
+                "commission_asset": asset,
+                "reason": "invalid_commission_amount",
+            })
+            continue
         if not amount.is_finite() or amount < 0:
             mismatches.append({
                 "trade_id": str(fill.get("trade_id", "")),
