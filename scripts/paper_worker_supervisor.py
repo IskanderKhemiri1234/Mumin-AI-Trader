@@ -165,6 +165,8 @@ class PaperWorkerSupervisor:
 
                 if desired == "PAUSED":
                     self._stop_child(desired, "dashboard_pause_request")
+                    self.restart_delay = self.restart_initial_seconds
+                    self.restart_at = 0.0
                 elif desired == "RUNNING" and self.child is None:
                     if time.monotonic() >= self.restart_at:
                         self._start_child(desired)
