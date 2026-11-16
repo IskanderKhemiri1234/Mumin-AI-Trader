@@ -273,7 +273,10 @@ class BinanceSpotTestnetOCO:
         status = str(response.get("listOrderStatus", "")).upper()
         if status == "ALL_DONE":
             reports = response.get("orderReports", [])
-            return "ALL_DONE" if reports else "ALL_DONE"
+            child_states = {str(item.get("status", "")).upper() for item in reports}
+            if child_states and child_states <= {"CANCELED", "EXPIRED", "REJECTED"}:
+                return "CANCELED"
+            return "ALL_DONE"
         return "EXECUTING" if status in {"EXECUTING", "EXEC_STARTED"} else "UNKNOWN"
 
     async def get_order_list(
