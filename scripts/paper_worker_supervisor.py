@@ -25,12 +25,16 @@ class PaperWorkerSupervisor:
         data_source: str,
         restart_initial_seconds: float = 2.0,
         restart_max_seconds: float = 60.0,
+        cycles: int | None = None,
+        run_for_seconds: float | None = None,
     ) -> None:
         self.database = database
         self.interval_seconds = interval_seconds
         self.data_source = data_source
         self.restart_initial_seconds = restart_initial_seconds
         self.restart_max_seconds = restart_max_seconds
+        self.cycles = cycles
+        self.run_for_seconds = run_for_seconds
         self.bot = ContinuousPaperBot(database)
         self.instance_id = f"paper-supervisor-{os.getpid()}"
         self.child: subprocess.Popen[bytes] | None = None
@@ -71,6 +75,8 @@ class PaperWorkerSupervisor:
             "--data-source",
             self.data_source,
         ]
+        if self.cycles is not None:
+            command.extend(("--cycles", str(self.cycles)))
         self.child = subprocess.Popen(command, cwd=PROJECT_ROOT)
         self.bot.supervisor_heartbeat(self.instance_id, self.child.pid)
         self._record("WORKER_STARTED", desired_state, f"pid={self.child.pid}")
@@ -118,8 +124,14 @@ class PaperWorkerSupervisor:
             f"poll={POLL_SECONDS}s; exchange orders are not enabled.",
             flush=True,
         )
+        started_at = time.monotonic()
         try:
             while not self.stop_requested:
+                if (
+                    self.run_for_seconds is not None
+                    and time.monotonic() - started_at >= self.run_for_seconds
+                ):
+                    break
                 desired = self._desired_state()
                 if self.child is not None and self.child.poll() is not None:
                     exit_code = self.child.returncode
@@ -173,11 +185,15 @@ def main() -> None:
     )
     parser.add_argument("--restart-initial-seconds", type=float, default=2.0)
     parser.add_argument("--restart-max-seconds", type=float, default=60.0)
+    parser.add_argument("--cycles", type=int, default=None)
+    parser.add_argument("--run-for-seconds", type=float, default=None)
     args = parser.parse_args()
     if (
         args.interval_seconds <= 0
         or args.restart_initial_seconds <= 0
         or args.restart_max_seconds < args.restart_initial_seconds
+        or (args.cycles is not None and args.cycles <= 0)
+        or (args.run_for_seconds is not None and args.run_for_seconds <= 0)
     ):
         parser.error("Intervals and restart backoff values must be positive and ordered.")
     PaperWorkerSupervisor(
@@ -186,6 +202,8 @@ def main() -> None:
         data_source=args.data_source,
         restart_initial_seconds=args.restart_initial_seconds,
         restart_max_seconds=args.restart_max_seconds,
+        cycles=args.cycles,
+        run_for_seconds=args.run_for_seconds,
     ).run()
 
 
