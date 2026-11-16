@@ -977,7 +977,7 @@ async def test_oco_create_timeout_recovers_existing_list_without_duplicate_post(
         assert client.oco.store.get("mumin-oco-create-recovery")["state"] == "PARTIAL_FILL_REVIEW"
         assert client.store.is_halted() == (True, "OCO_PARTIAL_FILL_REVIEW")
         assert client.store.last_trade_id("BTCUSDT") == 1701
-        assert client.store.get_trade_fill("BTCUSDT", 1701)["order_id"] == 1501
+        assert client.store.get_trade_fill("BTCUSDT", 1701)["commission"] == "0.00255"
     finally:
         await client.close()
 
