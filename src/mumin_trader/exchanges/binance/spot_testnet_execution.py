@@ -137,6 +137,56 @@ class BinanceSpotTestnetExecution:
             raise SpotExecutionError(f"Invalid mark price for {symbol}.")
         return price
 
+    async def _historical_bnb_quote_mark(self, trade_time_ms: int) -> Decimal:
+        quote = self.settings.QUOTE_ASSET.upper()
+        if quote != "USDT":
+            raise SpotExecutionError("Historical BNB fee valuation currently requires a USDT quote ledger.")
+        candle_start = (int(trade_time_ms) // 60_000) * 60_000
+        candles = await self._request(
+            "GET",
+            "/api/v3/klines",
+            {
+                "symbol": "BNBUSDT",
+                "interval": "1m",
+                "startTime": str(candle_start),
+                "endTime": str(candle_start + 59_999),
+                "limit": "1",
+            },
+        )
+        if not isinstance(candles, list) or len(candles) != 1:
+            raise SpotExecutionError(
+                f"Historical BNB/USDT candle unavailable for trade timestamp {trade_time_ms}."
+            )
+        candle = candles[0]
+        if int(candle[0]) != candle_start:
+            raise SpotExecutionError("Historical BNB/USDT candle timestamp does not match the trade minute.")
+        mark = Decimal(str(candle[4]))
+        if not mark.is_finite() or mark <= 0:
+            raise SpotExecutionError("Historical BNB/USDT candle close is invalid.")
+        return mark
+
+    async def _backfill_bnb_fee_valuations(self) -> None:
+        for fill in self.store.unvalued_bnb_fills():
+            try:
+                mark = await self._historical_bnb_quote_mark(int(fill["trade_time_ms"]))
+                fee_quote_value = Decimal(str(
+                    self._commission_amount_for_fill(fill["symbol"], fill["trade_id"])
+                )) * mark
+                self.store.set_commission_quote_value(
+                    str(fill["symbol"]), int(fill["trade_id"]), str(fee_quote_value)
+                )
+            except Exception as exc:
+                self.store.halt("BNB_FEE_VALUATION_UNAVAILABLE")
+                raise SpotExecutionError(
+                    "Historical BNB commission could not be valued; fee ledger remains incomplete."
+                ) from exc
+
+    def _commission_amount_for_fill(self, symbol: str, trade_id: int) -> str:
+        fill = self.store.get_trade_fill(symbol, trade_id)
+        if fill is None:
+            raise SpotExecutionError("Trade fill disappeared while valuing BNB commission.")
+        return str(fill["commission"])
+
     @staticmethod
     def _balance_map(account: dict[str, Any]) -> dict[str, tuple[Decimal, Decimal]]:
         result: dict[str, tuple[Decimal, Decimal]] = {}
@@ -166,7 +216,14 @@ class BinanceSpotTestnetExecution:
                 ids = [int(fill["id"]) for fill in fills]
                 if ids != sorted(ids) or ids[-1] < from_id:
                     raise SpotExecutionError(f"Trade-history pagination is inconsistent for {symbol}.")
-                self.store.record_trade_fills(symbol, fills)
+                bnb_values: dict[int, str] = {}
+                for fill in fills:
+                    if str(fill.get("commissionAsset", "")).upper() == "BNB" and Decimal(str(fill["commission"])) > 0:
+                        mark = await self._historical_bnb_quote_mark(int(fill["time"]))
+                        bnb_values[int(fill["id"])] = str(Decimal(str(fill["commission"])) * mark)
+                self.store.record_trade_fills(
+                    symbol, fills, commission_quote_values=bnb_values
+                )
                 if len(fills) < 1000:
                     break
                 from_id = ids[-1] + 1
@@ -174,6 +231,7 @@ class BinanceSpotTestnetExecution:
                 raise SpotExecutionError(
                     f"Trade history for {symbol} exceeded the 100-page safety bound; reconciliation is incomplete."
                 )
+        await self._backfill_bnb_fee_valuations()
         return self.store.trade_position_quantities(self.settings.QUOTE_ASSET)
 
     async def _check_portfolio_risk(
@@ -298,6 +356,12 @@ class BinanceSpotTestnetExecution:
             raise SpotExecutionError("Execution halt is active; new orders are blocked.")
         if not self.store.has_risk_state():
             raise SpotExecutionError("A successful account/trade reconciliation is required before the first order.")
+        pnl_report = self.store.realized_pnl_report(self.settings.QUOTE_ASSET)
+        if not pnl_report["complete"]:
+            self.store.halt("PNL_LEDGER_INCOMPLETE")
+            raise SpotExecutionError(
+                "Fee and FIFO cost-basis ledger is incomplete; reconcile missing historical inventory/fee valuations before any order."
+            )
         try:
             params = await self._validator.validate_limit_order(
                 symbol=symbol, side=side, quantity=quantity, price=price,
@@ -466,6 +530,11 @@ class BinanceSpotTestnetExecution:
             if risk_reason:
                 discrepancies.append(f"RISK_LIMIT:{risk_reason}")
             trade_positions = await self.sync_trade_history()
+            pnl_report = self.store.realized_pnl_report(self.settings.QUOTE_ASSET)
+            if not pnl_report["complete"]:
+                discrepancies.extend(
+                    f"PNL_ACCOUNTING_INCOMPLETE:{item}" for item in pnl_report["unresolved"]
+                )
             local_unresolved = self.store.unresolved_orders()
             local_ids = {str(order["client_order_id"]) for order in local_unresolved}
 
@@ -506,6 +575,7 @@ class BinanceSpotTestnetExecution:
                 "discrepancies": discrepancies,
                 "risk_reason": risk_reason,
                 "trade_positions": {asset: str(quantity) for asset, quantity in trade_positions.items()},
+                "realized_pnl": pnl_report,
                 "halted": self.store.is_halted()[0],
             }
         except Exception:
