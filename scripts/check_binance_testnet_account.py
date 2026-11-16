@@ -1,10 +1,36 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from decimal import Decimal
 
 from config.config import Settings, TradingEnvironment, TradingMode
 from mumin_trader.exchanges.binance.rest_client import BinanceAPIError, BinanceSpotRESTClient
+
+
+def report_geo_block_skip() -> None:
+    message = (
+        "SKIPPED: Binance returned HTTP 451 because this GitHub-hosted runner is not "
+        "eligible by location. Credentials remain unverified by this run; no order was submitted."
+    )
+    print(f"::warning title=Binance Testnet geo-restriction::{message}")
+    print(message)
+
+    output_path = os.environ.get("GITHUB_OUTPUT")
+    if output_path:
+        with open(output_path, "a", encoding="utf-8") as output:
+            output.write("result=skipped_geo_restriction\n")
+
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary_path:
+        with open(summary_path, "a", encoding="utf-8") as summary:
+            summary.write(
+                "### Binance Spot Testnet account check: skipped (HTTP 451)\n\n"
+                "- Reason: GitHub-hosted runner rejected by Binance restricted-location eligibility.\n"
+                "- Credential validity: **not established by this run**.\n"
+                "- Order submission: **not attempted**.\n"
+                "- Required CI compile, tests, lint and Paper smoke remain independent and mandatory.\n"
+            )
 
 
 async def main() -> None:
@@ -15,6 +41,8 @@ async def main() -> None:
         raise SystemExit("Refusing account check: TRADING_MODE must remain PAPER.")
     if settings.ALLOW_MAINNET or settings.LIVE_TRADING_ENABLED:
         raise SystemExit("Refusing account check: Mainnet/live flags must remain disabled.")
+    if settings.TESTNET_ORDER_PREFLIGHT_ENABLED or settings.TESTNET_SPOT_EXECUTION_ENABLED:
+        raise SystemExit("Refusing account check: order preflight and execution gates must remain disabled.")
     if not settings.BINANCE_API_KEY.get_secret_value() or not settings.BINANCE_API_SECRET.get_secret_value():
         raise SystemExit("Missing BINANCE_API_KEY or BINANCE_API_SECRET GitHub Secret.")
 
@@ -42,12 +70,9 @@ async def main() -> None:
             print("NOTICE: Testnet USDT balance is below the configured 70 USDT ceiling.")
     except BinanceAPIError as exc:
         if exc.status_code == 451:
-            message = (
-                "Binance rejected this runner with HTTP 451 (restricted-location eligibility). "
-                "The signed account check did not complete; this result does not establish "
-                "whether the API credentials are valid. No order was submitted."
-            )
-        elif exc.status_code == 401:
+            report_geo_block_skip()
+            return
+        if exc.status_code == 401:
             message = (
                 "Binance rejected the signed account request with HTTP 401. Check the "
                 "Testnet API key/secret and USER DATA permission. No order was submitted."
