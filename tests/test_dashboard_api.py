@@ -94,7 +94,7 @@ def test_dashboard_api_exposes_read_only_control_plane(monkeypatch, tmp_path):
     assert control["execution_authorized"] is False
     assert control["testnet_order_submission"] == "DISABLED"
     assert control["mainnet_order_submission"] == "BLOCKED"
-    assert control["available_actions"] == []
+    assert control["available_actions"] == ["PAPER_PAUSE", "PAPER_RESUME"]
 
 
 def test_dashboard_page_exposes_live_control_center():
