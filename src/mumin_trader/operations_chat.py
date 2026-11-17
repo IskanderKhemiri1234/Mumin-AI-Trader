@@ -130,167 +130,167 @@ def read_operations_snapshot(database: Path) -> dict[str, Any]:
             }], "events": [],
         }
 
-    with db:
-        tables = _table_names(db)
-        required = {"bot_account", "bot_positions", "bot_fills", "bot_market_ticks"}
-        if not required.issubset(tables):
-            db.close()
-            return {
-                "database_status": "schema_unavailable", "engine": {"status": "unknown"},
-                "account": None, "positions": [], "alerts": [{
-                    "code": "LEDGER_SCHEMA", "severity": "warning",
-                    "message": "The SQLite file does not contain the required Paper ledger tables.",
-                }], "events": [],
-            }
-
-        account_row = db.execute("SELECT * FROM bot_account WHERE id=1").fetchone()
-        if account_row is None:
-            db.close()
-            return {
-                "database_status": "empty", "engine": {"status": "unknown"},
-                "account": None, "positions": [], "alerts": [{
-                    "code": "ACCOUNT_MISSING", "severity": "warning",
-                    "message": "The Paper ledger has no account record yet.",
-                }], "events": [],
-            }
-
-        account_raw = dict(account_row)
-        marks = {
-            str(row["symbol"]): _decimal(row["price"])
-            for row in db.execute(
-                """SELECT m.symbol,m.price FROM bot_market_ticks m
-                   JOIN (SELECT symbol,MAX(id) AS max_id FROM bot_market_ticks GROUP BY symbol) x
-                   ON x.max_id=m.id"""
-            ).fetchall()
-        }
-        positions: list[dict[str, Any]] = []
-        market_value = ZERO
-        open_cost = ZERO
-        marks_complete = True
-        for row in db.execute(
-            """SELECT symbol,quantity,entry_price,entry_gross,entry_fee,opened_at
-               FROM bot_positions ORDER BY symbol"""
-        ).fetchall():
-            quantity = _decimal(row["quantity"])
-            entry_gross = _decimal(row["entry_gross"])
-            entry_fee = _decimal(row["entry_fee"])
-            mark = marks.get(str(row["symbol"]))
-            value = quantity * mark if mark is not None else None
-            if value is None:
-                marks_complete = False
-            else:
-                market_value += value
-            open_cost += entry_gross + entry_fee
-            positions.append({
-                "symbol": str(row["symbol"]), "quantity": str(quantity),
-                "entry_price": str(_decimal(row["entry_price"])),
-                "mark_price": str(mark) if mark is not None else None,
-                "market_value": str(value) if value is not None else None,
-                "unrealized_pnl": str(value - entry_gross - entry_fee) if value is not None else None,
-                "opened_at": row["opened_at"],
-            })
-
-        cash = _decimal(account_raw.get("cash"))
-        realized = _decimal(account_raw.get("realized_pnl"))
-        fees = _decimal(account_raw.get("fees_paid"))
-        equity = cash + market_value if marks_complete else None
-        unrealized = market_value - open_cost if marks_complete else None
-
-        engine: dict[str, Any] = {
-            "status": "offline", "supervisor_status": "offline",
-            "worker_status": "offline", "desired_state": "UNKNOWN",
-            "heartbeat_age_seconds": None, "supervisor_heartbeat_age_seconds": None,
-        }
-        if "bot_runtime_control" in tables:
-            runtime = db.execute("SELECT * FROM bot_runtime_control WHERE id=1").fetchone()
-            if runtime is not None:
-                runtime_data = dict(runtime)
-                worker_age = _age_seconds(runtime_data.get("heartbeat_at"))
-                supervisor_age = _age_seconds(runtime_data.get("supervisor_heartbeat_at"))
-                worker_online = worker_age is not None and -5 <= worker_age <= HEARTBEAT_LIMIT_SECONDS
-                supervisor_online = supervisor_age is not None and -5 <= supervisor_age <= HEARTBEAT_LIMIT_SECONDS
-                desired = str(runtime_data.get("desired_state", "UNKNOWN"))
-                worker_status = (
-                    "paused" if desired == "PAUSED" and supervisor_online
-                    else "running" if worker_online
-                    else "starting" if supervisor_online
-                    else "offline"
-                )
-                engine = {
-                    "status": "online" if supervisor_online or worker_online else "offline",
-                    "supervisor_status": "online" if supervisor_online else "offline",
-                    "worker_status": worker_status, "desired_state": desired,
-                    "heartbeat_age_seconds": worker_age,
-                    "supervisor_heartbeat_age_seconds": supervisor_age,
-                    "worker_pid": runtime_data.get("worker_pid"),
-                }
-
-        alerts: list[dict[str, str]] = []
-        if engine["status"] == "offline":
-            alerts.append({
-                "code": "ENGINE_OFFLINE", "severity": "warning",
-                "message": "Paper engine or supervisor heartbeat is missing or stale.",
-            })
-        if bool(account_raw.get("halted", False)):
-            alerts.append({
-                "code": "RISK_HALTED", "severity": "critical",
-                "message": str(account_raw.get("halt_reason") or "Paper risk halt is active."),
-            })
-        if not marks_complete:
-            alerts.append({
-                "code": "MARKS_INCOMPLETE", "severity": "warning",
-                "message": "At least one open position has no market mark; total equity is incomplete.",
-            })
-
-        audit = _rows(
-            db,
-            """SELECT event_type,actor,desired_state,detail,created_at
-               FROM bot_runtime_audit ORDER BY audit_id DESC LIMIT ?"""
-        ) if "bot_runtime_audit" in tables else []
-        command_events = _rows(
-            db,
-            """SELECT e.event_type,e.status,e.detail,e.created_at,c.command_type,c.symbol
-               FROM bot_command_events e
-               LEFT JOIN bot_commands c ON c.command_id=e.command_id
-               ORDER BY e.event_id DESC LIMIT ?"""
-        ) if {"bot_command_events", "bot_commands"}.issubset(tables) else []
-        events = (audit + command_events)
-        events.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
-        events = events[:12]
-
-        reconciliation: dict[str, Any] = {"status": "UNAVAILABLE", "issues": []}
-        try:
-            from mumin_trader.execution.paper_reconciliation import reconcile_paper_ledger
-            reconciliation = reconcile_paper_ledger(db)
-        except (sqlite3.Error, KeyError, ValueError, InvalidOperation):
-            reconciliation = {"status": "UNAVAILABLE", "issues": ["Ledger reconciliation could not be completed."]}
-        if reconciliation.get("status") not in {"PASS", "INCOMPLETE"}:
-            alerts.append({
-                "code": "LEDGER_RECONCILIATION", "severity": "critical",
-                "message": "Paper ledger reconciliation reported a mismatch.",
-            })
-
-        closed = db.execute("SELECT COUNT(*) FROM bot_fills WHERE side='SELL'").fetchone()[0]
+    tables = _table_names(db)
+    required = {"bot_account", "bot_positions", "bot_fills", "bot_market_ticks"}
+    if not required.issubset(tables):
+        db.close()
         return {
-            "database_status": "ready",
-            "engine": engine,
-            "account": {
-                "initial_cash": str(_decimal(account_raw.get("initial_cash"))),
-                "cash": str(cash), "equity": str(equity) if equity is not None else None,
-                "realized_pnl": str(realized),
-                "unrealized_pnl": str(unrealized) if unrealized is not None else None,
-                "fees_paid": str(fees), "closed_trades": int(closed),
-                "open_positions": len(positions), "tick_count": int(account_raw.get("tick_count") or 0),
-                "halted": bool(account_raw.get("halted", False)),
-            },
-            "positions": positions,
-            "reconciliation": {
-                "status": reconciliation.get("status", "UNAVAILABLE"),
-                "issues": list(reconciliation.get("issues", []))[:5],
-            },
-            "alerts": alerts,
-            "events": events,
+            "database_status": "schema_unavailable", "engine": {"status": "unknown"},
+            "account": None, "positions": [], "alerts": [{
+                "code": "LEDGER_SCHEMA", "severity": "warning",
+                "message": "The SQLite file does not contain the required Paper ledger tables.",
+            }], "events": [],
         }
+
+    account_row = db.execute("SELECT * FROM bot_account WHERE id=1").fetchone()
+    if account_row is None:
+        db.close()
+        return {
+            "database_status": "empty", "engine": {"status": "unknown"},
+            "account": None, "positions": [], "alerts": [{
+                "code": "ACCOUNT_MISSING", "severity": "warning",
+                "message": "The Paper ledger has no account record yet.",
+            }], "events": [],
+        }
+
+    account_raw = dict(account_row)
+    marks = {
+        str(row["symbol"]): _decimal(row["price"])
+        for row in db.execute(
+            """SELECT m.symbol,m.price FROM bot_market_ticks m
+               JOIN (SELECT symbol,MAX(id) AS max_id FROM bot_market_ticks GROUP BY symbol) x
+               ON x.max_id=m.id"""
+        ).fetchall()
+    }
+    positions: list[dict[str, Any]] = []
+    market_value = ZERO
+    open_cost = ZERO
+    marks_complete = True
+    for row in db.execute(
+        """SELECT symbol,quantity,entry_price,entry_gross,entry_fee,opened_at
+           FROM bot_positions ORDER BY symbol"""
+    ).fetchall():
+        quantity = _decimal(row["quantity"])
+        entry_gross = _decimal(row["entry_gross"])
+        entry_fee = _decimal(row["entry_fee"])
+        mark = marks.get(str(row["symbol"]))
+        value = quantity * mark if mark is not None else None
+        if value is None:
+            marks_complete = False
+        else:
+            market_value += value
+        open_cost += entry_gross + entry_fee
+        positions.append({
+            "symbol": str(row["symbol"]), "quantity": str(quantity),
+            "entry_price": str(_decimal(row["entry_price"])),
+            "mark_price": str(mark) if mark is not None else None,
+            "market_value": str(value) if value is not None else None,
+            "unrealized_pnl": str(value - entry_gross - entry_fee) if value is not None else None,
+            "opened_at": row["opened_at"],
+        })
+
+    cash = _decimal(account_raw.get("cash"))
+    realized = _decimal(account_raw.get("realized_pnl"))
+    fees = _decimal(account_raw.get("fees_paid"))
+    equity = cash + market_value if marks_complete else None
+    unrealized = market_value - open_cost if marks_complete else None
+
+    engine: dict[str, Any] = {
+        "status": "offline", "supervisor_status": "offline",
+        "worker_status": "offline", "desired_state": "UNKNOWN",
+        "heartbeat_age_seconds": None, "supervisor_heartbeat_age_seconds": None,
+    }
+    if "bot_runtime_control" in tables:
+        runtime = db.execute("SELECT * FROM bot_runtime_control WHERE id=1").fetchone()
+        if runtime is not None:
+            runtime_data = dict(runtime)
+            worker_age = _age_seconds(runtime_data.get("heartbeat_at"))
+            supervisor_age = _age_seconds(runtime_data.get("supervisor_heartbeat_at"))
+            worker_online = worker_age is not None and -5 <= worker_age <= HEARTBEAT_LIMIT_SECONDS
+            supervisor_online = supervisor_age is not None and -5 <= supervisor_age <= HEARTBEAT_LIMIT_SECONDS
+            desired = str(runtime_data.get("desired_state", "UNKNOWN"))
+            worker_status = (
+                "paused" if desired == "PAUSED" and supervisor_online
+                else "running" if worker_online
+                else "starting" if supervisor_online
+                else "offline"
+            )
+            engine = {
+                "status": "online" if supervisor_online or worker_online else "offline",
+                "supervisor_status": "online" if supervisor_online else "offline",
+                "worker_status": worker_status, "desired_state": desired,
+                "heartbeat_age_seconds": worker_age,
+                "supervisor_heartbeat_age_seconds": supervisor_age,
+                "worker_pid": runtime_data.get("worker_pid"),
+            }
+
+    alerts: list[dict[str, str]] = []
+    if engine["status"] == "offline":
+        alerts.append({
+            "code": "ENGINE_OFFLINE", "severity": "warning",
+            "message": "Paper engine or supervisor heartbeat is missing or stale.",
+        })
+    if bool(account_raw.get("halted", False)):
+        alerts.append({
+            "code": "RISK_HALTED", "severity": "critical",
+            "message": str(account_raw.get("halt_reason") or "Paper risk halt is active."),
+        })
+    if not marks_complete:
+        alerts.append({
+            "code": "MARKS_INCOMPLETE", "severity": "warning",
+            "message": "At least one open position has no market mark; total equity is incomplete.",
+        })
+
+    audit = _rows(
+        db,
+        """SELECT event_type,actor,desired_state,detail,created_at
+           FROM bot_runtime_audit ORDER BY audit_id DESC LIMIT ?"""
+    ) if "bot_runtime_audit" in tables else []
+    command_events = _rows(
+        db,
+        """SELECT e.event_type,e.status,e.detail,e.created_at,c.command_type,c.symbol
+           FROM bot_command_events e
+           LEFT JOIN bot_commands c ON c.command_id=e.command_id
+           ORDER BY e.event_id DESC LIMIT ?"""
+    ) if {"bot_command_events", "bot_commands"}.issubset(tables) else []
+    events = (audit + command_events)
+    events.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+    events = events[:12]
+
+    reconciliation: dict[str, Any] = {"status": "UNAVAILABLE", "issues": []}
+    try:
+        from mumin_trader.execution.paper_reconciliation import reconcile_paper_ledger
+        reconciliation = reconcile_paper_ledger(db)
+    except (sqlite3.Error, KeyError, ValueError, InvalidOperation):
+        reconciliation = {"status": "UNAVAILABLE", "issues": ["Ledger reconciliation could not be completed."]}
+    if reconciliation.get("status") not in {"PASS", "INCOMPLETE"}:
+        alerts.append({
+            "code": "LEDGER_RECONCILIATION", "severity": "critical",
+            "message": "Paper ledger reconciliation reported a mismatch.",
+        })
+
+    closed = db.execute("SELECT COUNT(*) FROM bot_fills WHERE side='SELL'").fetchone()[0]
+    db.close()
+    return {
+        "database_status": "ready",
+        "engine": engine,
+        "account": {
+            "initial_cash": str(_decimal(account_raw.get("initial_cash"))),
+            "cash": str(cash), "equity": str(equity) if equity is not None else None,
+            "realized_pnl": str(realized),
+            "unrealized_pnl": str(unrealized) if unrealized is not None else None,
+            "fees_paid": str(fees), "closed_trades": int(closed),
+            "open_positions": len(positions), "tick_count": int(account_raw.get("tick_count") or 0),
+            "halted": bool(account_raw.get("halted", False)),
+        },
+        "positions": positions,
+        "reconciliation": {
+            "status": reconciliation.get("status", "UNAVAILABLE"),
+            "issues": list(reconciliation.get("issues", []))[:5],
+        },
+        "alerts": alerts,
+        "events": events,
+    }
 
 
 def _reply(intent: str, language: str, snapshot: dict[str, Any]) -> str:
