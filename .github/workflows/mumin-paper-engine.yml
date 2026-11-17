@@ -137,6 +137,9 @@ jobs:
               raise SystemExit(f"Latest Paper cycle must contain all 8 assets; found {asset_count}.")
           print(f"Paper ledger verified: {latest_tick} durable cycles; all 8 assets present; SQLite integrity OK.")
           PY
+          python scripts/audit_paper_ledger.py \
+            --db mumin-paper-ledger/mumin_public_paper.db \
+            --output mumin-paper-ledger/latest-accounting-audit.json
           python scripts/export_paper_report.py \
             --db mumin-paper-ledger/mumin_public_paper.db \
             --markdown mumin-paper-ledger/latest-report.md \
