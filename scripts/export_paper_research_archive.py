@@ -85,16 +85,23 @@ def export_archive(database: str | Path, archive_path: str | Path, manifest_path
 
     macro_complete_rows = 0
     macro_timestamp_aligned_rows = 0
+    minute_timestamp_aligned_rows = 0
     for row in ticks:
         closes = json.loads(row.get("macro_hourly_closes_json") or "[]")
         close_times = json.loads(row.get("macro_hourly_close_times_json") or "[]")
         received_at = int(row.get("received_at_ms") or 0)
+        candle_close = row.get("candle_close_time_ms")
+        if candle_close is not None and int(candle_close) < received_at:
+            minute_timestamp_aligned_rows += 1
         if len(closes) == 21:
             macro_complete_rows += 1
         if (
             len(closes) == 21
             and len(close_times) == 21
-            and close_times == sorted(close_times)
+            and all(
+                int(left) < int(right)
+                for left, right in zip(close_times, close_times[1:])
+            )
             and all(int(value) < received_at for value in close_times)
         ):
             macro_timestamp_aligned_rows += 1
@@ -110,6 +117,7 @@ def export_archive(database: str | Path, archive_path: str | Path, manifest_path
         and complete_cycles == observed_cycles
         and all_macro_inputs_present
         and all_macro_timestamps_aligned
+        and minute_timestamp_aligned_rows == len(ticks)
         and total_duplicate_closes == 0
         and total_missing_minute_slots == 0
     )
@@ -158,6 +166,8 @@ def export_archive(database: str | Path, archive_path: str | Path, manifest_path
             "historical_depth_available_only_at_recorded_snapshots": True,
             "raw_21_hourly_closes_persisted": all_macro_inputs_present,
             "raw_21_hourly_close_timestamp_alignment_passed": all_macro_timestamps_aligned,
+            "one_minute_close_timestamp_alignment_passed": bool(ticks) and minute_timestamp_aligned_rows == len(ticks),
+            "minute_timestamp_aligned_rows": minute_timestamp_aligned_rows,
             "macro_complete_rows": macro_complete_rows,
             "macro_timestamp_aligned_rows": macro_timestamp_aligned_rows,
             "replay_ready": replay_ready,
