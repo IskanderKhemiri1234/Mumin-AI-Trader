@@ -5,6 +5,7 @@ import pytest
 
 from mumin_trader.execution.command_plane import (
     CommandRejected,
+    latch_emergency_stop,
     submit_paper_order,
 )
 from scripts.run_continuous_paper import ContinuousPaperBot
@@ -99,3 +100,32 @@ def test_sell_cannot_exceed_fifo_inventory(tmp_path):
             database, idempotency_key="oversell", side="SELL",
             symbol="BTCUSDT", quantity="0.01", confirmed=True,
         )
+
+
+
+def test_emergency_stop_latches_entries_without_closing_positions(tmp_path):
+    database, bot = _ledger(tmp_path)
+    bought = submit_paper_order(
+        database, idempotency_key="pre-stop-buy", side="BUY", symbol="BTCUSDT",
+        quote_amount="5", confirmed=True,
+    )
+    result = latch_emergency_stop(
+        database, idempotency_key="emergency-1", confirmed=True,
+    )
+    assert result["halted"] is True
+    assert result["open_positions_closed"] is False
+    with bot._connect() as db:
+        account = db.execute("SELECT halted,halt_reason FROM bot_account WHERE id=1").fetchone()
+        assert account["halted"] == 1
+        assert account["halt_reason"] == "MANUAL_EMERGENCY_STOP"
+        assert db.execute("SELECT COUNT(*) FROM bot_positions").fetchone()[0] == 1
+    with pytest.raises(CommandRejected, match="risk halt"):
+        submit_paper_order(
+            database, idempotency_key="post-stop-buy", side="BUY", symbol="ETHUSDT",
+            quote_amount="5", confirmed=True,
+        )
+    sold = submit_paper_order(
+        database, idempotency_key="post-stop-sell", side="SELL", symbol="BTCUSDT",
+        quantity=bought["result"]["quantity"], confirmed=True,
+    )
+    assert sold["status"] == "COMPLETED"
