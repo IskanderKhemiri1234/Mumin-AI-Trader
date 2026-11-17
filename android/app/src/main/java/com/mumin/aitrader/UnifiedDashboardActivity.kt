@@ -40,6 +40,7 @@ class UnifiedDashboardActivity : Activity() {
         private const val RELEASE_API =
             "https://api.github.com/repos/IskanderKhemiri1234/Mumin-AI-Trader/releases/latest"
         private const val USER_AGENT = "Mumin-AI-Trader-Android"
+        private const val INSTALL_REQUEST_CODE = 7102
         private const val EMERALD = 0xFF071C17.toInt()
         private const val GOLD = 0xFFD8B66A.toInt()
         private const val LIGHT = 0xFFF4F0E6.toInt()
@@ -243,6 +244,9 @@ class UnifiedDashboardActivity : Activity() {
                     return@execute
                 }
                 val downloadUrl = apkUrl
+                if (!downloadUrl.startsWith("https://github.com/")) {
+                    throw IllegalStateException("Release asset URL is not an approved GitHub HTTPS URL.")
+                }
                 runOnUiThread { connectionStatus.text = "الإصدار $tag متاح. جارٍ التنزيل…" }
                 val download = (URL(downloadUrl).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 20000
@@ -257,6 +261,11 @@ class UnifiedDashboardActivity : Activity() {
                 download.disconnect()
                 if (!apk.isFile || apk.length() < 1024) {
                     throw IllegalStateException("Downloaded APK is incomplete.")
+                }
+                val archiveInfo = packageManager.getPackageArchiveInfo(apk.absolutePath, 0)
+                if (archiveInfo?.packageName != packageName) {
+                    apk.delete()
+                    throw IllegalStateException("Downloaded APK package does not match this application.")
                 }
                 pendingInstall = apk
                 runOnUiThread {
@@ -285,10 +294,10 @@ class UnifiedDashboardActivity : Activity() {
     private fun installDownloadedApk(apk: File) {
         if (Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
             connectionStatus.text = "اسمح بالتثبيت من هذا التطبيق ثم ارجع لإكمال التحديث."
-            startActivity(Intent(
+            startActivityForResult(Intent(
                 Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                 Uri.parse("package:$packageName")
-            ))
+            ), INSTALL_REQUEST_CODE)
             return
         }
         val apkUri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
@@ -296,6 +305,18 @@ class UnifiedDashboardActivity : Activity() {
             setDataAndType(apkUri, "application/vnd.android.package-archive")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         })
+    }
+
+    @Deprecated("Deprecated by Android; retained for package installer permission result")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (
+            requestCode == INSTALL_REQUEST_CODE &&
+            Build.VERSION.SDK_INT >= 26 &&
+            packageManager.canRequestPackageInstalls()
+        ) {
+            pendingInstall?.let { installDownloadedApk(it) }
+        }
     }
 
     private fun dp(value: Int): Int =
