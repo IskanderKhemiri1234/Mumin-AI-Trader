@@ -13,7 +13,9 @@ def _ledger(path):
         CREATE TABLE bot_market_ticks (
             id INTEGER PRIMARY KEY, tick INTEGER, symbol TEXT,
             candle_close_time_ms INTEGER, data_source TEXT, received_at_ms INTEGER,
-            macro_hourly_closes_json TEXT, macro_hourly_close_times_json TEXT
+            macro_hourly_closes_json TEXT, macro_hourly_close_times_json TEXT,
+            price TEXT, bid TEXT, ask TEXT, candle_open TEXT, candle_high TEXT,
+            candle_low TEXT, candle_volume TEXT, bid_depth_qty TEXT, ask_depth_qty TEXT
         );
         CREATE TABLE bot_agent_decisions (
             decision_id INTEGER PRIMARY KEY, tick INTEGER, symbol TEXT,
@@ -28,12 +30,13 @@ def _ledger(path):
     close_times = json.dumps([1_799_000_000_000 + i * 3_600_000 for i in range(21)])
     for index, symbol in enumerate(EXPECTED_SYMBOLS, start=1):
         db.execute(
-            "INSERT INTO bot_market_ticks VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO bot_market_ticks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (index, 1, symbol, 1_800_000_000_000, "BINANCE_PUBLIC_MARKET_DATA",
-             1_800_000_000_100, closes, close_times),
+             1_800_000_000_100, closes, close_times, "100", "99", "101",
+             "100", "102", "98", "10", "500", "400"),
         )
     db.execute(
-        "INSERT INTO bot_market_ticks VALUES (9,1,'BTCUSDT',1800000000000,'MOCK_SYNTHETIC',1800000000100,'[]','[]')"
+        "INSERT INTO bot_market_ticks (id,tick,symbol,candle_close_time_ms,data_source,received_at_ms,macro_hourly_closes_json,macro_hourly_close_times_json) VALUES (9,1,'BTCUSDT',1800000000000,'MOCK_SYNTHETIC',1800000000100,'[]','[]')"
     )
     db.execute(
         "INSERT INTO bot_agent_decisions VALUES (1,1,'BTCUSDT','BINANCE_PUBLIC_MARKET_DATA','HOLD')"
@@ -47,6 +50,23 @@ def _ledger(path):
     db.execute(
         "INSERT INTO bot_fills VALUES (2,1,'BTCUSDT','MOCK_SYNTHETIC','SELL')"
     )
+    db.commit()
+    db.close()
+
+
+def _add_cycle(db_path, tick, candle_close, received_at, id_start):
+    db = sqlite3.connect(db_path)
+    closes = json.dumps(["100"] * 21)
+    close_times = json.dumps([
+        candle_close - 21 * 3_600_000 + i * 3_600_000 for i in range(21)
+    ])
+    for offset, symbol in enumerate(EXPECTED_SYMBOLS):
+        db.execute(
+            "INSERT INTO bot_market_ticks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (id_start + offset, tick, symbol, candle_close,
+             "BINANCE_PUBLIC_MARKET_DATA", received_at, closes, close_times,
+             "100", "99", "101", "100", "102", "98", "10", "500", "400"),
+        )
     db.commit()
     db.close()
 
@@ -70,6 +90,8 @@ def test_archive_is_deterministic_and_excludes_synthetic_rows(tmp_path):
     assert manifest["quality"]["raw_21_hourly_closes_persisted"] is True
     assert manifest["quality"]["raw_21_hourly_close_timestamp_alignment_passed"] is True
     assert manifest["quality"]["one_minute_close_timestamp_alignment_passed"] is True
+    assert manifest["quality"]["replay_numeric_quote_rows"] == 8
+    assert manifest["quality"]["replay_macro_numeric_rows"] == 8
     assert manifest["quality"]["macro_complete_rows"] == 8
     assert manifest["quality"]["replay_ready"] is False
     assert manifest["quality"]["holdout_eligible"] is False
@@ -83,20 +105,6 @@ def test_archive_does_not_modify_source_database(tmp_path):
     export_archive(database, tmp_path / "observations.jsonl.gz", tmp_path / "manifest.json")
 
     assert database.read_bytes() == before
-
-
-def _add_cycle(db_path, tick, candle_close, received_at, id_start):
-    db = sqlite3.connect(db_path)
-    closes = json.dumps(["100"] * 21)
-    close_times = json.dumps([candle_close - 21 * 3_600_000 + i * 3_600_000 for i in range(21)])
-    for offset, symbol in enumerate(EXPECTED_SYMBOLS):
-        db.execute(
-            "INSERT INTO bot_market_ticks VALUES (?,?,?,?,?,?,?,?)",
-            (id_start + offset, tick, symbol, candle_close,
-             "BINANCE_PUBLIC_MARKET_DATA", received_at, closes, close_times),
-        )
-    db.commit()
-    db.close()
 
 
 def test_archive_deduplicates_repeated_same_minute_cycles(tmp_path):
