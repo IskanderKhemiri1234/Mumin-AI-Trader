@@ -50,6 +50,8 @@ class SQLiteOCOOrderStore:
                     order_list_id TEXT,
                     above_order_id TEXT,
                     below_order_id TEXT,
+                    working_order_id TEXT,
+                    working_client_order_id TEXT,
                     above_client_order_id TEXT,
                     below_client_order_id TEXT,
                     request_json TEXT NOT NULL,
@@ -64,8 +66,8 @@ class SQLiteOCOOrderStore:
                 for row in db.execute("PRAGMA table_info(spot_oco_order_lists)").fetchall()
             }
             for name in (
-                "above_order_id", "below_order_id",
-                "above_client_order_id", "below_client_order_id",
+                "above_order_id", "below_order_id", "working_order_id",
+                "working_client_order_id", "above_client_order_id", "below_client_order_id",
             ):
                 if name not in columns:
                     db.execute(f"ALTER TABLE spot_oco_order_lists ADD COLUMN {name} TEXT")
@@ -135,12 +137,26 @@ class SQLiteOCOOrderStore:
         payload = response or {}
         list_id = payload.get("orderListId")
         orders = payload.get("orders", [])
-        above = orders[0] if len(orders) > 0 else {}
-        below = orders[1] if len(orders) > 1 else {}
+        local = self.get(list_client_order_id)
+        request = json.loads(local["request_json"]) if local else {}
+        if "workingClientOrderId" in request:
+            by_client_id = {
+                str(item.get("clientOrderId", "")): item
+                for item in orders if isinstance(item, dict)
+            }
+            working = by_client_id.get(request.get("workingClientOrderId", ""), {})
+            above = by_client_id.get(request.get("pendingAboveClientOrderId", ""), {})
+            below = by_client_id.get(request.get("pendingBelowClientOrderId", ""), {})
+        else:
+            working = {}
+            above = orders[0] if len(orders) > 0 else {}
+            below = orders[1] if len(orders) > 1 else {}
         with self._connect() as db:
             db.execute(
                 """UPDATE spot_oco_order_lists SET state=?,
                    order_list_id=COALESCE(?,order_list_id),
+                   working_order_id=COALESCE(?,working_order_id),
+                   working_client_order_id=COALESCE(?,working_client_order_id),
                    above_order_id=COALESCE(?,above_order_id),
                    below_order_id=COALESCE(?,below_order_id),
                    above_client_order_id=COALESCE(?,above_client_order_id),
@@ -149,6 +165,8 @@ class SQLiteOCOOrderStore:
                    WHERE list_client_order_id=?""",
                 (
                     state, None if list_id is None else str(list_id),
+                    None if working.get("orderId") is None else str(working["orderId"]),
+                    working.get("clientOrderId"),
                     None if above.get("orderId") is None else str(above["orderId"]),
                     None if below.get("orderId") is None else str(below["orderId"]),
                     above.get("clientOrderId"), below.get("clientOrderId"),
@@ -168,13 +186,13 @@ class SQLiteOCOOrderStore:
     def child_client_order_ids(self) -> set[str]:
         with self._connect() as db:
             rows = db.execute(
-                """SELECT above_client_order_id,below_client_order_id
+                """SELECT working_client_order_id,above_client_order_id,below_client_order_id
                    FROM spot_oco_order_lists"""
             ).fetchall()
         return {
             str(value)
             for row in rows
-            for value in (row["above_client_order_id"], row["below_client_order_id"])
+            for value in (row["working_client_order_id"], row["above_client_order_id"], row["below_client_order_id"])
             if value
         }
 
