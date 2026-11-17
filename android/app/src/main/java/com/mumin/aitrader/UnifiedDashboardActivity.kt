@@ -268,11 +268,11 @@ class UnifiedDashboardActivity : Activity() {
         webView.loadUrl("$baseUrl/dashboard", mapOf("Cache-Control" to "no-cache"))
     }
 
+    @Suppress("DEPRECATION")
     private fun packageInfoFlags(): Int =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             PackageManager.GET_SIGNING_CERTIFICATES
         } else {
-            @Suppress("DEPRECATION")
             PackageManager.GET_SIGNATURES
         }
 
@@ -308,11 +308,11 @@ class UnifiedDashboardActivity : Activity() {
             installedSigners.map { it.toCharsString() }.toSet()
     }
 
+    @Suppress("DEPRECATION")
     private fun packageVersionCode(info: PackageInfo): Long =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             info.longVersionCode
         } else {
-            @Suppress("DEPRECATION")
             info.versionCode.toLong()
         }
 
