@@ -536,6 +536,7 @@ def latch_emergency_stop(
             }
         account = db.execute("SELECT * FROM bot_account WHERE id=1").fetchone()
         if account is None:
+            db.rollback()
             raise CommandRejected("Paper account is not initialized.")
         db.execute(
             """INSERT INTO bot_commands
