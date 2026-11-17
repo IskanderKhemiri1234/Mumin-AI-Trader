@@ -2,13 +2,13 @@ name: Mumin AI Trader Android APK
 
 on:
   push:
-    branches: [main, feature/android-paper-dashboard, research/clean-profit-core]
+    branches: [main, 'feat/**', feature/android-paper-dashboard, research/clean-profit-core]
     tags: ["v*"]
     paths:
       - "android/**"
       - ".github/workflows/build-apk.yml"
   pull_request:
-    branches: [main]
+    branches: [main, 'feat/**']
     paths:
       - "android/**"
       - ".github/workflows/build-apk.yml"

@@ -51,8 +51,10 @@ class BinanceSpotTestnetExecution:
         )
         self._validator = BinanceSpotTestnetOrderPreflight(settings, transport=transport)
         from mumin_trader.exchanges.binance.spot_testnet_oco import BinanceSpotTestnetOCO
+        from mumin_trader.exchanges.binance.spot_testnet_opoco import BinanceSpotTestnetOPOCO
 
         self.oco = BinanceSpotTestnetOCO(self)
+        self.opoco = BinanceSpotTestnetOPOCO(self)
 
     @staticmethod
     def _assert_safety_gate(settings: Settings) -> None:
@@ -133,11 +135,14 @@ class BinanceSpotTestnetExecution:
         buy_notional: Decimal,
         sell_notional: Decimal,
     ) -> dict[str, str]:
-        """Fail closed unless BNB fee discount and a conservative fee reserve are proven."""
+        """Fail closed unless BNB discount and its conservative fee reserve are proven."""
+        unavailable = "TESTNET_FEE_DATA_UNAVAILABLE"
+
         if not self.settings.ENABLE_BNB_FEE_DISCOUNT:
             raise SpotExecutionError("BNB fee discount is disabled in configuration.")
         if not self.settings.REQUIRE_BNB_BALANCE_FOR_DISCOUNT:
             raise SpotExecutionError("BNB fee balance is not mandatory; refusing lifecycle execution.")
+
         bnb_asset = self.settings.BNB_FEE_ASSET.upper()
         if bnb_asset != "BNB" or self.settings.QUOTE_ASSET.upper() != "USDT":
             raise SpotExecutionError("Conservative BNB fee preflight currently requires BNB and USDT.")
@@ -147,57 +152,110 @@ class BinanceSpotTestnetExecution:
             or not sell_notional.is_finite() or sell_notional <= 0
         ):
             raise SpotExecutionError("BUY and protective OCO notionals must be finite and positive.")
+
         commission = await self._request(
             "GET", "/api/v3/account/commission", {"symbol": symbol.upper()}, signed=True,
         )
-        if not isinstance(commission, dict) or str(commission.get("symbol", "")).upper() != symbol.upper():
-            raise SpotExecutionError("Binance commission response is missing or for a different symbol.")
+        if (
+            not isinstance(commission, dict)
+            or str(commission.get("symbol", "")).upper() != symbol.upper()
+        ):
+            raise SpotExecutionError(
+                f"{unavailable}: Binance commission response is missing or for a different symbol."
+            )
+
         discount = commission.get("discount")
         if not isinstance(discount, dict):
-            raise SpotExecutionError("Binance did not return symbol-specific BNB discount settings.")
-        if (
-            discount.get("enabledForAccount") is not True
-            or discount.get("enabledForSymbol") is not True
-            or str(discount.get("discountAsset", "")).upper() != bnb_asset
-        ):
-            raise SpotExecutionError("BNB fee discount is not explicitly enabled for this account and symbol.")
-        discount_multiplier = Decimal(str(discount.get("discount", "0")))
-        if not discount_multiplier.is_finite() or not (Decimal("0") < discount_multiplier <= Decimal("1")):
-            raise SpotExecutionError("Binance returned an invalid BNB commission multiplier.")
+            raise SpotExecutionError(
+                f"{unavailable}: Binance did not return symbol-specific BNB discount settings."
+            )
 
-        def conservative_component(name: str, *, required: bool) -> Decimal:
+        account_enabled = discount.get("enabledForAccount")
+        symbol_enabled = discount.get("enabledForSymbol")
+
+        if account_enabled is False or symbol_enabled is False:
+            raise SpotExecutionError(
+                "BNB fee discount is not explicitly enabled for this account and symbol."
+            )
+        if account_enabled is not True or symbol_enabled is not True:
+            raise SpotExecutionError(
+                f"{unavailable}: Binance did not explicitly confirm both BNB discount flags."
+            )
+
+        discount_asset = discount.get("discountAsset")
+        if not isinstance(discount_asset, str) or discount_asset.upper() != bnb_asset:
+            raise SpotExecutionError(
+                f"{unavailable}: Binance did not confirm BNB as the discount asset."
+            )
+
+        def parse_commission_decimal(raw: Any, field: str) -> Decimal:
+            try:
+                value = Decimal(str(raw))
+            except (ArithmeticError, TypeError, ValueError) as exc:
+                raise SpotExecutionError(
+                    f"{unavailable}: Binance returned a non-numeric {field} value."
+                ) from exc
+            if not value.is_finite() or value < 0:
+                raise SpotExecutionError(
+                    f"{unavailable}: Binance returned an invalid {field} value."
+                )
+            return value
+
+        discount_multiplier = parse_commission_decimal(
+            discount.get("discount"), "discount multiplier",
+        )
+        if not (Decimal("0") < discount_multiplier <= Decimal("1")):
+            raise SpotExecutionError(
+                f"{unavailable}: Binance returned a zero or out-of-range BNB discount multiplier."
+            )
+
+        def conservative_component(name: str) -> Decimal:
             rates = commission.get(name)
             if not isinstance(rates, dict):
-                if required:
-                    raise SpotExecutionError(f"Binance commission response is missing {name}.")
-                return Decimal("0")
+                raise SpotExecutionError(
+                    f"{unavailable}: Binance commission response is missing {name}."
+                )
+
             values: dict[str, Decimal] = {}
             for key in ("maker", "taker", "buyer", "seller"):
-                raw = rates.get(key, "0")
-                value = Decimal(str(raw))
-                if not value.is_finite() or value < 0:
-                    raise SpotExecutionError(f"Binance returned an invalid {name}.{key} rate.")
-                values[key] = value
+                if key not in rates or rates[key] is None:
+                    raise SpotExecutionError(
+                        f"{unavailable}: Binance commission response is missing {name}.{key}."
+                    )
+                values[key] = parse_commission_decimal(rates[key], f"{name}.{key}")
+
             return max(values["maker"], values["taker"]) + values["buyer"] + values["seller"]
 
-        standard_rate = conservative_component("standardCommission", required=True)
-        tax_rate = conservative_component("taxCommission", required=True)
-        special_rate = conservative_component("specialCommission", required=True)
+        standard_rate = conservative_component("standardCommission")
+        tax_rate = conservative_component("taxCommission")
+        special_rate = conservative_component("specialCommission")
         effective_rate = standard_rate * discount_multiplier + tax_rate + special_rate
-        if effective_rate <= 0:
-            raise SpotExecutionError("Commission rates do not provide a provable positive BNB fee reserve.")
+
+        if not effective_rate.is_finite() or effective_rate <= 0:
+            raise SpotExecutionError(
+                f"{unavailable}: Commission rates do not provide a provable positive BNB fee reserve."
+            )
 
         bnb_price = await self._ticker_price("BNBUSDT")
         account = await self._account()
         balances = self._balance_map(account)
         bnb_free = balances.get(bnb_asset, (Decimal("0"), Decimal("0")))[0]
+
         # Cover the BUY and the worst-priced single OCO exit, with an additional 50% reserve.
         reserve_factor = Decimal("1.50")
-        required_bnb = ((buy_notional + sell_notional) * effective_rate / bnb_price) * reserve_factor
-        if not required_bnb.is_finite() or required_bnb <= 0 or bnb_free < required_bnb:
+        required_bnb = (
+            (buy_notional + sell_notional) * effective_rate / bnb_price
+        ) * reserve_factor
+
+        if not required_bnb.is_finite() or required_bnb <= 0:
+            raise SpotExecutionError(
+                f"{unavailable}: The calculated BNB fee reserve is invalid."
+            )
+        if bnb_free < required_bnb:
             raise SpotExecutionError(
                 "Insufficient free BNB for the conservative BUY plus protective OCO commission reserve."
             )
+
         return {
             "symbol": symbol.upper(),
             "discount_asset": bnb_asset,
@@ -352,7 +410,13 @@ class BinanceSpotTestnetExecution:
         exposure = Decimal("0")
         marked_assets = Decimal("0")
         occupied_symbols: set[str] = set()
-        known_assets = {watch_symbol.removesuffix(quote_asset) for watch_symbol in self.settings.watchlist_symbols}
+        bnb_asset = self.settings.BNB_FEE_ASSET.upper()
+        known_assets = {
+            watch_symbol.removesuffix(quote_asset)
+            for watch_symbol in self.settings.watchlist_symbols
+        }
+        if bnb_asset != quote_asset:
+            known_assets.add(bnb_asset)
         for asset, (free, locked) in balances.items():
             if asset != quote_asset and free + locked > 0 and asset not in known_assets:
                 raise SpotExecutionError(f"Non-zero {asset} balance is outside the configured valuation watchlist.")
@@ -368,9 +432,20 @@ class BinanceSpotTestnetExecution:
                 if marked_value >= Decimal("1.00"):
                     occupied_symbols.add(watch_symbol)
 
+        if bnb_asset != quote_asset:
+            bnb_free, bnb_locked = balances.get(
+                bnb_asset, (Decimal("0"), Decimal("0"))
+            )
+            if bnb_free + bnb_locked > 0:
+                marked_assets += (
+                    (bnb_free + bnb_locked)
+                    * await self._ticker_price(f"{bnb_asset}{quote_asset}")
+                )
+
         equity = free_quote + locked_quote + marked_assets
+        risk_equity = min(equity, self.settings.MAX_CAPITAL_ALLOCATION_USD)
         risk_reason = self.store.update_risk_state(
-            equity=str(equity),
+            equity=str(risk_equity),
             trading_day=datetime.now(timezone.utc).date().isoformat(),
             max_daily_loss_percent=str(self.settings.MAX_DAILY_LOSS_PERCENT),
             max_drawdown_percent=str(self.settings.MAX_DRAWDOWN_PERCENT),
@@ -559,28 +634,108 @@ class BinanceSpotTestnetExecution:
     async def emergency_stop(self, reason: str = "MANUAL_EMERGENCY_STOP") -> dict[str, Any]:
         self._assert_safety_gate(self.settings)
         self.store.halt(reason)
+        cancelled: list[dict[str, Any]] = []
+        preserved_protective_orders: list[dict[str, Any]] = []
+        failures: list[str] = []
+        manual_review_required = False
         try:
             open_orders = await self._request("GET", "/api/v3/openOrders", signed=True)
-            cancelled: list[dict[str, Any]] = []
-            failures: list[str] = []
+            if not isinstance(open_orders, list):
+                raise SpotExecutionError("Emergency-stop open-order response is malformed.")
             for order in open_orders:
-                symbol = str(order.get("symbol", ""))
+                symbol = str(order.get("symbol", "")).upper()
                 client_id = str(order.get("clientOrderId", ""))
+                side = str(order.get("side", "")).upper()
+                if side == "SELL":
+                    preserved_protective_orders.append({
+                        "symbol": symbol,
+                        "clientOrderId": client_id,
+                        "reason": "Protective SELL order preserved; emergency stop does not remove exit protection.",
+                    })
+                    continue
+                if side != "BUY":
+                    failures.append(f"{symbol}:{client_id}:UNKNOWN_ORDER_SIDE")
+                    continue
                 try:
+                    order_list = (
+                        self.oco.store.get_by_child_client_id(client_id)
+                        if client_id else None
+                    )
+                    if (
+                        order_list
+                        and order_list.get("working_client_order_id") == client_id
+                    ):
+                        observed = await self.opoco.get_order_list(
+                            symbol=symbol,
+                            list_client_order_id=order_list["list_client_order_id"],
+                        )
+                        if observed is None:
+                            raise SpotOrderOutcomeUnknown(
+                                "OPOCO working order is not queryable; no replacement request was sent."
+                            )
+                        working = next(
+                            (
+                                item for item in observed.get("orderReports", [])
+                                if item.get("clientOrderId") == client_id
+                            ),
+                            {},
+                        )
+                        if str(working.get("status", "")).upper() == "FILLED":
+                            preserved_protective_orders.append({
+                                "symbol": symbol,
+                                "clientOrderId": client_id,
+                                "listClientOrderId": order_list["list_client_order_id"],
+                                "reason": "OPOCO BUY is filled; protective SELL legs must remain active.",
+                            })
+                            continue
+                        cancelled_list = await self.opoco.cancel_order_list(
+                            symbol=symbol,
+                            list_client_order_id=order_list["list_client_order_id"],
+                        )
+                        cancelled.append({
+                            "type": "OPOCO_LIST",
+                            "symbol": symbol,
+                            "listClientOrderId": order_list["list_client_order_id"],
+                            "result": cancelled_list,
+                        })
+                        if self.opoco._state(cancelled_list) == "PARTIAL_FILL_REVIEW":
+                            manual_review_required = True
+                            failures.append(
+                                f"{symbol}:{client_id}:PARTIAL_BUY_CANCELED_WITH_UNPROTECTED_INVENTORY_REVIEW_REQUIRED"
+                            )
+                        continue
+
                     result = await self._request(
-                        "DELETE", "/api/v3/order",
+                        "DELETE",
+                        "/api/v3/order",
                         {"symbol": symbol, "origClientOrderId": client_id},
                         signed=True,
                     )
                     cancelled.append(result)
-                    if client_id:
-                        self.store.update_order(client_id, state=self._status(result), response=result)
+                    if client_id and self.store.get_order(client_id) is not None:
+                        self.store.update_order(
+                            client_id, state=self._status(result), response=result
+                        )
                     await self._sync_fills_if_needed(result)
                 except Exception as exc:
                     failures.append(f"{symbol}:{client_id}:{type(exc).__name__}")
-            return {"halted": True, "cancelled": cancelled, "failures": failures}
+            return {
+                "halted": True,
+                "cancelled": cancelled,
+                "preserved_protective_orders": preserved_protective_orders,
+                "failures": failures,
+                "manual_review_required": manual_review_required,
+                "exposure_closed": False,
+            }
         except Exception as exc:
-            return {"halted": True, "cancelled": [], "failures": [type(exc).__name__]}
+            return {
+                "halted": True,
+                "cancelled": cancelled,
+                "preserved_protective_orders": preserved_protective_orders,
+                "failures": failures + [type(exc).__name__],
+                "manual_review_required": manual_review_required,
+                "exposure_closed": False,
+            }
 
     async def reconcile(self) -> dict[str, Any]:
         try:
@@ -595,10 +750,13 @@ class BinanceSpotTestnetExecution:
             balances_map = self._balance_map(account)
             quote_asset = self.settings.QUOTE_ASSET.upper()
             quote_free, quote_locked = balances_map.get(quote_asset, (Decimal("0"), Decimal("0")))
+            bnb_asset = self.settings.BNB_FEE_ASSET.upper()
             known_assets = {
                 watch_symbol.removesuffix(quote_asset)
                 for watch_symbol in self.settings.watchlist_symbols
             }
+            if bnb_asset != quote_asset:
+                known_assets.add(bnb_asset)
             marked_assets = Decimal("0")
             for asset, (free, locked) in balances_map.items():
                 if asset != quote_asset and free + locked > 0 and asset not in known_assets:
@@ -610,9 +768,19 @@ class BinanceSpotTestnetExecution:
                 free, locked = balances_map.get(base, (Decimal("0"), Decimal("0")))
                 if free + locked > 0:
                     marked_assets += (free + locked) * await self._ticker_price(watch_symbol)
+            if bnb_asset != quote_asset:
+                bnb_free, bnb_locked = balances_map.get(
+                    bnb_asset, (Decimal("0"), Decimal("0"))
+                )
+                if bnb_free + bnb_locked > 0:
+                    marked_assets += (
+                        (bnb_free + bnb_locked)
+                        * await self._ticker_price(f"{bnb_asset}{quote_asset}")
+                    )
             account_equity = quote_free + quote_locked + marked_assets
+            risk_equity = min(account_equity, self.settings.MAX_CAPITAL_ALLOCATION_USD)
             risk_reason = self.store.update_risk_state(
-                equity=str(account_equity),
+                equity=str(risk_equity),
                 trading_day=datetime.now(timezone.utc).date().isoformat(),
                 max_daily_loss_percent=str(self.settings.MAX_DAILY_LOSS_PERCENT),
                 max_drawdown_percent=str(self.settings.MAX_DRAWDOWN_PERCENT),

@@ -14,6 +14,7 @@ from typing import Any
 
 from config.config import Settings, TradingEnvironment, TradingMode
 from mumin_trader.exchanges.binance.order_store import SQLiteOrderStore
+from mumin_trader.exchanges.binance.spot_testnet_oco import validate_fixed_exit_risk
 from mumin_trader.exchanges.binance.spot_testnet_execution import (
     BinanceSpotTestnetExecution,
     SpotExecutionError,
@@ -68,7 +69,11 @@ class Evidence:
         os.chmod(self.summary_path, 0o600)
 
 
-def require_testnet(settings: Settings) -> None:
+def require_testnet(
+    settings: Settings,
+    *,
+    allow_trade_cap_override: bool = False,
+) -> None:
     if settings.TRADING_ENV is not TradingEnvironment.TESTNET:
         raise SpotExecutionError("Refusing: TRADING_ENV must be TESTNET.")
     if settings.TRADING_MODE is not TradingMode.TESTNET:
@@ -82,6 +87,38 @@ def require_testnet(settings: Settings) -> None:
         )
     if not settings.BINANCE_API_KEY.get_secret_value() or not settings.BINANCE_API_SECRET.get_secret_value():
         raise SpotExecutionError("Spot Testnet API credentials are missing from the private environment.")
+
+    fixed_limits = {
+        "INITIAL_CAPITAL_USD": Decimal("70.00"),
+        "MAX_CAPITAL_ALLOCATION_USD": Decimal("70.00"),
+        "MIN_TRADE_ALLOCATION_USD": Decimal("5.00"),
+        "CAPITAL_RESERVE_PERCENT": Decimal("20.00"),
+        "MAX_RISK_PER_TRADE_PERCENT": Decimal("0.50"),
+        "MAX_DAILY_LOSS_PERCENT": Decimal("2.00"),
+        "MAX_DRAWDOWN_PERCENT": Decimal("5.00"),
+        "MAX_OPEN_POSITIONS": 2,
+    }
+    for name, expected in fixed_limits.items():
+        if getattr(settings, name) != expected:
+            raise SpotExecutionError(
+                f"Refusing: {name} differs from the approved fixed Testnet risk policy."
+            )
+    trade_cap = settings.MAX_TRADE_ALLOCATION_USD
+    if trade_cap != Decimal("5.00"):
+        if (
+            not allow_trade_cap_override
+            or trade_cap <= Decimal("5.00")
+            or trade_cap > Decimal("6.00")
+        ):
+            raise SpotExecutionError(
+                "Refusing: Testnet trade cap is fixed at 5.00 USDT; a one-run override requires explicit operator action and cannot exceed 6.00 USDT."
+            )
+    if settings.QUOTE_ASSET.upper() != "USDT":
+        raise SpotExecutionError("Refusing: Testnet execution quote asset is fixed to USDT.")
+    if settings.BNB_FEE_ASSET.upper() != "BNB":
+        raise SpotExecutionError("Refusing: Testnet fee reserve asset is fixed to BNB.")
+    if not settings.ENABLE_BNB_FEE_DISCOUNT or not settings.REQUIRE_BNB_BALANCE_FOR_DISCOUNT:
+        raise SpotExecutionError("Refusing: explicit BNB fee-discount and balance-reserve checks are required.")
 
 
 def safe_error_message(exc: Exception, settings: Settings) -> str:
@@ -108,6 +145,20 @@ def round_down_to_step(quantity: Decimal, step: Decimal) -> Decimal:
     if step <= 0:
         raise SpotExecutionError("Exchange LOT_SIZE stepSize is invalid.")
     return (quantity / step).to_integral_value(rounding=ROUND_DOWN) * step
+
+
+def opoco_capability(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Report exchange-declared OPOCO eligibility without implying order acceptance."""
+    flags = {
+        "oto_allowed": metadata.get("otoAllowed") is True,
+        "opo_allowed": metadata.get("opoAllowed") is True,
+        "oco_allowed": metadata.get("ocoAllowed") is True,
+    }
+    return {
+        **flags,
+        "supported_by_exchange_info": all(flags.values()),
+        "evidence_scope": "EXCHANGE_INFO_CAPABILITY_ONLY",
+    }
 
 
 def commission_asset_mismatches(
@@ -234,6 +285,151 @@ async def watch_oco(
     return last or {}
 
 
+def exit_risk_metrics(
+    average_entry_price: Decimal,
+    take_profit_price: Decimal,
+    stop_price: Decimal,
+) -> dict[str, Any]:
+    if (
+        not average_entry_price.is_finite()
+        or average_entry_price <= 0
+        or take_profit_price <= average_entry_price
+        or stop_price >= average_entry_price
+    ):
+        return {
+            "average_entry_price": str(average_entry_price),
+            "actual_stop_loss_percent": None,
+            "actual_take_profit_percent": None,
+            "exit_risk_policy_match": False,
+        }
+    stop_percent = (
+        (average_entry_price - stop_price) / average_entry_price * Decimal("100")
+    )
+    take_profit_percent = (
+        (take_profit_price - average_entry_price) / average_entry_price * Decimal("100")
+    )
+    tolerance = Decimal("0.02")
+    return {
+        "average_entry_price": str(average_entry_price),
+        "actual_stop_loss_percent": str(stop_percent),
+        "actual_take_profit_percent": str(take_profit_percent),
+        "exit_risk_policy_match": (
+            abs(stop_percent - Decimal("0.50")) <= tolerance
+            and abs(take_profit_percent - Decimal("1.25")) <= tolerance
+        ),
+    }
+
+
+def opoco_exit_risk_metrics(
+    average_entry_price: Decimal,
+    protective_children: list[dict[str, Any]],
+) -> dict[str, Any]:
+    above = next(
+        (item for item in protective_children if item.get("type") == "LIMIT_MAKER"),
+        None,
+    )
+    below = next(
+        (item for item in protective_children if item.get("type") == "STOP_LOSS_LIMIT"),
+        None,
+    )
+    if above is None or below is None:
+        result = exit_risk_metrics(average_entry_price, Decimal("0"), Decimal("0"))
+        result["exchange_exit_prices_verified"] = False
+        return result
+    try:
+        take_profit = Decimal(str(above["price"]))
+        stop_price = Decimal(str(below["stopPrice"]))
+    except (KeyError, ArithmeticError, ValueError):
+        result = exit_risk_metrics(average_entry_price, Decimal("0"), Decimal("0"))
+        result["exchange_exit_prices_verified"] = False
+        return result
+    result = exit_risk_metrics(average_entry_price, take_profit, stop_price)
+    result["exchange_take_profit_price"] = str(take_profit)
+    result["exchange_stop_price"] = str(stop_price)
+    result["exchange_exit_prices_verified"] = (
+        take_profit.is_finite() and stop_price.is_finite()
+        and take_profit > 0 and stop_price > 0
+    )
+    result["exit_risk_policy_match"] = (
+        result["exit_risk_policy_match"] and result["exchange_exit_prices_verified"]
+    )
+    return result
+
+
+def opoco_result(list_response: dict[str, Any]) -> dict[str, Any]:
+    reports = list_response.get("orderReports", [])
+    normalized = [
+        {
+            "orderId": str(item.get("orderId", "")),
+            "clientOrderId": str(item.get("clientOrderId", "")),
+            "type": str(item.get("type", "")).upper(),
+            "side": str(item.get("side", "")).upper(),
+            "status": str(item.get("status", "")).upper(),
+            "executedQty": str(item.get("executedQty", "0")),
+            "origQty": str(item.get("origQty", "0")),
+            "price": str(item.get("price", "0")),
+            "stopPrice": str(item.get("stopPrice", "0")),
+        }
+        for item in reports if isinstance(item, dict)
+    ]
+    working = next(
+        (item for item in normalized if item["side"] == "BUY" and item["type"] == "LIMIT"),
+        None,
+    )
+    above = next((item for item in normalized if item["type"] == "LIMIT_MAKER"), None)
+    below = next((item for item in normalized if item["type"] == "STOP_LOSS_LIMIT"), None)
+    order_list_id = str(list_response.get("orderListId", ""))
+    list_status = str(list_response.get("listOrderStatus", "")).upper()
+    ids = [item["orderId"] for item in normalized]
+    mutual_cancel = bool(
+        working and above and below
+        and order_list_id and list_response.get("listClientOrderId")
+        and list_status == "ALL_DONE"
+        and len(normalized) == 3
+        and len(set(ids)) == 3 and all(ids)
+        and working["status"] == "FILLED"
+        and (
+            (above["status"] == "FILLED" and below["status"] in {"CANCELED", "EXPIRED"})
+            or (below["status"] == "FILLED" and above["status"] in {"CANCELED", "EXPIRED"})
+        )
+    )
+    return {
+        "orderListId": order_list_id,
+        "listClientOrderId": str(list_response.get("listClientOrderId", "")),
+        "listOrderStatus": list_status,
+        "working_order": working,
+        "protective_children": [item for item in (above, below) if item],
+        "children": normalized,
+        "mutual_cancel_proven": mutual_cancel,
+    }
+
+
+async def watch_opoco(
+    client: BinanceSpotTestnetExecution,
+    *,
+    symbol: str,
+    list_client_order_id: str,
+    timeout_seconds: int,
+    poll_seconds: float,
+    evidence: Evidence,
+) -> dict[str, Any]:
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    last: dict[str, Any] | None = None
+    while asyncio.get_running_loop().time() < deadline:
+        last = await client.opoco.get_order_list(
+            symbol=symbol,
+            list_client_order_id=list_client_order_id,
+        )
+        if last is None:
+            raise SpotOrderOutcomeUnknown("OPOCO list is not visible; its exchange outcome is unresolved.")
+        evidence.record("opoco_order_list_observed", last)
+        state = client.opoco._state(last)
+        if state in {"COMPLETE", "CANCELED", "PARTIAL_FILL_REVIEW"}:
+            return last
+        await asyncio.sleep(poll_seconds)
+    return last or {}
+
+
 async def run_cycle(args: argparse.Namespace) -> int:
     if args.testnet_max_order_usdt is None:
         settings = Settings()
@@ -242,7 +438,7 @@ async def run_cycle(args: argparse.Namespace) -> int:
         if not testnet_cap.is_finite() or testnet_cap <= 0 or testnet_cap > Decimal("6.00"):
             raise SpotExecutionError("The Testnet-only order-cap override must be between 0 and 6.00 USDT.")
         settings = Settings(MAX_TRADE_ALLOCATION_USD=testnet_cap)
-    require_testnet(settings)
+    require_testnet(settings, allow_trade_cap_override=args.testnet_max_order_usdt is not None)
     if args.confirm_testnet_cycle != "TESTNET_ONLY":
         raise SpotExecutionError("Explicit TESTNET_ONLY confirmation is required.")
     symbol = args.symbol.upper()
@@ -320,7 +516,8 @@ async def run_cycle(args: argparse.Namespace) -> int:
             "symbol_info": symbol_info, "buy_notional": notional,
         })
 
-        # Validate both legs before exposing any Testnet capital.
+        # Validate the configured 0.50% stop and 1.25% target before exposing any Testnet capital.
+        validate_fixed_exit_risk(buy_price, take_profit, stop_price)
         buy_params = await client._validator.validate_limit_order(
             symbol=symbol, side="BUY", quantity=quantity,
             price=buy_price, client_order_id=buy_client_id,
@@ -378,6 +575,12 @@ async def run_cycle(args: argparse.Namespace) -> int:
         buy_summary = store.order_fill_summary(
             symbol, int(buy_order_id), base_asset=base_asset,
         )
+        gross_buy_quantity = Decimal(buy_summary["gross_quantity"])
+        average_entry_price = (
+            Decimal(buy_summary["quote_quantity"]) / gross_buy_quantity
+            if gross_buy_quantity > 0 else Decimal("0")
+        )
+        exit_risk = exit_risk_metrics(average_entry_price, take_profit, stop_price)
         buy_fills = store.trade_fills_for_order(symbol, int(buy_order_id))
         buy_fee_asset_mismatches = commission_asset_mismatches(buy_fills, settings.BNB_FEE_ASSET)
         evidence.record("buy_fills_from_myTrades", {
@@ -476,6 +679,10 @@ async def run_cycle(args: argparse.Namespace) -> int:
             "buy_order_id": str(buy_order_id),
             "buy_status": str(buy_order.get("status", "")).upper(),
             "buy_fill_summary": buy_summary,
+            "actual_entry_average_price": exit_risk["average_entry_price"],
+            "actual_stop_loss_percent": exit_risk["actual_stop_loss_percent"],
+            "actual_take_profit_percent": exit_risk["actual_take_profit_percent"],
+            "exit_risk_policy_match": exit_risk["exit_risk_policy_match"],
             "bnb_fee_preflight": bnb_fee_preflight,
             "buy_fee_asset_mismatches": buy_fee_asset_mismatches,
             "oco_fee_asset_mismatches": oco_fee_asset_mismatches,
@@ -498,6 +705,7 @@ async def run_cycle(args: argparse.Namespace) -> int:
                 "TESTNET_CYCLE_VERIFIED"
                 if proof["mutual_cancel_proven"] and fifo_complete
                 and open_inventory_quantity == 0 and unprotected_dust == 0
+                and exit_risk["exit_risk_policy_match"]
                 and oco_children_cover_quantity
                 and not all_fee_asset_mismatches
                 and not fill_discrepancies and not unmatched and reconciliation_clean
@@ -529,6 +737,343 @@ async def run_cycle(args: argparse.Namespace) -> int:
             "symbol": symbol,
             "buy_client_order_id": buy_client_id,
             "oco_list_client_order_id": list_client_id,
+            "database": str(database),
+            "evidence_directory": str(directory),
+            "summary_file": str(evidence.summary_path),
+            "mainnet_used": False,
+            "secrets_written": False,
+        }, indent=2))
+
+
+async def run_opoco_cycle(args: argparse.Namespace) -> int:
+    if args.testnet_max_order_usdt is None:
+        settings = Settings()
+    else:
+        testnet_cap = Decimal(args.testnet_max_order_usdt)
+        if not testnet_cap.is_finite() or testnet_cap <= 0 or testnet_cap > Decimal("6.00"):
+            raise SpotExecutionError("The Testnet-only order-cap override must be between 0 and 6.00 USDT.")
+        settings = Settings(MAX_TRADE_ALLOCATION_USD=testnet_cap)
+    require_testnet(settings, allow_trade_cap_override=args.testnet_max_order_usdt is not None)
+    if args.confirm_testnet_cycle != "TESTNET_ONLY":
+        raise SpotExecutionError("Explicit TESTNET_ONLY confirmation is required.")
+
+    symbol = args.symbol.upper()
+    if symbol not in settings.watchlist_symbols:
+        raise SpotExecutionError("The selected symbol is not in the configured watchlist.")
+    quantity = Decimal(args.quantity)
+    working_price = Decimal(args.working_price)
+    take_profit = Decimal(args.take_profit_price)
+    stop_price = Decimal(args.stop_price)
+    stop_limit = Decimal(args.stop_limit_price)
+    values = (quantity, working_price, take_profit, stop_price, stop_limit)
+    if not all(value.is_finite() and value > 0 for value in values):
+        raise SpotExecutionError("OPOCO quantity and prices must be finite positive decimals.")
+    if (
+        args.buy_timeout_seconds < 10 or args.buy_timeout_seconds > 3600
+        or args.oco_timeout_seconds < 10 or args.oco_timeout_seconds > 3600
+        or args.poll_seconds <= 0 or args.poll_seconds > 60
+    ):
+        raise SpotExecutionError("OPOCO timeouts or polling interval are outside safe bounds.")
+
+    run_id = make_run_id()
+    directory = Path(args.evidence_root).expanduser() / run_id
+    directory.mkdir(parents=True, exist_ok=False)
+    os.chmod(directory, 0o700)
+    database = directory / "testnet-ledger.sqlite3"
+    os.chmod(directory, 0o700)
+    store = SQLiteOrderStore(str(database))
+    client = BinanceSpotTestnetExecution(settings, store)
+    list_client_id = f"mumin-opoco-{uuid.uuid4().hex[:10]}"
+    working_client_id = f"mumin-work-{uuid.uuid4().hex[:10]}"
+    above_client_id = f"mumin-tp-{uuid.uuid4().hex[:10]}"
+    below_client_id = f"mumin-sl-{uuid.uuid4().hex[:10]}"
+    evidence = Evidence(directory)
+    summary: dict[str, Any] = {
+        "run_id": run_id,
+        "environment": "BINANCE_SPOT_TESTNET",
+        "protection_mode": "OPOCO",
+        "rest_base_url": TESTNET_REST_BASE_URL,
+        "symbol": symbol,
+        "testnet_max_order_usdt": str(settings.MAX_TRADE_ALLOCATION_USD),
+        "testnet_cap_override_used": args.testnet_max_order_usdt is not None,
+        "opoco_list_client_order_id": list_client_id,
+        "working_client_order_id": working_client_id,
+        "pending_above_client_order_id": above_client_id,
+        "pending_below_client_order_id": below_client_id,
+        "database": str(database),
+        "evidence_directory": str(directory),
+        "started_at": utc_now(),
+        "status": "RUNNING",
+        "mainnet_used": False,
+        "secrets_written": False,
+    }
+    evidence.record("opoco_run_started", {
+        "run_id": run_id,
+        "symbol": symbol,
+        "quantity": quantity,
+        "working_price": working_price,
+        "take_profit_price": take_profit,
+        "stop_price": stop_price,
+        "stop_limit_price": stop_limit,
+        "rest_base_url": TESTNET_REST_BASE_URL,
+    })
+    try:
+        initial = await client.reconcile()
+        evidence.record("initial_reconciliation", initial)
+        if initial["discrepancies"] or initial["halted"]:
+            raise SpotExecutionError(
+                "Initial Testnet reconciliation is not clean. No OPOCO was submitted; inspect evidence."
+            )
+        if not initial["realized_pnl"]["complete"]:
+            raise SpotExecutionError("Initial FIFO/fee ledger is incomplete; no OPOCO was submitted.")
+
+        ticker = await client._ticker_price(symbol)
+        symbol_info = await client._exchange_symbol(symbol)
+        capability = opoco_capability(symbol_info)
+        base_asset = str(symbol_info.get("baseAsset", "")).upper()
+        quote_asset = str(symbol_info.get("quoteAsset", "")).upper()
+        if quote_asset != settings.QUOTE_ASSET.upper():
+            raise SpotExecutionError("OPOCO lifecycle runner only permits the configured USDT quote asset.")
+        if not capability["supported_by_exchange_info"]:
+            raise SpotExecutionError(
+                "Exchange Information does not enable OPOCO for this symbol; no order was submitted."
+            )
+        working_notional = quantity * working_price
+        if (
+            working_notional < settings.MIN_TRADE_ALLOCATION_USD
+            or working_notional > settings.MAX_TRADE_ALLOCATION_USD
+        ):
+            raise SpotExecutionError("OPOCO working BUY notional is outside configured bounds.")
+
+        params, validated_metadata = await client.opoco._validate_request(
+            symbol=symbol,
+            quantity=quantity,
+            working_price=working_price,
+            take_profit_price=take_profit,
+            stop_price=stop_price,
+            stop_limit_price=stop_limit,
+            list_client_order_id=list_client_id,
+            working_client_order_id=working_client_id,
+            pending_above_client_order_id=above_client_id,
+            pending_below_client_order_id=below_client_id,
+        )
+        fee_preflight = await client._bnb_fee_readiness(
+            symbol=symbol,
+            buy_notional=working_notional,
+            sell_notional=quantity * max(take_profit, stop_limit),
+        )
+        evidence.record("opoco_pre_submit_validation", {
+            "exchange_capability": capability,
+            "working_order_template": params,
+            "symbol_info": validated_metadata,
+            "last_price": ticker,
+            "bnb_fee_preflight": fee_preflight,
+        })
+
+        initial_response = await client.opoco.place_buy_opoco(
+            symbol=symbol,
+            quantity=quantity,
+            working_price=working_price,
+            take_profit_price=take_profit,
+            stop_price=stop_price,
+            stop_limit_price=stop_limit,
+            list_client_order_id=list_client_id,
+            working_client_order_id=working_client_id,
+            pending_above_client_order_id=above_client_id,
+            pending_below_client_order_id=below_client_id,
+        )
+        evidence.record("opoco_submission_response", initial_response)
+
+        observed = await watch_opoco(
+            client,
+            symbol=symbol,
+            list_client_order_id=list_client_id,
+            timeout_seconds=args.buy_timeout_seconds,
+            poll_seconds=args.poll_seconds,
+            evidence=evidence,
+        )
+        state = client.opoco._state(observed)
+        proof = opoco_result(observed)
+        working_report = proof["working_order"]
+        working_status = str((working_report or {}).get("status", "")).upper()
+
+        if state == "WORKING":
+            observed = await client.opoco.cancel_order_list(
+                symbol=symbol,
+                list_client_order_id=list_client_id,
+            )
+            evidence.record("opoco_working_order_cancel_after_timeout", observed)
+            state = client.opoco._state(observed)
+            proof = opoco_result(observed)
+            working_report = proof["working_order"]
+            working_status = str((working_report or {}).get("status", "")).upper()
+        elif state == "PARTIAL_FILL_REVIEW" and working_status != "FILLED":
+            observed = await client.opoco.cancel_order_list(
+                symbol=symbol,
+                list_client_order_id=list_client_id,
+            )
+            evidence.record("opoco_partial_working_order_cancel", observed)
+            state = client.opoco._state(observed)
+            proof = opoco_result(observed)
+            working_report = proof["working_order"]
+            working_status = str((working_report or {}).get("status", "")).upper()
+
+        if state == "PROTECTION_ARMED":
+            observed = await watch_opoco(
+                client,
+                symbol=symbol,
+                list_client_order_id=list_client_id,
+                timeout_seconds=args.oco_timeout_seconds,
+                poll_seconds=args.poll_seconds,
+                evidence=evidence,
+            )
+            state = client.opoco._state(observed)
+            proof = opoco_result(observed)
+        evidence.record("opoco_final_exchange_state", observed)
+
+        await client.sync_trade_history()
+        proof = opoco_result(observed)
+        working_report = proof["working_order"]
+        protective_children = proof["protective_children"]
+        working_order_id = (
+            int(working_report["orderId"])
+            if working_report and str(working_report.get("orderId", "")).isdigit()
+            else None
+        )
+        buy_summary = (
+            store.order_fill_summary(symbol, working_order_id, base_asset=base_asset)
+            if working_order_id is not None else None
+        )
+        gross_buy_quantity = (
+            Decimal(buy_summary["gross_quantity"])
+            if buy_summary is not None else Decimal("0")
+        )
+        average_entry_price = (
+            Decimal(buy_summary["quote_quantity"]) / gross_buy_quantity
+            if gross_buy_quantity > 0 else Decimal("0")
+        )
+        exit_risk = opoco_exit_risk_metrics(
+            average_entry_price, protective_children,
+        )
+        buy_fills = (
+            store.trade_fills_for_order(symbol, working_order_id)
+            if working_order_id is not None else []
+        )
+        buy_fee_mismatches = commission_asset_mismatches(buy_fills, settings.BNB_FEE_ASSET)
+        child_fills: dict[str, list[dict[str, Any]]] = {}
+        child_fee_mismatches: list[dict[str, str]] = []
+        for child in protective_children:
+            child_id = str(child.get("orderId", ""))
+            if child_id.isdigit():
+                fills = store.trade_fills_for_order(symbol, int(child_id))
+                child_fills[child_id] = fills
+                child_fee_mismatches.extend(
+                    commission_asset_mismatches(fills, settings.BNB_FEE_ASSET)
+                )
+        pnl = store.realized_pnl_report(settings.QUOTE_ASSET)
+        reconciliation = await client.reconcile()
+        fill_discrepancies = store.order_fill_quantity_discrepancies()
+        unmatched = store.unmatched_trade_order_ids()
+        fifo_open = Decimal(
+            str(pnl.get("symbols", {}).get(symbol, {}).get("open_quantity", "0"))
+        )
+        net_quantity = (
+            Decimal(buy_summary["net_base_quantity"])
+            if buy_summary is not None else Decimal("0")
+        )
+        filters = {
+            item.get("filterType"): item
+            for item in symbol_info.get("filters", [])
+            if isinstance(item, dict)
+        }
+        lot = filters.get("LOT_SIZE", {})
+        step = Decimal(str(lot.get("stepSize", "0")))
+        sellable_net = round_down_to_step(net_quantity, step) if net_quantity > 0 else Decimal("0")
+        child_quantities = [
+            Decimal(str(child.get("origQty", "0")))
+            for child in protective_children
+        ]
+        protected_quantity = min(child_quantities) if len(child_quantities) == 2 else Decimal("0")
+        unprotected_dust = net_quantity - protected_quantity
+        children_cover = (
+            len(child_quantities) == 2
+            and child_quantities[0] == child_quantities[1] == sellable_net
+            and protected_quantity <= net_quantity
+        )
+        all_fee_mismatches = buy_fee_mismatches + child_fee_mismatches
+        reconciliation_clean = (
+            not reconciliation["discrepancies"] and not reconciliation["halted"]
+        )
+        verified = (
+            proof["mutual_cancel_proven"]
+            and bool(pnl.get("complete"))
+            and fifo_open == 0
+            and unprotected_dust == net_quantity - sellable_net
+            and unprotected_dust == 0
+            and children_cover
+            and exit_risk["exit_risk_policy_match"]
+            and not all_fee_mismatches
+            and not fill_discrepancies
+            and not unmatched
+            and reconciliation_clean
+        )
+        summary.update({
+            "opoco_state": state,
+            "order_list_id": proof["orderListId"],
+            "working_order_id": str(working_order_id or ""),
+            "working_status": working_status,
+            "working_fill_summary": buy_summary,
+            "actual_entry_average_price": exit_risk["average_entry_price"],
+            "actual_stop_loss_percent": exit_risk["actual_stop_loss_percent"],
+            "actual_take_profit_percent": exit_risk["actual_take_profit_percent"],
+            "exit_risk_policy_match": exit_risk["exit_risk_policy_match"],
+            "working_fee_asset_mismatches": buy_fee_mismatches,
+            "opoco_children": proof["children"],
+            "protective_child_fills": child_fills,
+            "protective_fee_asset_mismatches": child_fee_mismatches,
+            "mutual_cancel_proven": proof["mutual_cancel_proven"],
+            "net_base_quantity": str(net_quantity),
+            "protected_quantity": str(protected_quantity),
+            "sellable_net_quantity": str(sellable_net),
+            "unprotected_dust_quantity": str(unprotected_dust),
+            "opoco_children_cover_quantity": children_cover,
+            "fifo_complete": bool(pnl.get("complete")),
+            "fifo_open_inventory_quantity": str(fifo_open),
+            "fifo_realized_pnl": pnl,
+            "fill_discrepancies": fill_discrepancies,
+            "unmatched_trade_orders": unmatched,
+            "reconciliation_discrepancies": reconciliation["discrepancies"],
+            "reconciliation_clean": reconciliation_clean,
+            "all_fee_asset_mismatches": all_fee_mismatches,
+            "status": "TESTNET_OPOCO_CYCLE_VERIFIED" if verified else "TESTNET_OPOCO_CYCLE_INCOMPLETE",
+            "finished_at": utc_now(),
+        })
+        evidence.record("opoco_fifo_realized_pnl_report", pnl)
+        evidence.record("opoco_final_reconciliation", reconciliation)
+        return 0 if verified else 2
+    except Exception as exc:
+        store.halt("TESTNET_OPOCO_LIFECYCLE_INCOMPLETE")
+        summary.update({
+            "status": "TESTNET_OPOCO_LIFECYCLE_INCOMPLETE",
+            "error_type": type(exc).__name__,
+            "error": safe_error_message(exc, settings),
+            "finished_at": utc_now(),
+        })
+        evidence.record("opoco_run_error", {
+            "type": type(exc).__name__,
+            "message": safe_error_message(exc, settings),
+        })
+        return 2
+    finally:
+        evidence.summary(summary)
+        await client.close()
+        print(json.dumps({
+            "status": summary["status"],
+            "error": summary.get("error"),
+            "run_id": run_id,
+            "symbol": symbol,
+            "opoco_list_client_order_id": list_client_id,
+            "working_client_order_id": working_client_id,
             "database": str(database),
             "evidence_directory": str(directory),
             "summary_file": str(evidence.summary_path),
@@ -569,6 +1114,7 @@ async def inspect_market(args: argparse.Namespace) -> int:
             "quote_asset": metadata.get("quoteAsset"),
             "status": metadata.get("status"),
             "is_spot_trading_allowed": metadata.get("isSpotTradingAllowed"),
+            "opoco_capability": opoco_capability(metadata),
             "price_filter": filters.get("PRICE_FILTER"),
             "lot_size_filter": filters.get("LOT_SIZE"),
             "notional_filter": filters.get("NOTIONAL") or filters.get("MIN_NOTIONAL"),
@@ -644,6 +1190,151 @@ async def watch_existing(args: argparse.Namespace) -> int:
         await client.close()
 
 
+async def watch_opoco_existing(args: argparse.Namespace) -> int:
+    settings = Settings()
+    require_testnet(settings)
+    directory = Path(args.evidence_dir).expanduser()
+    evidence = Evidence(directory)
+    evidence.summary_path = directory / "watch-opoco-summary.json"
+    store = SQLiteOrderStore(args.database)
+    client = BinanceSpotTestnetExecution(settings, store)
+    try:
+        result = await watch_opoco(
+            client,
+            symbol=args.symbol.upper(),
+            list_client_order_id=args.list_client_order_id,
+            timeout_seconds=args.timeout_seconds,
+            poll_seconds=args.poll_seconds,
+            evidence=evidence,
+        )
+        await client.sync_trade_history()
+        pnl = store.realized_pnl_report(settings.QUOTE_ASSET)
+        reconciliation = await client.reconcile()
+        proof = opoco_result(result)
+        symbol_info = await client._exchange_symbol(args.symbol.upper())
+        base_asset = str(symbol_info.get("baseAsset", "")).upper()
+        working_report = proof["working_order"]
+        working_order_id = (
+            int(working_report["orderId"])
+            if working_report and str(working_report.get("orderId", "")).isdigit()
+            else None
+        )
+        buy_summary = (
+            store.order_fill_summary(
+                args.symbol.upper(), working_order_id, base_asset=base_asset
+            )
+            if working_order_id is not None else None
+        )
+        gross_buy_quantity = (
+            Decimal(buy_summary["gross_quantity"])
+            if buy_summary is not None else Decimal("0")
+        )
+        average_entry_price = (
+            Decimal(buy_summary["quote_quantity"]) / gross_buy_quantity
+            if gross_buy_quantity > 0 else Decimal("0")
+        )
+        exit_risk = opoco_exit_risk_metrics(
+            average_entry_price, proof["protective_children"],
+        )
+        net_quantity = (
+            Decimal(buy_summary["net_base_quantity"])
+            if buy_summary is not None else Decimal("0")
+        )
+        filters = {
+            item.get("filterType"): item
+            for item in symbol_info.get("filters", [])
+            if isinstance(item, dict)
+        }
+        step = Decimal(str(filters.get("LOT_SIZE", {}).get("stepSize", "0")))
+        sellable_net = round_down_to_step(net_quantity, step) if net_quantity > 0 else Decimal("0")
+        child_quantities = [
+            Decimal(str(child.get("origQty", "0")))
+            for child in proof["protective_children"]
+        ]
+        protected_quantity = min(child_quantities) if len(child_quantities) == 2 else Decimal("0")
+        unprotected_dust = net_quantity - protected_quantity
+        children_cover = (
+            len(child_quantities) == 2
+            and child_quantities[0] == child_quantities[1] == sellable_net
+            and protected_quantity <= net_quantity
+        )
+        fifo_open = Decimal(
+            str(pnl.get("symbols", {}).get(args.symbol.upper(), {}).get("open_quantity", "0"))
+        )
+        fee_mismatches = []
+        for child in proof["children"]:
+            child_id = str(child.get("orderId", ""))
+            if child_id.isdigit():
+                fee_mismatches.extend(
+                    commission_asset_mismatches(
+                        store.trade_fills_for_order(args.symbol.upper(), int(child_id)),
+                        settings.BNB_FEE_ASSET,
+                    )
+                )
+        fill_discrepancies = store.order_fill_quantity_discrepancies()
+        unmatched = store.unmatched_trade_order_ids()
+        reconciliation_clean = (
+            not reconciliation["discrepancies"] and not reconciliation["halted"]
+        )
+        verified = (
+            proof["mutual_cancel_proven"]
+            and bool(pnl.get("complete"))
+            and fifo_open == 0
+            and unprotected_dust == 0
+            and children_cover
+            and exit_risk["exit_risk_policy_match"]
+            and not fee_mismatches
+            and not fill_discrepancies
+            and not unmatched
+            and reconciliation_clean
+        )
+        summary = {
+            "environment": "BINANCE_SPOT_TESTNET",
+            "protection_mode": "OPOCO",
+            "symbol": args.symbol.upper(),
+            "order_list_id": proof["orderListId"],
+            "opoco_list_client_order_id": args.list_client_order_id,
+            "opoco_state": client.opoco._state(result),
+            "opoco_children": proof["children"],
+            "mutual_cancel_proven": proof["mutual_cancel_proven"],
+            "working_order_id": str(working_order_id or ""),
+            "working_fill_summary": buy_summary,
+            "actual_entry_average_price": exit_risk["average_entry_price"],
+            "actual_stop_loss_percent": exit_risk["actual_stop_loss_percent"],
+            "actual_take_profit_percent": exit_risk["actual_take_profit_percent"],
+            "exit_risk_policy_match": exit_risk["exit_risk_policy_match"],
+            "net_base_quantity": str(net_quantity),
+            "protected_quantity": str(protected_quantity),
+            "sellable_net_quantity": str(sellable_net),
+            "unprotected_dust_quantity": str(unprotected_dust),
+            "opoco_children_cover_quantity": children_cover,
+            "fifo_complete": bool(pnl.get("complete")),
+            "fifo_open_inventory_quantity": str(fifo_open),
+            "fifo_realized_pnl": pnl,
+            "fee_asset_mismatches": fee_mismatches,
+            "fill_discrepancies": fill_discrepancies,
+            "unmatched_trade_orders": unmatched,
+            "reconciliation_discrepancies": reconciliation["discrepancies"],
+            "reconciliation_clean": reconciliation_clean,
+            "status": "TESTNET_OPOCO_CYCLE_VERIFIED" if verified else "TESTNET_OPOCO_CYCLE_INCOMPLETE",
+            "finished_at": utc_now(),
+        }
+        evidence.summary(summary)
+        print(json.dumps({
+            "status": summary["status"],
+            "order_list_id": summary["order_list_id"],
+            "opoco_state": summary["opoco_state"],
+            "mutual_cancel_proven": summary["mutual_cancel_proven"],
+            "evidence_directory": str(directory),
+            "summary_file": str(evidence.summary_path),
+            "mainnet_used": False,
+            "secrets_written": False,
+        }, indent=2))
+        return 0 if verified else 2
+    finally:
+        await client.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Supervised BUY -> protective OCO -> FIFO evidence runner. Binance Spot Testnet only."
@@ -665,6 +1356,26 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--evidence-root", default="artifacts/binance-spot-testnet-evidence")
     run.add_argument("--confirm-testnet-cycle", required=True, choices=("TESTNET_ONLY",))
 
+    opoco = commands.add_parser(
+        "run-opoco",
+        help="Run one explicitly confirmed Spot Testnet OPOCO lifecycle.",
+    )
+    opoco.add_argument("--symbol", default="BTCUSDT")
+    opoco.add_argument("--quantity", required=True)
+    opoco.add_argument("--working-price", required=True)
+    opoco.add_argument("--take-profit-price", required=True)
+    opoco.add_argument("--stop-price", required=True)
+    opoco.add_argument("--stop-limit-price", required=True)
+    opoco.add_argument("--buy-timeout-seconds", type=int, default=120)
+    opoco.add_argument("--oco-timeout-seconds", type=int, default=900)
+    opoco.add_argument("--poll-seconds", type=float, default=2)
+    opoco.add_argument(
+        "--testnet-max-order-usdt",
+        help="Optional one-run Testnet-only cap override, hard-limited to 6.00 USDT.",
+    )
+    opoco.add_argument("--evidence-root", default="artifacts/binance-spot-testnet-evidence")
+    opoco.add_argument("--confirm-testnet-cycle", required=True, choices=("TESTNET_ONLY",))
+
     inspect = commands.add_parser("inspect", help="Read the current Testnet price and filters; sends no orders.")
     inspect.add_argument("--symbol", default="BTCUSDT")
     inspect.add_argument("--database", default="data/testnet-inspect.sqlite3")
@@ -684,6 +1395,16 @@ def build_parser() -> argparse.ArgumentParser:
     watch.add_argument("--evidence-dir", required=True)
     watch.add_argument("--timeout-seconds", type=int, default=1800)
     watch.add_argument("--poll-seconds", type=float, default=3)
+    watch_opoco = commands.add_parser(
+        "watch-opoco",
+        help="Continue monitoring a previously submitted OPOCO list; sends no new orders.",
+    )
+    watch_opoco.add_argument("--symbol", required=True)
+    watch_opoco.add_argument("--list-client-order-id", required=True)
+    watch_opoco.add_argument("--database", required=True)
+    watch_opoco.add_argument("--evidence-dir", required=True)
+    watch_opoco.add_argument("--timeout-seconds", type=int, default=1800)
+    watch_opoco.add_argument("--poll-seconds", type=float, default=3)
     return parser
 
 
@@ -692,8 +1413,12 @@ def main() -> None:
     try:
         if args.command == "run":
             code = asyncio.run(run_cycle(args))
+        elif args.command == "run-opoco":
+            code = asyncio.run(run_opoco_cycle(args))
         elif args.command == "inspect":
             code = asyncio.run(inspect_market(args))
+        elif args.command == "watch-opoco":
+            code = asyncio.run(watch_opoco_existing(args))
         else:
             code = asyncio.run(watch_existing(args))
     except Exception as exc:

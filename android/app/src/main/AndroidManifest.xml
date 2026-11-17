@@ -12,7 +12,7 @@
         android:theme="@style/Theme.MuminTrader"
         android:usesCleartextTraffic="false">
         <activity
-            android:name=".LiveDashboardActivity"
+            android:name=".UnifiedDashboardActivity"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:exported="true">
             <intent-filter>
@@ -20,6 +20,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".LiveDashboardActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false" />
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

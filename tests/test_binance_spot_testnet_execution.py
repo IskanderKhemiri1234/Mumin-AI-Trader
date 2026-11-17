@@ -7,13 +7,17 @@ import pytest
 
 from config.config import Settings, TradingEnvironment, TradingMode
 from mumin_trader.exchanges.binance.order_store import OrderStoreError, SQLiteOrderStore
-from mumin_trader.exchanges.binance.spot_testnet_oco import BinanceSpotTestnetOCO
+from mumin_trader.exchanges.binance.spot_testnet_oco import (
+    BinanceSpotTestnetOCO,
+    validate_fixed_exit_risk,
+)
 from mumin_trader.exchanges.binance.spot_testnet_execution import (
     BinanceSpotTestnetExecution,
     SpotExecutionError,
     SpotOrderOutcomeUnknown,
 )
 from mumin_trader.exchanges.binance.testnet_order_preflight import TESTNET_REST_BASE_URL
+from scripts.binance_spot_testnet_lifecycle import opoco_exit_risk_metrics
 
 
 def settings(**overrides: object) -> Settings:
@@ -1154,3 +1158,406 @@ async def test_bnb_fee_readiness_rejects_disabled_account_discount_before_any_or
             )
     finally:
         await client.close()
+
+
+@pytest.mark.parametrize(
+    "invalid_case",
+    [
+        "missing_discount_asset",
+        "zero_discount_multiplier",
+        "zero_commission_rates",
+        "non_numeric_commission_rate",
+    ],
+)
+@pytest.mark.asyncio
+async def test_bnb_fee_readiness_rejects_unverifiable_testnet_fee_data(
+    tmp_path, invalid_case: str,
+) -> None:
+    seen: list[httpx.Request] = []
+    base_handler = bnb_fee_handler(free_bnb="1.0")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/v3/account/commission":
+            payload = bnb_commission_response()
+
+            if invalid_case == "missing_discount_asset":
+                discount = payload["discount"]
+                assert isinstance(discount, dict)
+                discount["discountAsset"] = None
+
+            elif invalid_case == "zero_discount_multiplier":
+                discount = payload["discount"]
+                assert isinstance(discount, dict)
+                discount["discount"] = "0"
+
+            elif invalid_case == "zero_commission_rates":
+                for name in (
+                    "standardCommission",
+                    "taxCommission",
+                    "specialCommission",
+                ):
+                    rates = payload[name]
+                    assert isinstance(rates, dict)
+                    for key in ("maker", "taker", "buyer", "seller"):
+                        rates[key] = "0"
+
+            elif invalid_case == "non_numeric_commission_rate":
+                rates = payload["standardCommission"]
+                assert isinstance(rates, dict)
+                rates["maker"] = "not-a-number"
+
+            return httpx.Response(200, json=payload)
+
+        return await base_handler(request)
+
+    client = BinanceSpotTestnetExecution(
+        settings(),
+        SQLiteOrderStore(str(tmp_path / f"bnb-invalid-{invalid_case}.db")),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        with pytest.raises(
+            SpotExecutionError,
+            match="TESTNET_FEE_DATA_UNAVAILABLE",
+        ):
+            await client._bnb_fee_readiness(
+                symbol="BTCUSDT",
+                buy_notional=Decimal("5.25"),
+                sell_notional=Decimal("5.35"),
+            )
+
+        assert seen
+        assert all(request.method == "GET" for request in seen)
+        assert not any(request.method == "POST" for request in seen)
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_emergency_stop_cancels_buy_entries_but_preserves_sell_protection(tmp_path) -> None:
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/openOrders":
+            buy = order_response("NEW")
+            sell = {
+                **order_response("NEW"),
+                "orderId": 22334,
+                "clientOrderId": "mumin-protective-sell",
+                "side": "SELL",
+                "type": "STOP_LOSS_LIMIT",
+            }
+            return httpx.Response(200, json=[buy, sell])
+        if request.url.path == "/api/v3/order" and request.method == "DELETE":
+            return httpx.Response(200, json=order_response("CANCELED"))
+        return httpx.Response(404, json={"code": -2013, "msg": "Order does not exist."})
+
+    store = SQLiteOrderStore(str(tmp_path / "orders.db"))
+    store.register_intent({
+        "symbol": "BTCUSDT", "side": "BUY", "type": "LIMIT", "timeInForce": "GTC",
+        "quantity": "0.00010", "price": "50000.00", "newClientOrderId": "mumin-test-1001",
+    })
+    store.update_order("mumin-test-1001", state="NEW", response=order_response())
+    client = BinanceSpotTestnetExecution(
+        settings(), store, transport=httpx.MockTransport(handler),
+    )
+    try:
+        result = await client.emergency_stop("TEST_PRESERVE_EXITS")
+        assert result["halted"] is True
+        assert result["exposure_closed"] is False
+        assert len(result["cancelled"]) == 1
+        assert len(result["preserved_protective_orders"]) == 1
+        deletes = [request for request in seen if request.method == "DELETE"]
+        assert len(deletes) == 1
+        assert deletes[0].url.params.get("origClientOrderId") == "mumin-test-1001"
+    finally:
+        await client.close()
+
+
+def opoco_symbol_info() -> dict[str, object]:
+    payload = symbol_info()
+    symbol = payload["symbols"][0]
+    symbol["otoAllowed"] = True
+    symbol["opoAllowed"] = True
+    symbol["ocoAllowed"] = True
+    for item in symbol["filters"]:
+        if item.get("filterType") == "MIN_NOTIONAL":
+            item["minNotional"] = "4.90"
+    return payload
+
+
+@pytest.mark.asyncio
+async def test_opoco_submission_uses_single_server_side_order_list_and_three_child_ids(tmp_path) -> None:
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/exchangeInfo":
+            return httpx.Response(200, json=opoco_symbol_info())
+        if request.url.path == "/api/v3/account":
+            account = account_info()
+            account["balances"].append({"asset": "BNB", "free": "0.01", "locked": "0"})
+            return httpx.Response(200, json=account)
+        if request.url.path == "/api/v3/openOrders":
+            return httpx.Response(200, json=[])
+        if request.url.path == "/api/v3/myTrades":
+            return httpx.Response(200, json=[])
+        if request.url.path == "/api/v3/ticker/price":
+            symbol = request.url.params.get("symbol", "")
+            price = "50100.00" if symbol == "BTCUSDT" else "600.00"
+            return httpx.Response(200, json={"symbol": symbol, "price": price})
+        if request.url.path == "/api/v3/account/commission":
+            return httpx.Response(200, json=bnb_commission_response())
+        if request.url.path == "/api/v3/orderList/opoco" and request.method == "POST":
+            params = request.url.params
+            return httpx.Response(200, json={
+                "orderListId": 8801,
+                "contingencyType": "OPOCO",
+                "listStatusType": "EXEC_STARTED",
+                "listOrderStatus": "EXECUTING",
+                "listClientOrderId": params["listClientOrderId"],
+                "orders": [
+                    {"symbol": "BTCUSDT", "orderId": 8802, "clientOrderId": params["workingClientOrderId"]},
+                    {"symbol": "BTCUSDT", "orderId": 8803, "clientOrderId": params["pendingAboveClientOrderId"]},
+                    {"symbol": "BTCUSDT", "orderId": 8804, "clientOrderId": params["pendingBelowClientOrderId"]},
+                ],
+                "orderReports": [
+                    {
+                        "symbol": "BTCUSDT", "orderId": 8802,
+                        "clientOrderId": params["workingClientOrderId"],
+                        "type": "LIMIT", "side": "BUY", "status": "NEW",
+                        "executedQty": "0", "origQty": "0.00010",
+                    },
+                    {
+                        "symbol": "BTCUSDT", "orderId": 8803,
+                        "clientOrderId": params["pendingAboveClientOrderId"],
+                        "type": "LIMIT_MAKER", "side": "SELL", "status": "PENDING_NEW",
+                        "executedQty": "0", "origQty": "0",
+                    },
+                    {
+                        "symbol": "BTCUSDT", "orderId": 8804,
+                        "clientOrderId": params["pendingBelowClientOrderId"],
+                        "type": "STOP_LOSS_LIMIT", "side": "SELL", "status": "PENDING_NEW",
+                        "executedQty": "0", "origQty": "0",
+                    },
+                ],
+            })
+        return httpx.Response(404, json={"code": -2013, "msg": "Not found."})
+
+    configured = settings(
+        ENABLE_BNB_FEE_DISCOUNT=True,
+        REQUIRE_BNB_BALANCE_FOR_DISCOUNT=True,
+    )
+    store = SQLiteOrderStore(str(tmp_path / "opoco-ledger.db"))
+    client = BinanceSpotTestnetExecution(
+        configured, store, transport=httpx.MockTransport(handler),
+    )
+    try:
+        initial = await client.reconcile()
+        assert initial["discrepancies"] == []
+        with store._connection() as connection:
+            risk_state = connection.execute(
+                "SELECT high_watermark, last_equity FROM spot_risk_state WHERE id=1"
+            ).fetchone()
+        assert Decimal(risk_state["high_watermark"]) == Decimal("70.00")
+        assert Decimal(risk_state["last_equity"]) == Decimal("70.00")
+        response = await client.opoco.place_buy_opoco(
+            symbol="BTCUSDT",
+            quantity="0.00010",
+            working_price="50000.00",
+            take_profit_price="50625.00",
+            stop_price="49750.00",
+            stop_limit_price="49700.00",
+            list_client_order_id="mumin-opoco-list",
+            working_client_order_id="mumin-opoco-working",
+            pending_above_client_order_id="mumin-opoco-above",
+            pending_below_client_order_id="mumin-opoco-below",
+        )
+
+        assert response["orderListId"] == 8801
+        assert response["fee_preflight"]["discount_enabled_for_account"] == "true"
+        assert client.opoco._state(response) == "WORKING"
+        posted = [request for request in seen if request.method == "POST"]
+        assert len(posted) == 1
+        assert posted[0].url.path == "/api/v3/orderList/opoco"
+        assert posted[0].url.params["workingSide"] == "BUY"
+        assert posted[0].url.params["pendingSide"] == "SELL"
+        assert posted[0].url.params["pendingAboveType"] == "LIMIT_MAKER"
+        assert posted[0].url.params["pendingBelowType"] == "STOP_LOSS_LIMIT"
+        assert "quantity" not in posted[0].url.params
+        assert "pendingAboveQuantity" not in posted[0].url.params
+        assert "pendingBelowQuantity" not in posted[0].url.params
+        saved = client.oco.store.get("mumin-opoco-list")
+        assert saved["working_order_id"] == "8802"
+        assert saved["above_order_id"] == "8803"
+        assert saved["below_order_id"] == "8804"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_opoco_recovery_queries_parent_and_all_three_children_after_restart(tmp_path) -> None:
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/orderList":
+            return httpx.Response(200, json={
+                "orderListId": 8801,
+                "listClientOrderId": "mumin-opoco-recovery",
+                "listOrderStatus": "EXECUTING",
+                "orders": [
+                    {"symbol": "BTCUSDT", "orderId": 8802, "clientOrderId": "mumin-opoco-working"},
+                    {"symbol": "BTCUSDT", "orderId": 8803, "clientOrderId": "mumin-opoco-above"},
+                    {"symbol": "BTCUSDT", "orderId": 8804, "clientOrderId": "mumin-opoco-below"},
+                ],
+            })
+        if request.url.path == "/api/v3/order":
+            client_id = request.url.params["origClientOrderId"]
+            reports = {
+                "mumin-opoco-working": {
+                    "symbol": "BTCUSDT", "orderId": 8802, "clientOrderId": client_id,
+                    "type": "LIMIT", "side": "BUY", "status": "FILLED",
+                    "executedQty": "0.00010", "origQty": "0.00010",
+                },
+                "mumin-opoco-above": {
+                    "symbol": "BTCUSDT", "orderId": 8803, "clientOrderId": client_id,
+                    "type": "LIMIT_MAKER", "side": "SELL", "status": "NEW",
+                    "executedQty": "0", "origQty": "0.00010",
+                },
+                "mumin-opoco-below": {
+                    "symbol": "BTCUSDT", "orderId": 8804, "clientOrderId": client_id,
+                    "type": "STOP_LOSS_LIMIT", "side": "SELL", "status": "NEW",
+                    "executedQty": "0", "origQty": "0.00010",
+                },
+            }
+            return httpx.Response(200, json=reports[client_id])
+        if request.url.path == "/api/v3/myTrades":
+            return httpx.Response(200, json=[])
+        return httpx.Response(404, json={"code": -2013, "msg": "Not found."})
+
+    store = SQLiteOrderStore(str(tmp_path / "opoco-recovery.db"))
+    client = BinanceSpotTestnetExecution(
+        settings(), store, transport=httpx.MockTransport(handler),
+    )
+    request_record = {
+        "symbol": "BTCUSDT",
+        "side": "BUY",
+        "quantity": "0.00010",
+        "listClientOrderId": "mumin-opoco-recovery",
+        "workingClientOrderId": "mumin-opoco-working",
+        "pendingAboveClientOrderId": "mumin-opoco-above",
+        "pendingBelowClientOrderId": "mumin-opoco-below",
+    }
+    try:
+        client.oco.store.register(request_record)
+        assert client.oco.store.claim("mumin-opoco-recovery") is True
+        client.oco.store.update(
+            "mumin-opoco-recovery",
+            state="UNKNOWN",
+            response={
+                "orderListId": 8801,
+                "orders": [
+                    {"orderId": 8802, "clientOrderId": "mumin-opoco-working"},
+                    {"orderId": 8803, "clientOrderId": "mumin-opoco-above"},
+                    {"orderId": 8804, "clientOrderId": "mumin-opoco-below"},
+                ],
+            },
+        )
+
+        recovered = await client.opoco.get_order_list(
+            symbol="BTCUSDT",
+            list_client_order_id="mumin-opoco-recovery",
+        )
+
+        assert recovered is not None
+        assert client.opoco._state(recovered) == "PROTECTION_ARMED"
+        list_queries = [
+            request for request in seen
+            if request.url.path == "/api/v3/orderList" and request.method == "GET"
+        ]
+        assert len(list_queries) == 1
+        assert list_queries[0].url.params.get("origClientOrderId") == "mumin-opoco-recovery"
+        assert list_queries[0].url.params.get("symbol") is None
+        assert len([
+            request for request in seen
+            if request.url.path == "/api/v3/order" and request.method == "GET"
+        ]) == 3
+        saved = client.oco.store.get("mumin-opoco-recovery")
+        assert saved["state"] == "PROTECTION_ARMED"
+    finally:
+        await client.close()
+
+
+def test_fixed_exit_risk_accepts_approved_policy_prices() -> None:
+    result = validate_fixed_exit_risk(
+        "50000",
+        "50625",
+        "49750",
+    )
+    assert Decimal(result["stop_loss_percent"]) == Decimal("0.50")
+    assert Decimal(result["take_profit_percent"]) == Decimal("1.25")
+
+
+@pytest.mark.parametrize(
+    ("take_profit", "stop"),
+    [
+        ("50750", "49750"),
+        ("50625", "49600"),
+        ("49900", "49750"),
+        ("50625", "50100"),
+    ],
+)
+def test_fixed_exit_risk_rejects_unapproved_exit_prices(
+    take_profit: str,
+    stop: str,
+) -> None:
+    with pytest.raises(SpotExecutionError):
+        validate_fixed_exit_risk("50000", take_profit, stop)
+
+
+def test_fixed_exit_risk_rejects_invalid_price_relationship() -> None:
+    with pytest.raises(SpotExecutionError, match="0 < stop < entry < take-profit"):
+        validate_fixed_exit_risk("50000", "49000", "51000")
+
+
+def test_opoco_exit_risk_uses_exchange_reported_prices_and_actual_average_fill() -> None:
+    result = opoco_exit_risk_metrics(
+        Decimal("50000"),
+        [
+            {"type": "LIMIT_MAKER", "price": "50625", "stopPrice": "0"},
+            {"type": "STOP_LOSS_LIMIT", "price": "49700", "stopPrice": "49750"},
+        ],
+    )
+    assert result["exit_risk_policy_match"] is True
+    assert result["exchange_exit_prices_verified"] is True
+    assert Decimal(result["exchange_take_profit_price"]) == Decimal("50625")
+    assert Decimal(result["exchange_stop_price"]) == Decimal("49750")
+
+
+def test_opoco_exit_risk_rejects_fill_price_slippage_outside_policy() -> None:
+    result = opoco_exit_risk_metrics(
+        Decimal("50100"),
+        [
+            {"type": "LIMIT_MAKER", "price": "50625", "stopPrice": "0"},
+            {"type": "STOP_LOSS_LIMIT", "price": "49700", "stopPrice": "49750"},
+        ],
+    )
+    assert result["exit_risk_policy_match"] is False
+
+
+def test_opoco_exit_risk_rejects_missing_exchange_exit_prices() -> None:
+    result = opoco_exit_risk_metrics(
+        Decimal("50000"),
+        [{"type": "LIMIT_MAKER", "price": "50625"}],
+    )
+    assert result["exit_risk_policy_match"] is False
+    assert result["exchange_exit_prices_verified"] is False

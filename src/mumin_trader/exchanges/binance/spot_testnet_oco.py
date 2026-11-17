@@ -13,6 +13,40 @@ from mumin_trader.exchanges.binance.spot_testnet_execution import (
 )
 
 
+def validate_fixed_exit_risk(
+    entry_price: Decimal | str,
+    take_profit_price: Decimal | str,
+    stop_price: Decimal | str,
+    *,
+    tolerance_percentage_points: Decimal = Decimal("0.02"),
+) -> dict[str, str]:
+    entry = Decimal(str(entry_price))
+    take_profit = Decimal(str(take_profit_price))
+    stop = Decimal(str(stop_price))
+    if (
+        not entry.is_finite() or not take_profit.is_finite() or not stop.is_finite()
+        or entry <= 0 or take_profit <= entry or stop >= entry or stop <= 0
+    ):
+        raise SpotExecutionError("Exit prices must satisfy 0 < stop < entry < take-profit.")
+    stop_loss_percent = (entry - stop) / entry * Decimal("100")
+    take_profit_percent = (take_profit - entry) / entry * Decimal("100")
+    if abs(stop_loss_percent - Decimal("0.50")) > tolerance_percentage_points:
+        raise SpotExecutionError(
+            "Stop trigger differs from the approved 0.50% stop-loss policy."
+        )
+    if abs(take_profit_percent - Decimal("1.25")) > tolerance_percentage_points:
+        raise SpotExecutionError(
+            "Take-profit price differs from the approved 1.25% take-profit policy."
+        )
+    return {
+        "entry_price": str(entry),
+        "stop_loss_percent": str(stop_loss_percent),
+        "take_profit_percent": str(take_profit_percent),
+        "policy_stop_loss_percent": "0.50",
+        "policy_take_profit_percent": "1.25",
+    }
+
+
 def validate_oco_leg_notionals(
     quantity: Decimal,
     take_profit_price: Decimal,
@@ -50,6 +84,8 @@ class SQLiteOCOOrderStore:
                     order_list_id TEXT,
                     above_order_id TEXT,
                     below_order_id TEXT,
+                    working_order_id TEXT,
+                    working_client_order_id TEXT,
                     above_client_order_id TEXT,
                     below_client_order_id TEXT,
                     request_json TEXT NOT NULL,
@@ -64,8 +100,8 @@ class SQLiteOCOOrderStore:
                 for row in db.execute("PRAGMA table_info(spot_oco_order_lists)").fetchall()
             }
             for name in (
-                "above_order_id", "below_order_id",
-                "above_client_order_id", "below_client_order_id",
+                "above_order_id", "below_order_id", "working_order_id",
+                "working_client_order_id", "above_client_order_id", "below_client_order_id",
             ):
                 if name not in columns:
                     db.execute(f"ALTER TABLE spot_oco_order_lists ADD COLUMN {name} TEXT")
@@ -129,18 +165,33 @@ class SQLiteOCOOrderStore:
         allowed = {
             "SUBMITTING", "UNKNOWN", "EXECUTING", "ALL_DONE", "CANCEL_PENDING",
             "CANCELED", "REJECT", "PREPARED", "PARTIAL_FILL_REVIEW",
+            "WORKING", "PROTECTION_ARMED", "COMPLETE",
         }
         if state not in allowed:
             raise SpotExecutionError(f"Unsupported OCO list state: {state}")
         payload = response or {}
         list_id = payload.get("orderListId")
         orders = payload.get("orders", [])
-        above = orders[0] if len(orders) > 0 else {}
-        below = orders[1] if len(orders) > 1 else {}
+        local = self.get(list_client_order_id)
+        request = json.loads(local["request_json"]) if local else {}
+        if "workingClientOrderId" in request:
+            by_client_id = {
+                str(item.get("clientOrderId", "")): item
+                for item in orders if isinstance(item, dict)
+            }
+            working = by_client_id.get(request.get("workingClientOrderId", ""), {})
+            above = by_client_id.get(request.get("pendingAboveClientOrderId", ""), {})
+            below = by_client_id.get(request.get("pendingBelowClientOrderId", ""), {})
+        else:
+            working = {}
+            above = orders[0] if len(orders) > 0 else {}
+            below = orders[1] if len(orders) > 1 else {}
         with self._connect() as db:
             db.execute(
                 """UPDATE spot_oco_order_lists SET state=?,
                    order_list_id=COALESCE(?,order_list_id),
+                   working_order_id=COALESCE(?,working_order_id),
+                   working_client_order_id=COALESCE(?,working_client_order_id),
                    above_order_id=COALESCE(?,above_order_id),
                    below_order_id=COALESCE(?,below_order_id),
                    above_client_order_id=COALESCE(?,above_client_order_id),
@@ -149,6 +200,8 @@ class SQLiteOCOOrderStore:
                    WHERE list_client_order_id=?""",
                 (
                     state, None if list_id is None else str(list_id),
+                    None if working.get("orderId") is None else str(working["orderId"]),
+                    working.get("clientOrderId"),
                     None if above.get("orderId") is None else str(above["orderId"]),
                     None if below.get("orderId") is None else str(below["orderId"]),
                     above.get("clientOrderId"), below.get("clientOrderId"),
@@ -165,16 +218,28 @@ class SQLiteOCOOrderStore:
             ).fetchone()
             return dict(row) if row else None
 
+    def get_by_child_client_id(self, client_order_id: str) -> dict[str, Any] | None:
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT * FROM spot_oco_order_lists
+                   WHERE working_client_order_id=?
+                      OR above_client_order_id=?
+                      OR below_client_order_id=?
+                   LIMIT 1""",
+                (client_order_id, client_order_id, client_order_id),
+            ).fetchone()
+            return dict(row) if row else None
+
     def child_client_order_ids(self) -> set[str]:
         with self._connect() as db:
             rows = db.execute(
-                """SELECT above_client_order_id,below_client_order_id
+                """SELECT working_client_order_id,above_client_order_id,below_client_order_id
                    FROM spot_oco_order_lists"""
             ).fetchall()
         return {
             str(value)
             for row in rows
-            for value in (row["above_client_order_id"], row["below_client_order_id"])
+            for value in (row["working_client_order_id"], row["above_client_order_id"], row["below_client_order_id"])
             if value
         }
 

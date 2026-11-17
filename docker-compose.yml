@@ -27,7 +27,18 @@ services:
     env_file:
       - .env
     container_name: mumin-paper-bot
-    command: ["python", "scripts/run_continuous_paper.py", "--db", "/app/data/mumin_public_paper.db", "--interval-seconds", "30", "--data-source", "${MUMIN_MARKET_DATA_SOURCE:-BINANCE_PUBLIC_MARKET_DATA}"]
+    init: true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sqlite3,sys; from datetime import datetime,timezone; db=sqlite3.connect('/app/data/mumin_public_paper.db'); row=db.execute('SELECT supervisor_heartbeat_at FROM bot_runtime_control WHERE id=1').fetchone(); age=(datetime.now(timezone.utc)-datetime.fromisoformat(row[0])).total_seconds() if row and row[0] else 999999; sys.exit(0 if -5 <= age <= 90 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    command: ["python", "scripts/paper_worker_supervisor.py", "--db", "/app/data/mumin_public_paper.db", "--interval-seconds", "30", "--data-source", "${MUMIN_MARKET_DATA_SOURCE:-BINANCE_PUBLIC_MARKET_DATA}", "--restart-initial-seconds", "2", "--restart-max-seconds", "60"]
     restart: unless-stopped
     volumes:
       - mumin_data:/app/data
