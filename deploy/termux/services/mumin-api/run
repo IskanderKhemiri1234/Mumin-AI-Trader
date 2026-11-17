@@ -1,0 +1,9 @@
+#!/data/data/com.termux/files/usr/bin/sh
+set -eu
+ROOT="$HOME/Mumin-AI-Trader"
+LOG_DIR="$HOME/.mumin-ai-trader/logs"
+mkdir -p "$LOG_DIR"
+cd "$ROOT"
+if [ -f "$ROOT/.env" ]; then set -a; . "$ROOT/.env"; set +a; fi
+export PYTHONUNBUFFERED=1
+exec python -m uvicorn mumin_trader.main:app --host 127.0.0.1 --port 8000 >> "$LOG_DIR/api.log" 2>&1
