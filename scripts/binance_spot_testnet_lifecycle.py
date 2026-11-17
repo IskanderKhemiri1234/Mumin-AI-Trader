@@ -1233,8 +1233,6 @@ async def watch_opoco_existing(args: argparse.Namespace) -> int:
             Decimal(buy_summary["quote_quantity"]) / gross_buy_quantity
             if gross_buy_quantity > 0 else Decimal("0")
         )
-        local_intent = client.oco.store.get(args.list_client_order_id)
-        stored_request = json.loads(local_intent["request_json"]) if local_intent else {}
         exit_risk = opoco_exit_risk_metrics(
             average_entry_price, proof["protective_children"],
         )
