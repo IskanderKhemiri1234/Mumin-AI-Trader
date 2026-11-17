@@ -17,6 +17,8 @@ SLIPPAGE = Decimal("0.0002")
 MAX_NOTIONAL = Decimal("5.00")
 RESERVE = Decimal("14.00")
 MAX_POSITIONS = 2
+MAX_TOTAL_EXPOSURE = Decimal("56.00")
+MAX_SPREAD_BPS = Decimal("8.00")
 ALLOWED_SYMBOLS = {
     "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
     "XRPUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT",
@@ -250,6 +252,24 @@ def submit_paper_order(
             ).fetchone()
             if mark is None:
                 raise CommandRejected("No market price is available for this symbol.")
+            stored_sources = {
+                row["data_source"] for row in db.execute(
+                    """SELECT DISTINCT data_source FROM bot_fills
+                       UNION SELECT DISTINCT data_source FROM bot_market_ticks"""
+                ).fetchall()
+            }
+            if stored_sources and stored_sources != {str(mark["data_source"])}:
+                raise CommandRejected(
+                    "Paper ledger market source mismatch; order rejected to preserve ledger isolation."
+                )
+            bid = Decimal(mark["bid"])
+            ask = Decimal(mark["ask"])
+            if bid <= ZERO or ask < bid:
+                raise CommandRejected("Market bid/ask is invalid.")
+            mid = (bid + ask) / Decimal("2")
+            spread_bps = ((ask - bid) / mid) * Decimal("10000") if mid > ZERO else Decimal("10000")
+            if spread_bps > MAX_SPREAD_BPS:
+                raise CommandRejected("Market spread exceeds the fixed 8 bps liquidity shield.")
             age_ms = int(datetime.now(timezone.utc).timestamp() * 1000) - int(mark["received_at_ms"])
             if age_ms < -5000 or age_ms > 90000:
                 raise CommandRejected("Market quote is stale; order rejected.")
@@ -263,6 +283,7 @@ def submit_paper_order(
                 "SELECT symbol,quantity FROM bot_positions"
             ).fetchall()
             marked_equity = cash
+            current_exposure = ZERO
             for current_position in current_positions:
                 position_mark = db.execute(
                     "SELECT price FROM bot_market_ticks WHERE symbol=? ORDER BY id DESC LIMIT 1",
@@ -272,9 +293,11 @@ def submit_paper_order(
                     raise CommandRejected(
                         f"No current mark exists for open position {current_position['symbol']}."
                     )
-                marked_equity += (
+                position_value = (
                     Decimal(current_position["quantity"]) * Decimal(position_mark["price"])
                 )
+                marked_equity += position_value
+                current_exposure += position_value
             daily_start = Decimal(account["daily_start_equity"])
             high_water = Decimal(account["high_watermark"])
             if side == "BUY" and marked_equity <= daily_start * Decimal("0.98"):
@@ -299,6 +322,8 @@ def submit_paper_order(
                 total = gross + fee
                 if effective_qty <= ZERO or total > notional or total > cash - reserve:
                     raise CommandRejected("BUY failed quantity, fee, or available-cash checks.")
+                if current_exposure + total > MAX_TOTAL_EXPOSURE:
+                    raise CommandRejected("BUY would exceed the fixed 56 USDT total-exposure ceiling.")
                 new_cash = cash - total
                 new_realized = Decimal(account["realized_pnl"])
                 new_daily_realized = Decimal(account["daily_realized_pnl"])
