@@ -11,7 +11,7 @@ async def test_market_snapshot_exposes_disconnect_and_reconnect_state():
     service._client.last_error = "ConnectionClosed"
     snapshot = await service.snapshot()
     assert snapshot["status"] == "disconnected"
-    assert snapshot["connection_state"] == "connecting"
+    assert snapshot["connection_state"] == "disconnected"
     assert snapshot["reconnect_count"] == 3
     assert snapshot["last_error"] == "ConnectionClosed"
     await service.close()
