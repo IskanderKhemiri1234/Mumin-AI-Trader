@@ -101,7 +101,7 @@ def create_backup(
         manifest_path = destination / f"{filename}.manifest.json"
         manifest_tmp = manifest_path.with_suffix(manifest_path.suffix + ".tmp")
         manifest_tmp.write_text(
-            json.dumps(manifest, indent=2, sort_keys=True) + "\\n",
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
         os.replace(manifest_tmp, manifest_path)
