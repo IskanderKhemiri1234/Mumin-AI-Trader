@@ -5,6 +5,7 @@ import gzip
 import hashlib
 import json
 import sqlite3
+from decimal import Decimal, InvalidOperation
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -154,15 +155,17 @@ def export_archive(database: str | Path, archive_path: str | Path, manifest_path
 
     macro_complete_rows = 0
     macro_timestamp_aligned_rows = 0
+    macro_values_valid_rows = 0
     minute_timestamp_aligned_rows = 0
+    quote_valid_rows = 0
+    replay_numeric_fields = (\n        \"price\", \"bid\", \"ask\", \"candle_open\", \"candle_high\",\n        \"candle_low\", \"candle_volume\", \"bid_depth_qty\", \"ask_depth_qty\",\n    )
+    received_by_tick = {\n        tick: max(int(row.get(\"received_at_ms\") or 0) for row in symbols.values())\n        for tick, symbols in tick_symbols.items()\n    }
     for row in ticks:
         closes = json.loads(row.get("macro_hourly_closes_json") or "[]")
         close_times = json.loads(row.get("macro_hourly_close_times_json") or "[]")
-        received_at = int(row.get("received_at_ms") or 0)
-        candle_close = row.get("candle_close_time_ms")
-        if candle_close is not None and int(candle_close) < received_at:
-            minute_timestamp_aligned_rows += 1
-        if len(closes) == 21:
+        received_at = received_by_tick[int(row[\"tick\"])]
+        candle_close = row.get(\"candle_close_time_ms\")
+        if (\n            candle_close is not None\n            and int(candle_close) < received_at\n            and received_at - int(candle_close) <= 180_000\n        ):\n            minute_timestamp_aligned_rows += 1\n        try:\n            numeric_values = [Decimal(str(row[name])) for name in replay_numeric_fields]\n            if all(value.is_finite() for value in numeric_values):\n                price, bid, ask, candle_open, candle_high, candle_low, volume, bid_depth, ask_depth = numeric_values\n                if (price > 0 and bid > 0 and ask >= bid and candle_open > 0\n                    and candle_high >= candle_low and volume >= 0 and bid_depth >= 0 and ask_depth >= 0):\n                    quote_valid_rows += 1\n        except (KeyError, InvalidOperation, TypeError, ValueError):\n            pass\n        try:\n            if all(Decimal(str(value)).is_finite() for value in closes):\n                macro_values_valid_rows += 1\n        except (InvalidOperation, TypeError, ValueError):\n            pass\n        if len(closes) == 21:
             macro_complete_rows += 1
         if (
             len(closes) == 21
@@ -187,6 +190,8 @@ def export_archive(database: str | Path, archive_path: str | Path, manifest_path
         and all_macro_inputs_present
         and all_macro_timestamps_aligned
         and minute_timestamp_aligned_rows == len(ticks)
+        and quote_valid_rows == len(ticks)
+        and macro_values_valid_rows == len(ticks)
         and total_duplicate_closes == 0
         and total_missing_minute_slots == 0
     )
@@ -239,6 +244,8 @@ def export_archive(database: str | Path, archive_path: str | Path, manifest_path
             "raw_21_hourly_close_timestamp_alignment_passed": all_macro_timestamps_aligned,
             "one_minute_close_timestamp_alignment_passed": bool(ticks) and minute_timestamp_aligned_rows == len(ticks),
             "minute_timestamp_aligned_rows": minute_timestamp_aligned_rows,
+            "replay_numeric_quote_rows": quote_valid_rows,
+            "replay_macro_numeric_rows": macro_values_valid_rows,
             "macro_complete_rows": macro_complete_rows,
             "macro_timestamp_aligned_rows": macro_timestamp_aligned_rows,
             "replay_ready": replay_ready,
@@ -250,6 +257,7 @@ def export_archive(database: str | Path, archive_path: str | Path, manifest_path
             "For each minute, the latest complete eight-symbol snapshot is selected; earlier same-minute snapshots are excluded.",
             "Only the latest contiguous one-minute suffix is retained. All preceding gaps are disclosed in the selection metadata and no missing data is reconstructed.",
             "Order-book depth is available only at captured snapshot times and is not historical exchange depth for skipped intervals.",
+            "Replay readiness additionally requires positive finite executable-side prices, valid bid/ask ordering, finite OHLCV and depth inputs, fresh minute candles, and finite raw hourly closes.",
             "Replay readiness requires at least 30 complete cycles, 21 causally aligned hourly closes per row, minute timestamp alignment, and no gaps or duplicates within the selected suffix.",
             "This archive is not a sealed Holdout and must not be used to claim out-of-sample profitability.",
         ],
