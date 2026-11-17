@@ -197,7 +197,7 @@ class UnifiedDashboardActivity : Activity() {
     private fun connectToDashboard() {
         val normalized = normalizeServerUrl(serverAddress.text.toString())
         if (normalized == null) {
-            connectionStatus.text = "العنوان غير صالح. استخدم HTTPS دون مسار أو بيانات اعتماد."
+            connectionStatus.text = "العنوان غير صالح. استخدم 127.0.0.1:8000 محلياً أو HTTPS دون مسار أو بيانات اعتماد."
             return
         }
         getPreferences(MODE_PRIVATE).edit().putString(SERVER_KEY, normalized).apply()
