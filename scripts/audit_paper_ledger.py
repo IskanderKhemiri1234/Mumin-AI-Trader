@@ -58,7 +58,7 @@ def build_audit(database: str | Path) -> dict[str, Any]:
         decisions = _decision_map(connection)
         fills = connection.execute(
             """SELECT fill_id,tick,symbol,side,quantity,reference_price,fill_price,
-                      gross_quote,fee_quote,net_pnl,data_source,created_at
+                      gross_quote,fee_quote,net_pnl,data_source,exit_reason,created_at
                FROM bot_fills ORDER BY fill_id"""
         ).fetchall()
 
@@ -167,7 +167,7 @@ def build_audit(database: str | Path) -> dict[str, Any]:
                 "exit_fees_usdt": str(allocated_exit_fee), "net_pnl_usdt": str(net),
                 "recorded_net_pnl_usdt": str(dec(fill["net_pnl"])),
                 "exit_signal_context": exit_signal,
-                "exit_trigger_reason": "NOT_PERSISTED_IN_LEGACY_FILL_SCHEMA",
+                "exit_trigger_reason": str(fill["exit_reason"]) if fill["exit_reason"] else "UNKNOWN_LEGACY_RECORD",
             })
 
         summary = {}
