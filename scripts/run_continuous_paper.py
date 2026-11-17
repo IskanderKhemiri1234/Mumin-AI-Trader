@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 
+from mumin_trader.execution.paper_reconciliation import reconcile_paper_ledger
+from mumin_trader.execution.process_lock import paper_process_lock
 from mumin_trader.strategy_swarm import PaperSwarm, compound_allocation, compoundable_equity
 from mumin_trader.strategy_micro_alpha import PaperMicroAlphaSwarm
 from mumin_trader.exchanges.binance.public_market_data import (
@@ -85,6 +87,10 @@ class TickResult:
     daily_pnl: Decimal
     fees_paid: Decimal
     halted: bool
+
+
+class PaperLedgerIntegrityError(RuntimeError):
+    """Raised when the Paper ledger fails mandatory reconciliation."""
 
 
 class ContinuousPaperBot:
@@ -435,6 +441,7 @@ class ContinuousPaperBot:
         candle_close_times: dict[str, int] | None = None,
         received_at_ms: int | None = None,
         market_features: dict[str, dict[str, Decimal]] | None = None,
+        allow_new_entries: bool = True,
     ) -> TickResult:
         if source not in {SYNTHETIC_SOURCE, PUBLIC_SOURCE}:
             raise ValueError("Unknown market data source.")
@@ -641,6 +648,7 @@ class ContinuousPaperBot:
                 if (
                     action == "NONE" and position is None and signal_name == "BUY"
                     and not spread_blocked
+                    and allow_new_entries
                     and not halted and len(open_positions) < MAX_OPEN_POSITIONS
                 ):
                     reserve_cash = self.initial_cash * RESERVE_PERCENT / Decimal("100")
@@ -832,7 +840,7 @@ class ContinuousPaperBot:
         return report
 
 
-async def run_bot(
+async def _run_bot_unlocked(
     database: str,
     interval_seconds: float,
     cycles: int | None,
@@ -869,9 +877,24 @@ async def run_bot(
                 desired_state = bot.heartbeat(worker_id)
             if stop.is_set():
                 break
+            with bot._connect() as audit_db:
+                ledger_audit = reconcile_paper_ledger(audit_db)
+            ledger_status = str(ledger_audit["status"])
+            if ledger_status == "FAIL":
+                raise PaperLedgerIntegrityError(
+                    "Paper ledger reconciliation failed; worker is entering a hard safe stop: "
+                    + "; ".join(ledger_audit["issues"][:5])
+                )
+            allow_new_entries = ledger_status == "PASS"
+            if not allow_new_entries:
+                print(
+                    "PAPER RECONCILIATION INCOMPLETE; new BUY entries are blocked. "
+                    "Existing positions remain eligible for normal exit management.",
+                    flush=True,
+                )
             completed += 1
             if feed is None:
-                result = bot.step()
+                result = bot.step(allow_new_entries=allow_new_entries)
             else:
                 snapshots, errors = await feed.snapshots(SYMBOLS)
                 for symbol, error in errors.items():
@@ -918,6 +941,7 @@ async def run_bot(
                     prices, source=PUBLIC_SOURCE, quotes=quotes,
                     candle_close_times=candle_times, received_at_ms=received,
                     market_features=features,
+                    allow_new_entries=allow_new_entries,
                 )
 
             print(
@@ -960,6 +984,16 @@ async def run_bot(
     print("Continuous Paper loop stopped cleanly.", flush=True)
 
 
+async def run_bot(
+    database: str,
+    interval_seconds: float,
+    cycles: int | None,
+    data_source: str = SYNTHETIC_SOURCE,
+) -> None:
+    with paper_process_lock(database, "worker"):
+        await _run_bot_unlocked(database, interval_seconds, cycles, data_source)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Continuous multi-symbol Paper Trading; no live orders.")
     parser.add_argument("--db", default=None)
@@ -977,7 +1011,11 @@ def main() -> None:
         if args.data_source == PUBLIC_SOURCE
         else "data/mumin_continuous_paper.db"
     )
-    asyncio.run(run_bot(database, args.interval_seconds, args.cycles, args.data_source))
+    try:
+        asyncio.run(run_bot(database, args.interval_seconds, args.cycles, args.data_source))
+    except PaperLedgerIntegrityError as exc:
+        print(str(exc), flush=True)
+        raise SystemExit(78) from exc
 
 
 if __name__ == "__main__":
