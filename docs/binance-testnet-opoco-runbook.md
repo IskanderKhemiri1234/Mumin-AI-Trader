@@ -16,6 +16,10 @@ The runner submits one `POST /api/v3/orderList/opoco` request containing:
 
 The pending OCO legs are placed by Binance only after the working BUY is fully filled. Binance uses the received amount, applies commission deductions as appropriate, and evaluates pending-order filters when the working order completes. Symbol support requires `otoAllowed`, `opoAllowed`, and `ocoAllowed` in Exchange Information. See the [Binance Spot Testnet REST documentation](https://developers.binance.com/en/docs/products/spot/testnet/rest-api) and [OPO FAQ](https://github.com/binance/binance-spot-api-docs/blob/master/faqs/opo.md).
 
+The approved exit policy is fixed at a **0.50% stop trigger** and **1.25% take-profit** relative to the working limit price (with a 0.02 percentage-point validation tolerance). After execution, the runner recomputes both percentages from the actual average fill price. A better-than-limit fill can change the realized percentages; if the actual fill moves either exit outside policy tolerance, the cycle remains NO-GO even if the protective list is active.
+
+**5 USDT minimum-notional constraint:** if a symbol has a 5 USDT minimum notional and the stop-limit price is 0.50% below the entry, a 5 USDT BUY can produce a stop leg below the exchange minimum. The runner refuses the list before submission. It does not silently increase the 5 USDT trade cap. A one-run Testnet-only cap override is an explicit operator action and must be justified by the symbol's actual filters; it is not a production risk-policy change.
+
 **Partial-fill limitation:** if the working BUY is only partially filled, the pending OCO protection is not yet active. The runner cancels the remaining OPOCO list when possible, halts the local execution ledger, records the partial fill, and returns a manual-review state. It does not pretend the partial inventory is protected and does not automatically sell it. If the working BUY is fully filled but a protective leg partially fills, the runner leaves the remaining protective list active and requires review.
 
 ## Read-only inspection
