@@ -284,6 +284,41 @@ async def watch_oco(
     return last or {}
 
 
+def exit_risk_metrics(
+    average_entry_price: Decimal,
+    take_profit_price: Decimal,
+    stop_price: Decimal,
+) -> dict[str, Any]:
+    if (
+        not average_entry_price.is_finite()
+        or average_entry_price <= 0
+        or take_profit_price <= average_entry_price
+        or stop_price >= average_entry_price
+    ):
+        return {
+            "average_entry_price": str(average_entry_price),
+            "actual_stop_loss_percent": None,
+            "actual_take_profit_percent": None,
+            "exit_risk_policy_match": False,
+        }
+    stop_percent = (
+        (average_entry_price - stop_price) / average_entry_price * Decimal("100")
+    )
+    take_profit_percent = (
+        (take_profit_price - average_entry_price) / average_entry_price * Decimal("100")
+    )
+    tolerance = Decimal("0.02")
+    return {
+        "average_entry_price": str(average_entry_price),
+        "actual_stop_loss_percent": str(stop_percent),
+        "actual_take_profit_percent": str(take_profit_percent),
+        "exit_risk_policy_match": (
+            abs(stop_percent - Decimal("0.50")) <= tolerance
+            and abs(take_profit_percent - Decimal("1.25")) <= tolerance
+        ),
+    }
+
+
 def opoco_result(list_response: dict[str, Any]) -> dict[str, Any]:
     reports = list_response.get("orderReports", [])
     normalized = [
@@ -858,6 +893,15 @@ async def run_opoco_cycle(args: argparse.Namespace) -> int:
             store.order_fill_summary(symbol, working_order_id, base_asset=base_asset)
             if working_order_id is not None else None
         )
+        gross_buy_quantity = (
+            Decimal(buy_summary["gross_quantity"])
+            if buy_summary is not None else Decimal("0")
+        )
+        average_entry_price = (
+            Decimal(buy_summary["quote_quantity"]) / gross_buy_quantity
+            if gross_buy_quantity > 0 else Decimal("0")
+        )
+        exit_risk = exit_risk_metrics(average_entry_price, take_profit, stop_price)
         buy_fills = (
             store.trade_fills_for_order(symbol, working_order_id)
             if working_order_id is not None else []
@@ -914,6 +958,7 @@ async def run_opoco_cycle(args: argparse.Namespace) -> int:
             and unprotected_dust == net_quantity - sellable_net
             and unprotected_dust == 0
             and children_cover
+            and exit_risk["exit_risk_policy_match"]
             and not all_fee_mismatches
             and not fill_discrepancies
             and not unmatched
@@ -925,6 +970,10 @@ async def run_opoco_cycle(args: argparse.Namespace) -> int:
             "working_order_id": str(working_order_id or ""),
             "working_status": working_status,
             "working_fill_summary": buy_summary,
+            "actual_entry_average_price": exit_risk["average_entry_price"],
+            "actual_stop_loss_percent": exit_risk["actual_stop_loss_percent"],
+            "actual_take_profit_percent": exit_risk["actual_take_profit_percent"],
+            "exit_risk_policy_match": exit_risk["exit_risk_policy_match"],
             "working_fee_asset_mismatches": buy_fee_mismatches,
             "opoco_children": proof["children"],
             "protective_child_fills": child_fills,
@@ -1123,6 +1172,21 @@ async def watch_opoco_existing(args: argparse.Namespace) -> int:
             )
             if working_order_id is not None else None
         )
+        gross_buy_quantity = (
+            Decimal(buy_summary["gross_quantity"])
+            if buy_summary is not None else Decimal("0")
+        )
+        average_entry_price = (
+            Decimal(buy_summary["quote_quantity"]) / gross_buy_quantity
+            if gross_buy_quantity > 0 else Decimal("0")
+        )
+        local_intent = client.oco.store.get(args.list_client_order_id)
+        stored_request = json.loads(local_intent["request_json"]) if local_intent else {}
+        exit_risk = exit_risk_metrics(
+            average_entry_price,
+            Decimal(str(stored_request.get("pendingAbovePrice", "0"))),
+            Decimal(str(stored_request.get("pendingBelowStopPrice", "0"))),
+        )
         net_quantity = (
             Decimal(buy_summary["net_base_quantity"])
             if buy_summary is not None else Decimal("0")
@@ -1169,6 +1233,7 @@ async def watch_opoco_existing(args: argparse.Namespace) -> int:
             and fifo_open == 0
             and unprotected_dust == 0
             and children_cover
+            and exit_risk["exit_risk_policy_match"]
             and not fee_mismatches
             and not fill_discrepancies
             and not unmatched
@@ -1185,6 +1250,10 @@ async def watch_opoco_existing(args: argparse.Namespace) -> int:
             "mutual_cancel_proven": proof["mutual_cancel_proven"],
             "working_order_id": str(working_order_id or ""),
             "working_fill_summary": buy_summary,
+            "actual_entry_average_price": exit_risk["average_entry_price"],
+            "actual_stop_loss_percent": exit_risk["actual_stop_loss_percent"],
+            "actual_take_profit_percent": exit_risk["actual_take_profit_percent"],
+            "exit_risk_policy_match": exit_risk["exit_risk_policy_match"],
             "net_base_quantity": str(net_quantity),
             "protected_quantity": str(protected_quantity),
             "sellable_net_quantity": str(sellable_net),
