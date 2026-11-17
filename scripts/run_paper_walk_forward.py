@@ -7,6 +7,7 @@ import json
 import statistics
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from scripts.replay_paper_observations import _prepare_cycles, replay_archive
 
