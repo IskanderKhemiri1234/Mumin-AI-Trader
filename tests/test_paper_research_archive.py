@@ -69,6 +69,7 @@ def test_archive_is_deterministic_and_excludes_synthetic_rows(tmp_path):
     assert all("MOCK_SYNTHETIC" not in json.dumps(row) for row in records)
     assert manifest["quality"]["raw_21_hourly_closes_persisted"] is True
     assert manifest["quality"]["raw_21_hourly_close_timestamp_alignment_passed"] is True
+    assert manifest["quality"]["one_minute_close_timestamp_alignment_passed"] is True
     assert manifest["quality"]["macro_complete_rows"] == 8
     assert manifest["quality"]["replay_ready"] is False
     assert manifest["quality"]["holdout_eligible"] is False
