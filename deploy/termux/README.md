@@ -26,6 +26,7 @@ Health: `http://127.0.0.1:8000/health`
 sv status mumin-api
 sv status mumin-paper-engine
 sv status mumin-paper-backup
+sv status mumin-paper-watchdog
 sv restart mumin-api
 sv restart mumin-paper-engine
 sv down mumin-paper-engine
@@ -53,6 +54,8 @@ python scripts/monitor_paper_node.py --db data/mumin_public_paper.db
 ```
 
 The command checks SQLite integrity, the fixed 70 USDT Paper capital, supervisor heartbeat, desired RUNNING state, freshness and completeness of the latest eight-symbol public market cycle, and FIFO accounting reconciliation. It is read-only and exits nonzero if a required operational check fails. It does not start or restart services.
+
+A local watchdog service runs this read-only check every five minutes. When health changes to WARN or FAIL it attempts an Android notification through `termux-notification`; install the matching Termux:API app and grant notification permission to receive phone notifications. Without Termux:API, transitions are still recorded in `~/.mumin-ai-trader/logs/paper-watchdog.log`. The watchdog does not restart or modify the Paper engine.
 
 ## Update
 ```sh
