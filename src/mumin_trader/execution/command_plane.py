@@ -598,3 +598,19 @@ def latch_emergency_stop(
             "halted": True,
             "open_positions_closed": False,
         }
+
+
+
+def list_command_events(
+    database_path: str | Path, command_id: str
+) -> list[dict[str, Any]]:
+    if not Path(database_path).is_file():
+        return []
+    with _connect(database_path) as db:
+        _ensure_schema(db)
+        rows = db.execute(
+            """SELECT event_id,command_id,event_type,status,detail,created_at
+               FROM bot_command_events WHERE command_id=? ORDER BY event_id ASC""",
+            (command_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
