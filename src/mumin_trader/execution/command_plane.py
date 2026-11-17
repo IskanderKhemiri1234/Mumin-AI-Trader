@@ -416,7 +416,7 @@ def submit_paper_order(
                    (command_id,idempotency_key,payload_hash,command_type,status,actor,
                     symbol,quantity,quote_amount,created_at,updated_at)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                (command_id, idempotency_key, payload_hash, f"PAPER_{side}", "REJECTED",
+                (command_id, idempotency_key, payload_hash, f"PAPER_{side}", "RECEIVED",
                  actor[:120], symbol, qty_input, quote_input, now, _now()),
             )
             row = db.execute(
@@ -424,6 +424,12 @@ def submit_paper_order(
                 (idempotency_key,),
             ).fetchone()
             persisted_id = row["command_id"]
+            _event(db, persisted_id, "COMMAND_RECEIVED", "RECEIVED", f"{side} {symbol}")
+            db.execute(
+                "UPDATE bot_commands SET status='VALIDATING',updated_at=? WHERE command_id=?",
+                (_now(), persisted_id),
+            )
+            _event(db, persisted_id, "VALIDATION_STARTED", "VALIDATING", "Paper risk checks")
             db.execute(
                 """UPDATE bot_commands SET status='REJECTED',rejection_reason=?,updated_at=?
                    WHERE command_id=?""",
@@ -432,8 +438,29 @@ def submit_paper_order(
             _event(db, persisted_id, "COMMAND_REJECTED", "REJECTED", str(exc))
             db.commit()
             raise
-        except Exception:
+        except Exception as exc:
             db.rollback()
+            db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                """INSERT OR IGNORE INTO bot_commands
+                   (command_id,idempotency_key,payload_hash,command_type,status,actor,
+                    symbol,quantity,quote_amount,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (command_id, idempotency_key, payload_hash, f"PAPER_{side}", "FAILED",
+                 actor[:120], symbol, qty_input, quote_input, now, _now()),
+            )
+            row = db.execute(
+                "SELECT command_id FROM bot_commands WHERE idempotency_key=?",
+                (idempotency_key,),
+            ).fetchone()
+            persisted_id = row["command_id"]
+            db.execute(
+                """UPDATE bot_commands SET status='FAILED',rejection_reason=?,updated_at=?
+                   WHERE command_id=?""",
+                (type(exc).__name__, _now(), persisted_id),
+            )
+            _event(db, persisted_id, "COMMAND_FAILED", "FAILED", type(exc).__name__)
+            db.commit()
             raise
 
 
