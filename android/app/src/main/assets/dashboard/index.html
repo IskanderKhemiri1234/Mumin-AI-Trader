@@ -165,7 +165,7 @@ $('paperPause').addEventListener('click',()=>sendPaperControl('pause'));$('paper
 document.addEventListener('click',e=>{const chip=e.target.closest('[data-symbol]');if(chip){const s=chip.dataset.symbol;if(marketState.selected.has(s))marketState.selected.delete(s);else marketState.selected.add(s);renderMarket();}});
 $('marketReconnect').addEventListener('click',()=>connectMarketFeed(true));$('marketShowAll').addEventListener('click',()=>{marketState.selected=new Set(watchSymbols);renderMarket();});
 $('langBtn').addEventListener('click',()=>setLanguage(language==='ar'?'en':'ar'));$('refreshBtn').addEventListener('click',()=>{refresh();toast(t('refreshing'))});window.addEventListener('resize',()=>{if(snapshot)drawChart(snapshot.equity_history||[])});
-setLanguage('ar');renderMarket();connectMarketFeed();const existing=sessionStorage.getItem('mumin_dashboard_token');if(existing){$('accessToken').value=existing;refresh()}refreshTimer=setInterval(refresh,20000);
+setLanguage('ar');renderMarket();
 </script>
 <style>
 #localDemoRibbon{position:sticky;top:0;z-index:30;padding:9px 14px;text-align:center;background:linear-gradient(90deg,#5a4217,#8a6825,#5a4217);color:#fff3ce;font-weight:800;font-size:12px;border-bottom:1px solid #e5c77b}
