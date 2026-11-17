@@ -330,6 +330,13 @@ class BinanceSpotTestnetOPOCO:
         below = next((item for item in values if item is not working and item is not above), None)
         if above is None or below is None:
             return "UNKNOWN"
+        if (
+            str(working.get("side", "")).upper() != "BUY"
+            or str(above.get("side", "")).upper() != "SELL"
+            or str(below.get("side", "")).upper() != "SELL"
+            or str(below.get("type", "")).upper() != "STOP_LOSS_LIMIT"
+        ):
+            return "UNKNOWN"
         working_status = str(working.get("status", "")).upper()
         try:
             working_filled = Decimal(str(working.get("executedQty", "0")))
@@ -396,6 +403,8 @@ class BinanceSpotTestnetOPOCO:
             raise
         if not isinstance(response, dict):
             return None
+        if str(response.get("listClientOrderId", "")) != list_client_order_id:
+            raise SpotOrderOutcomeUnknown("OPOCO parent list identity does not match the persisted client ID.")
         parent_orders = {
             str(item.get("clientOrderId", "")): item
             for item in response.get("orders", []) if isinstance(item, dict)
@@ -431,6 +440,9 @@ class BinanceSpotTestnetOPOCO:
         if (
             str(working.get("clientOrderId", "")) != request["workingClientOrderId"]
             or str(working.get("symbol", "")).upper() != symbol.upper()
+            or str(working.get("orderId", "")) != str(
+                parent_orders[request["workingClientOrderId"]].get("orderId", "")
+            )
         ):
             raise SpotOrderOutcomeUnknown("OPOCO working order identity does not match its persisted intent.")
         working_status = str(working.get("status", "")).upper()
@@ -446,6 +458,12 @@ class BinanceSpotTestnetOPOCO:
                 or str(below.get("clientOrderId", "")) != request["pendingBelowClientOrderId"]
                 or str(above.get("symbol", "")).upper() != symbol.upper()
                 or str(below.get("symbol", "")).upper() != symbol.upper()
+                or str(above.get("orderId", "")) != str(
+                    parent_orders[request["pendingAboveClientOrderId"]].get("orderId", "")
+                )
+                or str(below.get("orderId", "")) != str(
+                    parent_orders[request["pendingBelowClientOrderId"]].get("orderId", "")
+                )
             ):
                 raise SpotOrderOutcomeUnknown("OPOCO pending leg identities do not match the persisted intent.")
         else:
