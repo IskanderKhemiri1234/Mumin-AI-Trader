@@ -355,7 +355,7 @@ def submit_paper_order(
                    (tick,symbol,side,quantity,reference_price,fill_price,gross_quote,
                     fee_quote,net_pnl,data_source,created_at)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                (tick, symbol, side, str(result_quantity), str(price), str(fill),
+                (tick, symbol, side, str(result_quantity), str(price), str(fill_price),
                  str(gross), str(fee), str(net_pnl), str(mark["data_source"]), timestamp),
             )
             db.execute(
