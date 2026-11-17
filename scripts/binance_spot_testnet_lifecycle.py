@@ -1052,6 +1052,90 @@ async def watch_existing(args: argparse.Namespace) -> int:
         await client.close()
 
 
+async def watch_opoco_existing(args: argparse.Namespace) -> int:
+    settings = Settings()
+    require_testnet(settings)
+    directory = Path(args.evidence_dir).expanduser()
+    evidence = Evidence(directory)
+    evidence.summary_path = directory / "watch-opoco-summary.json"
+    store = SQLiteOrderStore(args.database)
+    client = BinanceSpotTestnetExecution(settings, store)
+    try:
+        result = await watch_opoco(
+            client,
+            symbol=args.symbol.upper(),
+            list_client_order_id=args.list_client_order_id,
+            timeout_seconds=args.timeout_seconds,
+            poll_seconds=args.poll_seconds,
+            evidence=evidence,
+        )
+        await client.sync_trade_history()
+        pnl = store.realized_pnl_report(settings.QUOTE_ASSET)
+        reconciliation = await client.reconcile()
+        proof = opoco_result(result)
+        fifo_open = Decimal(
+            str(pnl.get("symbols", {}).get(args.symbol.upper(), {}).get("open_quantity", "0"))
+        )
+        fee_mismatches = []
+        for child in proof["children"]:
+            child_id = str(child.get("orderId", ""))
+            if child_id.isdigit():
+                fee_mismatches.extend(
+                    commission_asset_mismatches(
+                        store.trade_fills_for_order(args.symbol.upper(), int(child_id)),
+                        settings.BNB_FEE_ASSET,
+                    )
+                )
+        fill_discrepancies = store.order_fill_quantity_discrepancies()
+        unmatched = store.unmatched_trade_order_ids()
+        reconciliation_clean = (
+            not reconciliation["discrepancies"] and not reconciliation["halted"]
+        )
+        verified = (
+            proof["mutual_cancel_proven"]
+            and bool(pnl.get("complete"))
+            and fifo_open == 0
+            and not fee_mismatches
+            and not fill_discrepancies
+            and not unmatched
+            and reconciliation_clean
+        )
+        summary = {
+            "environment": "BINANCE_SPOT_TESTNET",
+            "protection_mode": "OPOCO",
+            "symbol": args.symbol.upper(),
+            "order_list_id": proof["orderListId"],
+            "opoco_list_client_order_id": args.list_client_order_id,
+            "opoco_state": client.opoco._state(result),
+            "opoco_children": proof["children"],
+            "mutual_cancel_proven": proof["mutual_cancel_proven"],
+            "fifo_complete": bool(pnl.get("complete")),
+            "fifo_open_inventory_quantity": str(fifo_open),
+            "fifo_realized_pnl": pnl,
+            "fee_asset_mismatches": fee_mismatches,
+            "fill_discrepancies": fill_discrepancies,
+            "unmatched_trade_orders": unmatched,
+            "reconciliation_discrepancies": reconciliation["discrepancies"],
+            "reconciliation_clean": reconciliation_clean,
+            "status": "TESTNET_OPOCO_CYCLE_VERIFIED" if verified else "TESTNET_OPOCO_CYCLE_INCOMPLETE",
+            "finished_at": utc_now(),
+        }
+        evidence.summary(summary)
+        print(json.dumps({
+            "status": summary["status"],
+            "order_list_id": summary["order_list_id"],
+            "opoco_state": summary["opoco_state"],
+            "mutual_cancel_proven": summary["mutual_cancel_proven"],
+            "evidence_directory": str(directory),
+            "summary_file": str(evidence.summary_path),
+            "mainnet_used": False,
+            "secrets_written": False,
+        }, indent=2))
+        return 0 if verified else 2
+    finally:
+        await client.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Supervised BUY -> protective OCO -> FIFO evidence runner. Binance Spot Testnet only."
@@ -1073,6 +1157,26 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--evidence-root", default="artifacts/binance-spot-testnet-evidence")
     run.add_argument("--confirm-testnet-cycle", required=True, choices=("TESTNET_ONLY",))
 
+    opoco = commands.add_parser(
+        "run-opoco",
+        help="Run one explicitly confirmed Spot Testnet OPOCO lifecycle.",
+    )
+    opoco.add_argument("--symbol", default="BTCUSDT")
+    opoco.add_argument("--quantity", required=True)
+    opoco.add_argument("--working-price", required=True)
+    opoco.add_argument("--take-profit-price", required=True)
+    opoco.add_argument("--stop-price", required=True)
+    opoco.add_argument("--stop-limit-price", required=True)
+    opoco.add_argument("--buy-timeout-seconds", type=int, default=120)
+    opoco.add_argument("--oco-timeout-seconds", type=int, default=900)
+    opoco.add_argument("--poll-seconds", type=float, default=2)
+    opoco.add_argument(
+        "--testnet-max-order-usdt",
+        help="Optional one-run Testnet-only cap override, hard-limited to 6.00 USDT.",
+    )
+    opoco.add_argument("--evidence-root", default="artifacts/binance-spot-testnet-evidence")
+    opoco.add_argument("--confirm-testnet-cycle", required=True, choices=("TESTNET_ONLY",))
+
     inspect = commands.add_parser("inspect", help="Read the current Testnet price and filters; sends no orders.")
     inspect.add_argument("--symbol", default="BTCUSDT")
     inspect.add_argument("--database", default="data/testnet-inspect.sqlite3")
@@ -1092,6 +1196,16 @@ def build_parser() -> argparse.ArgumentParser:
     watch.add_argument("--evidence-dir", required=True)
     watch.add_argument("--timeout-seconds", type=int, default=1800)
     watch.add_argument("--poll-seconds", type=float, default=3)
+    watch_opoco = commands.add_parser(
+        "watch-opoco",
+        help="Continue monitoring a previously submitted OPOCO list; sends no new orders.",
+    )
+    watch_opoco.add_argument("--symbol", required=True)
+    watch_opoco.add_argument("--list-client-order-id", required=True)
+    watch_opoco.add_argument("--database", required=True)
+    watch_opoco.add_argument("--evidence-dir", required=True)
+    watch_opoco.add_argument("--timeout-seconds", type=int, default=1800)
+    watch_opoco.add_argument("--poll-seconds", type=float, default=3)
     return parser
 
 
@@ -1100,8 +1214,12 @@ def main() -> None:
     try:
         if args.command == "run":
             code = asyncio.run(run_cycle(args))
+        elif args.command == "run-opoco":
+            code = asyncio.run(run_opoco_cycle(args))
         elif args.command == "inspect":
             code = asyncio.run(inspect_market(args))
+        elif args.command == "watch-opoco":
+            code = asyncio.run(watch_opoco_existing(args))
         else:
             code = asyncio.run(watch_existing(args))
     except Exception as exc:
