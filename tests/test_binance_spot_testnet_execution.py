@@ -1280,6 +1280,12 @@ async def test_opoco_submission_uses_single_server_side_order_list_and_three_chi
     try:
         initial = await client.reconcile()
         assert initial["discrepancies"] == []
+        with store._connection() as connection:
+            risk_state = connection.execute(
+                "SELECT high_watermark, last_equity FROM spot_risk_state WHERE id=1"
+            ).fetchone()
+        assert Decimal(risk_state["high_watermark"]) == Decimal("70.00")
+        assert Decimal(risk_state["last_equity"]) == Decimal("70.00")
         response = await client.opoco.place_buy_opoco(
             symbol="BTCUSDT",
             quantity="0.00010",
