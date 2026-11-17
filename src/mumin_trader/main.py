@@ -347,6 +347,25 @@ def _read_dashboard_snapshot() -> dict[str, Any]:
         source_row = connection.execute(
             "SELECT data_source FROM bot_market_ticks ORDER BY id DESC LIMIT 1"
         ).fetchone()
+        decision_table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_agent_decisions'"
+        ).fetchone()
+        strategy_decisions = []
+        if decision_table is not None:
+            strategy_decisions = [
+                dict(row) for row in connection.execute(
+                    """SELECT d.symbol,d.final_signal,d.action,d.liquidity_sweep_vote,
+                              d.liquidity_sweep_reason,d.depth_imbalance_vote,
+                              d.depth_imbalance_reason,d.micro_alpha_filter_vote,
+                              d.micro_alpha_filter_reason,d.spread_bps,d.spread_pass,
+                              d.agent_consensus,d.agent_consensus_pass,d.created_at
+                       FROM bot_agent_decisions d
+                       JOIN (SELECT symbol,MAX(decision_id) AS latest_id
+                             FROM bot_agent_decisions GROUP BY symbol) latest
+                         ON latest.latest_id=d.decision_id
+                       ORDER BY d.symbol"""
+                ).fetchall()
+            ]
 
         accounting = reconcile_paper_ledger(connection)
         cash_decimal = Decimal(account["cash"])
@@ -392,6 +411,19 @@ def _read_dashboard_snapshot() -> dict[str, Any]:
             "fills": fills,
             "equity_history": equity_history,
             "accounting": accounting,
+            "strategy_decisions": strategy_decisions,
+            "risk_status": {
+                "halted": bool(account["halted"]),
+                "halt_reason": account["halt_reason"],
+                "daily_pnl": (
+                    float(equity_decimal) - float(account["daily_start_equity"])
+                    if equity_decimal is not None else None
+                ),
+                "daily_loss_limit_percent": "2.00",
+                "max_drawdown_percent": "5.00",
+                "max_trade_usdt": "5.00",
+                "cash_reserve_percent": "20.00",
+            },
         }
     finally:
         connection.close()
