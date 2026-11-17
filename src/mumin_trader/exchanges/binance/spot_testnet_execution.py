@@ -51,8 +51,10 @@ class BinanceSpotTestnetExecution:
         )
         self._validator = BinanceSpotTestnetOrderPreflight(settings, transport=transport)
         from mumin_trader.exchanges.binance.spot_testnet_oco import BinanceSpotTestnetOCO
+        from mumin_trader.exchanges.binance.spot_testnet_opoco import BinanceSpotTestnetOPOCO
 
         self.oco = BinanceSpotTestnetOCO(self)
+        self.opoco = BinanceSpotTestnetOPOCO(self)
 
     @staticmethod
     def _assert_safety_gate(settings: Settings) -> None:
