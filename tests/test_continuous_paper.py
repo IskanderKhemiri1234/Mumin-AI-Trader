@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from decimal import Decimal
 
@@ -128,11 +129,12 @@ def test_stop_loss_uses_net_exit_value_after_fees_and_slippage(tmp_path):
             "SELECT COUNT(*) FROM bot_positions WHERE symbol='BTCUSDT'"
         ).fetchone()[0]
         exit_row = db.execute(
-            "SELECT net_pnl FROM bot_fills WHERE symbol='BTCUSDT' AND side='SELL'"
+            "SELECT net_pnl,exit_reason FROM bot_fills WHERE symbol='BTCUSDT' AND side='SELL'"
         ).fetchone()
     assert remaining == 0
     assert exit_row is not None
     assert Decimal(exit_row[0]) <= Decimal("-0.25")
+    assert exit_row[1] == "STOP_LOSS"
 
 
 def test_daily_loss_halts_entries_before_another_symbol_can_open(tmp_path):
@@ -220,6 +222,9 @@ def test_public_micro_alpha_entry_persists_atr_adaptive_position_targets(tmp_pat
                       spread_bps, atr_pct, final_signal, action
                FROM bot_agent_decisions WHERE symbol='BTCUSDT' ORDER BY tick DESC LIMIT 1"""
         ).fetchone()
+        macro_json = db.execute(
+            "SELECT macro_hourly_closes_json FROM bot_market_ticks WHERE symbol='BTCUSDT' ORDER BY id DESC LIMIT 1"
+        ).fetchone()[0]
     assert result.signal.startswith("BTCUSDT:BUY")
     assert position is not None
     assert decision is not None
@@ -233,6 +238,8 @@ def test_public_micro_alpha_entry_persists_atr_adaptive_position_targets(tmp_pat
     assert Decimal(decision[7]) > 0
     assert decision[8] == "BUY"
     assert decision[9].startswith("BTCUSDT:OPEN")
+    assert len(json.loads(macro_json)) == 21
+    assert Decimal(json.loads(macro_json)[-1]) == Decimal("100")
     stop, target = map(Decimal, position)
     assert Decimal("0.20") <= stop <= Decimal("0.50")
     assert Decimal("0.40") <= target <= Decimal("1.25")
