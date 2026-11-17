@@ -7,7 +7,10 @@ import pytest
 
 from config.config import Settings, TradingEnvironment, TradingMode
 from mumin_trader.exchanges.binance.order_store import OrderStoreError, SQLiteOrderStore
-from mumin_trader.exchanges.binance.spot_testnet_oco import BinanceSpotTestnetOCO
+from mumin_trader.exchanges.binance.spot_testnet_oco import (
+    BinanceSpotTestnetOCO,
+    validate_fixed_exit_risk,
+)
 from mumin_trader.exchanges.binance.spot_testnet_execution import (
     BinanceSpotTestnetExecution,
     SpotExecutionError,
@@ -1417,3 +1420,35 @@ async def test_opoco_recovery_queries_parent_and_all_three_children_after_restar
         assert saved["state"] == "PROTECTION_ARMED"
     finally:
         await client.close()
+
+
+def test_fixed_exit_risk_accepts_approved_policy_prices() -> None:
+    result = validate_fixed_exit_risk(
+        "50000",
+        "50625",
+        "49750",
+    )
+    assert Decimal(result["stop_loss_percent"]) == Decimal("0.50")
+    assert Decimal(result["take_profit_percent"]) == Decimal("1.25")
+
+
+@pytest.mark.parametrize(
+    ("take_profit", "stop"),
+    [
+        ("50750", "49750"),
+        ("50625", "49600"),
+        ("49900", "49750"),
+        ("50625", "50100"),
+    ],
+)
+def test_fixed_exit_risk_rejects_unapproved_exit_prices(
+    take_profit: str,
+    stop: str,
+) -> None:
+    with pytest.raises(SpotExecutionError):
+        validate_fixed_exit_risk("50000", take_profit, stop)
+
+
+def test_fixed_exit_risk_rejects_invalid_price_relationship() -> None:
+    with pytest.raises(SpotExecutionError, match="0 < stop < entry < take-profit"):
+        validate_fixed_exit_risk("50000", "49000", "51000")
