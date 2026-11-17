@@ -1380,9 +1380,9 @@ async def test_opoco_recovery_queries_parent_and_all_three_children_after_restar
         "pendingBelowClientOrderId": "mumin-opoco-below",
     }
     try:
-        store.register(request_record)
-        assert store.claim("mumin-opoco-recovery") is True
-        store.update(
+        client.oco.store.register(request_record)
+        assert client.oco.store.claim("mumin-opoco-recovery") is True
+        client.oco.store.update(
             "mumin-opoco-recovery",
             state="UNKNOWN",
             response={
