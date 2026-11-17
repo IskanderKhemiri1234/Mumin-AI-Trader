@@ -7,6 +7,7 @@ from scripts.binance_spot_testnet_lifecycle import (
     commission_asset_mismatches,
     json_safe,
     opoco_capability,
+    opoco_result,
     round_down_to_step,
 )
 from mumin_trader.exchanges.binance.spot_testnet_oco import (
@@ -245,3 +246,27 @@ def test_opoco_order_list_store_persists_all_three_distinct_child_orders(tmp_pat
         "mumin-opoco-above",
         "mumin-opoco-below",
     }
+
+
+def test_opoco_result_proves_three_order_lifecycle_and_mutual_cancel():
+    response = _opoco_response(
+        above_status="FILLED",
+        below_status="CANCELED",
+        list_status="ALL_DONE",
+    )
+    result = opoco_result(response)
+
+    assert result["mutual_cancel_proven"] is True
+    assert result["working_order"]["side"] == "BUY"
+    assert len(result["protective_children"]) == 2
+    assert len({item["orderId"] for item in result["children"]}) == 3
+
+
+def test_opoco_result_does_not_claim_protection_for_partial_working_order():
+    response = _opoco_response(
+        working_status="PARTIALLY_FILLED",
+        working_executed="0.0004",
+        above_status="PENDING_NEW",
+        below_status="PENDING_NEW",
+    )
+    assert opoco_result(response)["mutual_cancel_proven"] is False
