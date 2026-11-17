@@ -5,6 +5,7 @@ import gzip
 import hashlib
 import json
 import sqlite3
+from decimal import Decimal, InvalidOperation
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,6 +16,7 @@ EXPECTED_SYMBOLS = (
     "XRPUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT",
 )
 PUBLIC_SOURCE = "BINANCE_PUBLIC_MARKET_DATA"
+ONE_MINUTE_MS = 60_000
 
 
 def _rows(connection: sqlite3.Connection, table: str, source_filter: bool = True) -> list[dict[str, Any]]:
@@ -32,6 +34,69 @@ def _rows(connection: sqlite3.Connection, table: str, source_filter: bool = True
     return [dict(row) for row in rows]
 
 
+def _latest_contiguous_cycles(
+    source_rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Select one complete eight-symbol cycle per closed minute, then the latest gap-free suffix."""
+    by_tick: dict[int, dict[str, dict[str, Any]]] = defaultdict(dict)
+    for row in source_rows:
+        by_tick[int(row["tick"])][str(row["symbol"]).upper()] = row
+
+    complete_by_close: dict[int, tuple[int, dict[str, dict[str, Any]]]] = {}
+    incomplete_ticks = 0
+    mismatched_close_ticks = 0
+    for tick, symbols in by_tick.items():
+        if set(symbols) != set(EXPECTED_SYMBOLS):
+            incomplete_ticks += 1
+            continue
+        closes = {int(row["candle_close_time_ms"]) for row in symbols.values()}
+        if len(closes) != 1:
+            mismatched_close_ticks += 1
+            continue
+        close_time = next(iter(closes))
+        current = complete_by_close.get(close_time)
+        if current is None or tick > current[0]:
+            complete_by_close[close_time] = (tick, symbols)
+
+    ordered_closes = sorted(complete_by_close)
+    last_gap_index = 0
+    gap_count = 0
+    for index, (left, right) in enumerate(zip(ordered_closes, ordered_closes[1:])):
+        if right - left > ONE_MINUTE_MS:
+            gap_count += 1
+            last_gap_index = index + 1
+
+    selected_closes = ordered_closes[last_gap_index:]
+    selected_rows: list[dict[str, Any]] = []
+    selected_ticks: set[int] = set()
+    for close_time in selected_closes:
+        tick, symbols = complete_by_close[close_time]
+        selected_ticks.add(tick)
+        selected_rows.extend(symbols[symbol] for symbol in EXPECTED_SYMBOLS)
+
+    source_duplicate_rows = max(0, len(source_rows) - len(selected_rows))
+    selection = {
+        "policy": (
+            "For each closed one-minute candle, select the latest complete eight-symbol "
+            "source tick; retain only the latest contiguous suffix after the most recent "
+            "missing-minute gap. No missing candles are synthesized."
+        ),
+        "source_market_snapshot_rows": len(source_rows),
+        "source_tick_count": len(by_tick),
+        "source_incomplete_tick_count": incomplete_ticks,
+        "source_mismatched_close_tick_count": mismatched_close_ticks,
+        "source_complete_candle_count": len(complete_by_close),
+        "source_duplicate_or_excluded_snapshot_rows": source_duplicate_rows,
+        "source_gap_count": gap_count,
+        "excluded_preceding_contiguous_segment_candles": last_gap_index,
+        "selected_contiguous_candle_count": len(selected_closes),
+        "selected_source_ticks": sorted(selected_ticks),
+        "selected_start_candle_close_ms": selected_closes[0] if selected_closes else None,
+        "selected_end_candle_close_ms": selected_closes[-1] if selected_closes else None,
+    }
+    return selected_rows, selection
+
+
 def export_archive(database: str | Path, archive_path: str | Path, manifest_path: str | Path) -> dict[str, Any]:
     db_path = Path(database).resolve()
     if not db_path.is_file():
@@ -39,11 +104,16 @@ def export_archive(database: str | Path, archive_path: str | Path, manifest_path
     connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10)
     connection.row_factory = sqlite3.Row
     try:
-        ticks = _rows(connection, "bot_market_ticks")
-        decisions = _rows(connection, "bot_agent_decisions")
-        fills = _rows(connection, "bot_fills")
+        source_ticks = _rows(connection, "bot_market_ticks")
+        all_decisions = _rows(connection, "bot_agent_decisions")
+        all_fills = _rows(connection, "bot_fills")
     finally:
         connection.close()
+
+    ticks, selection = _latest_contiguous_cycles(source_ticks)
+    selected_tick_ids = set(selection["selected_source_ticks"])
+    decisions = [row for row in all_decisions if int(row["tick"]) in selected_tick_ids]
+    fills = [row for row in all_fills if int(row["tick"]) in selected_tick_ids]
 
     ticks_by_symbol: dict[str, list[dict[str, Any]]] = defaultdict(list)
     tick_symbols: dict[int, set[str]] = defaultdict(set)
@@ -69,7 +139,7 @@ def export_archive(database: str | Path, archive_path: str | Path, manifest_path
         ) - len(stamps)
         gaps = [right - left for left, right in zip(stamps, stamps[1:])]
         symbol_largest = max(gaps, default=0)
-        missing = sum(max(0, (gap // 60_000) - 1) for gap in gaps if gap > 60_000)
+        missing = sum(max(0, (gap // ONE_MINUTE_MS) - 1) for gap in gaps if gap > ONE_MINUTE_MS)
         total_duplicate_closes += duplicates
         total_missing_minute_slots += missing
         largest_gap_ms = max(largest_gap_ms, symbol_largest)
@@ -85,14 +155,47 @@ def export_archive(database: str | Path, archive_path: str | Path, manifest_path
 
     macro_complete_rows = 0
     macro_timestamp_aligned_rows = 0
+    macro_values_valid_rows = 0
     minute_timestamp_aligned_rows = 0
+    quote_valid_rows = 0
+    replay_numeric_fields = (
+        "price", "bid", "ask", "candle_open", "candle_high",
+        "candle_low", "candle_volume", "bid_depth_qty", "ask_depth_qty",
+    )
+    received_values_by_tick: dict[int, list[int]] = defaultdict(list)
+    for row in ticks:
+        received_values_by_tick[int(row["tick"])].append(int(row.get("received_at_ms") or 0))
+    received_by_tick = {
+        tick: max(values) for tick, values in received_values_by_tick.items()
+    }
     for row in ticks:
         closes = json.loads(row.get("macro_hourly_closes_json") or "[]")
-        close_times = json.loads(row.get("macro_hourly_close_times_json") or "[]")
-        received_at = int(row.get("received_at_ms") or 0)
+        close_times = json.loads(row.get("macro_hourly_close_times_ms_json") or row.get("macro_hourly_close_times_json") or "[]")
+        received_at = received_by_tick[int(row["tick"])]
         candle_close = row.get("candle_close_time_ms")
-        if candle_close is not None and int(candle_close) < received_at:
+        if (
+            candle_close is not None
+            and int(candle_close) < received_at
+            and received_at - int(candle_close) <= 180_000
+        ):
             minute_timestamp_aligned_rows += 1
+        try:
+            numeric_values = [Decimal(str(row[name])) for name in replay_numeric_fields]
+            if all(value.is_finite() for value in numeric_values):
+                price, bid, ask, candle_open, candle_high, candle_low, volume, bid_depth, ask_depth = numeric_values
+                if (
+                    price > 0 and bid > 0 and ask >= bid and candle_open > 0
+                    and candle_high >= candle_low and volume >= 0
+                    and bid_depth >= 0 and ask_depth >= 0
+                ):
+                    quote_valid_rows += 1
+        except (KeyError, InvalidOperation, TypeError, ValueError):
+            pass
+        try:
+            if all(Decimal(str(value)).is_finite() for value in closes):
+                macro_values_valid_rows += 1
+        except (InvalidOperation, TypeError, ValueError):
+            pass
         if len(closes) == 21:
             macro_complete_rows += 1
         if (
@@ -118,6 +221,8 @@ def export_archive(database: str | Path, archive_path: str | Path, manifest_path
         and all_macro_inputs_present
         and all_macro_timestamps_aligned
         and minute_timestamp_aligned_rows == len(ticks)
+        and quote_valid_rows == len(ticks)
+        and macro_values_valid_rows == len(ticks)
         and total_duplicate_closes == 0
         and total_missing_minute_slots == 0
     )
@@ -139,9 +244,10 @@ def export_archive(database: str | Path, archive_path: str | Path, manifest_path
         if row.get("candle_close_time_ms") is not None
     ]
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at_utc": generated,
         "source": PUBLIC_SOURCE,
+        "source_database": str(db_path),
         "archive_sha256": digest,
         "archive_bytes": archive_path.stat().st_size,
         "record_counts": {
@@ -149,6 +255,7 @@ def export_archive(database: str | Path, archive_path: str | Path, manifest_path
             "agent_decisions": len(decisions),
             "paper_fills": len(fills),
         },
+        "selection": selection,
         "expected_symbols": list(EXPECTED_SYMBOLS),
         "symbols_present": sorted(ticks_by_symbol),
         "all_expected_symbols_present": all_symbols_present,
@@ -168,6 +275,8 @@ def export_archive(database: str | Path, archive_path: str | Path, manifest_path
             "raw_21_hourly_close_timestamp_alignment_passed": all_macro_timestamps_aligned,
             "one_minute_close_timestamp_alignment_passed": bool(ticks) and minute_timestamp_aligned_rows == len(ticks),
             "minute_timestamp_aligned_rows": minute_timestamp_aligned_rows,
+            "replay_numeric_quote_rows": quote_valid_rows,
+            "replay_macro_numeric_rows": macro_values_valid_rows,
             "macro_complete_rows": macro_complete_rows,
             "macro_timestamp_aligned_rows": macro_timestamp_aligned_rows,
             "replay_ready": replay_ready,
@@ -175,11 +284,12 @@ def export_archive(database: str | Path, archive_path: str | Path, manifest_path
             "status": "OBSERVATION_ARCHIVE_ONLY",
         },
         "limitations": [
-            "The archive includes only recorded public Paper snapshots; missing intervals are not reconstructed.",
-            "Order-book depth exists only at captured snapshot times and is not historical exchange depth for skipped intervals.",
-            "Legacy snapshots created before the macro-input schema migration contain no raw hourly closes or close timestamps and cannot be independently replayed.",
-            "Replay readiness requires 21 closed hourly values and their exact close timestamps for every row, complete eight-symbol cycles, at least 30 cycles, and no missing one-minute slots or duplicate candle snapshots.",
-            "The current schedule is best-effort and is not a guaranteed continuous 24/7 feed.",
+            "Only public-market observations are included; synthetic rows are excluded.",
+            "For each minute, the latest complete eight-symbol snapshot is selected; earlier same-minute snapshots are excluded.",
+            "Only the latest contiguous one-minute suffix is retained. All preceding gaps are disclosed in the selection metadata and no missing data is reconstructed.",
+            "Order-book depth is available only at captured snapshot times and is not historical exchange depth for skipped intervals.",
+            "Replay readiness additionally requires positive finite executable-side prices, valid bid/ask ordering, finite OHLCV and depth inputs, fresh minute candles, and finite raw hourly closes.",
+            "Replay readiness requires at least 30 complete cycles, 21 causally aligned hourly closes per row, minute timestamp alignment, and no gaps or duplicates within the selected suffix.",
             "This archive is not a sealed Holdout and must not be used to claim out-of-sample profitability.",
         ],
     }
@@ -197,6 +307,7 @@ def main() -> None:
     print(json.dumps({
         "archive_sha256": manifest["archive_sha256"],
         "record_counts": manifest["record_counts"],
+        "selection": manifest["selection"],
         "quality": manifest["quality"],
     }, indent=2))
 
