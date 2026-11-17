@@ -320,6 +320,42 @@ def exit_risk_metrics(
     }
 
 
+def opoco_exit_risk_metrics(
+    average_entry_price: Decimal,
+    protective_children: list[dict[str, Any]],
+) -> dict[str, Any]:
+    above = next(
+        (item for item in protective_children if item.get("type") == "LIMIT_MAKER"),
+        None,
+    )
+    below = next(
+        (item for item in protective_children if item.get("type") == "STOP_LOSS_LIMIT"),
+        None,
+    )
+    if above is None or below is None:
+        result = exit_risk_metrics(average_entry_price, Decimal("0"), Decimal("0"))
+        result["exchange_exit_prices_verified"] = False
+        return result
+    try:
+        take_profit = Decimal(str(above["price"]))
+        stop_price = Decimal(str(below["stopPrice"]))
+    except (KeyError, ArithmeticError, ValueError):
+        result = exit_risk_metrics(average_entry_price, Decimal("0"), Decimal("0"))
+        result["exchange_exit_prices_verified"] = False
+        return result
+    result = exit_risk_metrics(average_entry_price, take_profit, stop_price)
+    result["exchange_take_profit_price"] = str(take_profit)
+    result["exchange_stop_price"] = str(stop_price)
+    result["exchange_exit_prices_verified"] = (
+        take_profit.is_finite() and stop_price.is_finite()
+        and take_profit > 0 and stop_price > 0
+    )
+    result["exit_risk_policy_match"] = (
+        result["exit_risk_policy_match"] and result["exchange_exit_prices_verified"]
+    )
+    return result
+
+
 def opoco_result(list_response: dict[str, Any]) -> dict[str, Any]:
     reports = list_response.get("orderReports", [])
     normalized = [
@@ -331,6 +367,8 @@ def opoco_result(list_response: dict[str, Any]) -> dict[str, Any]:
             "status": str(item.get("status", "")).upper(),
             "executedQty": str(item.get("executedQty", "0")),
             "origQty": str(item.get("origQty", "0")),
+            "price": str(item.get("price", "0")),
+            "stopPrice": str(item.get("stopPrice", "0")),
         }
         for item in reports if isinstance(item, dict)
     ]
@@ -542,7 +580,9 @@ async def run_cycle(args: argparse.Namespace) -> int:
             Decimal(buy_summary["quote_quantity"]) / gross_buy_quantity
             if gross_buy_quantity > 0 else Decimal("0")
         )
-        exit_risk = exit_risk_metrics(average_entry_price, take_profit, stop_price)
+        exit_risk = opoco_exit_risk_metrics(
+            average_entry_price, protective_children,
+        )
         buy_fills = store.trade_fills_for_order(symbol, int(buy_order_id))
         buy_fee_asset_mismatches = commission_asset_mismatches(buy_fills, settings.BNB_FEE_ASSET)
         evidence.record("buy_fills_from_myTrades", {
@@ -1195,10 +1235,8 @@ async def watch_opoco_existing(args: argparse.Namespace) -> int:
         )
         local_intent = client.oco.store.get(args.list_client_order_id)
         stored_request = json.loads(local_intent["request_json"]) if local_intent else {}
-        exit_risk = exit_risk_metrics(
-            average_entry_price,
-            Decimal(str(stored_request.get("pendingAbovePrice", "0"))),
-            Decimal(str(stored_request.get("pendingBelowStopPrice", "0"))),
+        exit_risk = opoco_exit_risk_metrics(
+            average_entry_price, proof["protective_children"],
         )
         net_quantity = (
             Decimal(buy_summary["net_base_quantity"])
