@@ -233,14 +233,14 @@ class BinanceSpotTestnetOPOCO:
         }
         intent, created = self.store.register(record)
         if not created and intent["state"] != "PREPARED":
+            if intent["state"] in {"COMPLETE", "CANCELED", "REJECT"}:
+                return json.loads(intent["response_json"])
             observed = await self.get_order_list(
                 symbol=symbol,
                 list_client_order_id=list_client_order_id,
             )
             if observed is not None:
                 return observed
-            if intent["state"] in {"CANCELED", "REJECT"}:
-                return json.loads(intent["response_json"])
             self.store.update(
                 list_client_order_id,
                 state="UNKNOWN",
@@ -300,7 +300,6 @@ class BinanceSpotTestnetOPOCO:
             str(item.get("clientOrderId", "")): item
             for item in reports if isinstance(item, dict)
         }
-        local_request = None
         # The client IDs are persisted with the request and used as the authoritative leg mapping.
         # This method is static so callers must supply the normalized report roles explicitly.
         if len(by_client) != 3:
@@ -392,22 +391,30 @@ class BinanceSpotTestnetOPOCO:
         if any(client_id not in parent_orders for client_id in required_ids):
             raise SpotOrderOutcomeUnknown("OPOCO parent response omitted one or more child order IDs.")
 
-        working = await self.execution.get_order(
-            symbol=symbol.upper(),
-            client_order_id=request["workingClientOrderId"],
-        )
+        async def query_child(client_order_id: str) -> dict[str, Any] | None:
+            try:
+                report = await self.execution._request(
+                    "GET",
+                    "/api/v3/order",
+                    {"symbol": symbol.upper(), "origClientOrderId": client_order_id},
+                    signed=True,
+                )
+            except SpotExecutionError as exc:
+                if "(-2013)" in str(exc):
+                    return None
+                raise
+            if not isinstance(report, dict):
+                return None
+            await self.execution._sync_fills_if_needed(report)
+            return report
+
+        working = await query_child(request["workingClientOrderId"])
         if working is None:
             raise SpotOrderOutcomeUnknown("OPOCO working BUY is not queryable; state remains unresolved.")
         working_status = str(working.get("status", "")).upper()
         if working_status == "FILLED":
-            above = await self.execution.get_order(
-                symbol=symbol.upper(),
-                client_order_id=request["pendingAboveClientOrderId"],
-            )
-            below = await self.execution.get_order(
-                symbol=symbol.upper(),
-                client_order_id=request["pendingBelowClientOrderId"],
-            )
+            above = await query_child(request["pendingAboveClientOrderId"])
+            below = await query_child(request["pendingBelowClientOrderId"])
             if above is None or below is None:
                 raise SpotOrderOutcomeUnknown(
                     "Working BUY is filled but both pending OCO legs are not queryable."
