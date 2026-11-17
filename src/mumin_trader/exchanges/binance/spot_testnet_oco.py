@@ -184,6 +184,18 @@ class SQLiteOCOOrderStore:
             ).fetchone()
             return dict(row) if row else None
 
+    def get_by_child_client_id(self, client_order_id: str) -> dict[str, Any] | None:
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT * FROM spot_oco_order_lists
+                   WHERE working_client_order_id=?
+                      OR above_client_order_id=?
+                      OR below_client_order_id=?
+                   LIMIT 1""",
+                (client_order_id, client_order_id, client_order_id),
+            ).fetchone()
+            return dict(row) if row else None
+
     def child_client_order_ids(self) -> set[str]:
         with self._connect() as db:
             rows = db.execute(
