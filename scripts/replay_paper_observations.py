@@ -88,6 +88,7 @@ def replay_archive(
     output_path: str | Path,
     *,
     require_ready: bool = True,
+    warmup_cycles: int = 0,
 ) -> dict[str, Any]:
     archive = Path(archive_path)
     manifest_file = Path(manifest_path)
@@ -95,11 +96,15 @@ def replay_archive(
     cycles = _prepare_cycles(records)
     if require_ready and len(cycles) < 30:
         raise ValueError("At least 30 complete cycles are required for formal replay.")
+    if warmup_cycles < 0 or warmup_cycles >= len(cycles):
+        raise ValueError("warmup_cycles must be non-negative and smaller than the dataset.")
+    if require_ready and warmup_cycles and warmup_cycles < 30:
+        raise ValueError("Formal replay warm-up must contain at least 30 cycles.")
 
     with tempfile.TemporaryDirectory(prefix="mumin-paper-replay-") as temporary:
         database = Path(temporary) / "replay.sqlite3"
         bot = ContinuousPaperBot(str(database), initial_cash=Decimal("70.00"))
-        for _, received_at, symbols in cycles:
+        for cycle_index, (_, received_at, symbols) in enumerate(cycles):
             prices = {}
             quotes = {}
             candle_times = {}
@@ -127,6 +132,7 @@ def replay_archive(
                 received_at_ms=received_at,
                 market_features=features,
                 event_time=event_time,
+                allow_new_entries=cycle_index >= warmup_cycles,
             )
 
         bot.finalize_database_batch()
@@ -157,6 +163,8 @@ def replay_archive(
         )
         metrics = {
             "cycles_replayed": len(cycles),
+            "warmup_cycles": warmup_cycles,
+            "evaluation_cycles": len(cycles) - warmup_cycles,
             "first_received_at_ms": cycles[0][1],
             "last_received_at_ms": cycles[-1][1],
             "initial_capital_usdt": "70.00",
