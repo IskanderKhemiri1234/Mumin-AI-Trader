@@ -1,0 +1,15 @@
+#!/data/data/com.termux/files/usr/bin/sh
+set -eu
+ROOT="$HOME/Mumin-AI-Trader"
+LOG_DIR="$HOME/.mumin-ai-trader/logs"
+BACKUP_DIR="$ROOT/data/backups"
+mkdir -p "$LOG_DIR" "$BACKUP_DIR"
+cd "$ROOT"
+export PYTHONUNBUFFERED=1
+while true; do
+  RESULT="$(python scripts/backup_paper_ledger.py --db data/mumin_public_paper.db --backup-dir "$BACKUP_DIR" --retention-days 30)"
+  printf '%s\n' "$RESULT"
+  BACKUP_FILE="$(printf '%s' "$RESULT" | python -c 'import json,sys; print(json.load(sys.stdin)["backup_file"])')"
+  python scripts/backup_paper_ledger.py --db data/mumin_public_paper.db --backup-dir "$BACKUP_DIR" --verify "$BACKUP_DIR/$BACKUP_FILE"
+  sleep 21600
+done
