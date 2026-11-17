@@ -137,6 +137,53 @@ def test_stop_loss_uses_net_exit_value_after_fees_and_slippage(tmp_path):
     assert exit_row[1] == "STOP_LOSS"
 
 
+def test_take_profit_exit_reason_is_persisted(tmp_path):
+    database = tmp_path / "net-target.sqlite3"
+    bot = ContinuousPaperBot(str(database), initial_cash=Decimal("70.00"))
+    with sqlite3.connect(database) as db:
+        db.execute("UPDATE bot_account SET cash='19.95' WHERE id=1")
+        db.execute(
+            """INSERT INTO bot_positions
+               (symbol,quantity,entry_price,entry_gross,entry_fee,opened_at)
+               VALUES ('BTCUSDT','0.5','100','50','0.05','2026-11-13T00:00:00+00:00')"""
+        )
+
+    bot.step(
+        {"BTCUSDT": Decimal("103.5")},
+        source="BINANCE_PUBLIC_MARKET_DATA",
+        quotes={"BTCUSDT": (Decimal("103.4"), Decimal("103.5"))},
+        candle_close_times={"BTCUSDT": 1_800_000_000_000},
+        received_at_ms=1_800_000_000_100,
+    )
+
+    with sqlite3.connect(database) as db:
+        row = db.execute(
+            "SELECT exit_reason FROM bot_fills WHERE symbol='BTCUSDT' AND side='SELL'"
+        ).fetchone()
+    assert row == ("TAKE_PROFIT",)
+
+
+def test_sell_signal_exit_reason_is_persisted(tmp_path):
+    database = tmp_path / "signal-exit.sqlite3"
+    bot = ContinuousPaperBot(str(database), initial_cash=Decimal("70.00"))
+    bot.swarm.evaluate = lambda *args: ("SELL", "SELL", True)
+    with sqlite3.connect(database) as db:
+        db.execute("UPDATE bot_account SET cash='19.95' WHERE id=1")
+        db.execute(
+            """INSERT INTO bot_positions
+               (symbol,quantity,entry_price,entry_gross,entry_fee,opened_at)
+               VALUES ('BTCUSDT','0.5','100','50','0.05','2026-11-13T00:00:00+00:00')"""
+        )
+
+    bot.step({"BTCUSDT": Decimal("100")})
+
+    with sqlite3.connect(database) as db:
+        row = db.execute(
+            "SELECT exit_reason FROM bot_fills WHERE symbol='BTCUSDT' AND side='SELL'"
+        ).fetchone()
+    assert row == ("SELL_SIGNAL",)
+
+
 def test_daily_loss_halts_entries_before_another_symbol_can_open(tmp_path):
     database = tmp_path / "daily-halt.sqlite3"
     bot = ContinuousPaperBot(str(database), initial_cash=Decimal("70.00"))
