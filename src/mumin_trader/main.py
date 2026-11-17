@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from config.config import get_settings
 from mumin_trader.exchanges.binance.market_stream_service import MarketStreamService, WATCH_SYMBOLS
+from mumin_trader.execution.paper_reconciliation import reconcile_paper_ledger
 
 PROJECT_ROOT = (
     Path("/app")
@@ -290,18 +291,22 @@ def _read_dashboard_snapshot() -> dict[str, Any]:
         }
         positions = []
         for row in connection.execute(
-            "SELECT symbol, quantity, entry_price, opened_at FROM bot_positions ORDER BY symbol"
+            "SELECT symbol, quantity, entry_price, entry_gross, entry_fee, opened_at FROM bot_positions ORDER BY symbol"
         ).fetchall():
-            quantity = float(row["quantity"])
-            entry = float(row["entry_price"])
-            mark = latest_prices.get(row["symbol"])
+            quantity_decimal = Decimal(row["quantity"])
+            entry = Decimal(row["entry_price"])
+            entry_cost = Decimal(row["entry_gross"]) + Decimal(row["entry_fee"])
+            mark_value = latest_prices.get(row["symbol"])
+            mark = Decimal(str(mark_value)) if mark_value is not None else None
+            market_value = quantity_decimal * mark if mark is not None else None
             positions.append({
                 "symbol": row["symbol"],
-                "quantity": quantity,
-                "entry_price": entry,
-                "mark_price": mark,
-                "market_value": quantity * mark if mark is not None else None,
-                "unrealized_pnl": quantity * (mark - entry) if mark is not None else None,
+                "quantity": float(quantity_decimal),
+                "entry_price": float(entry),
+                "mark_price": float(mark) if mark is not None else None,
+                "market_value": float(market_value) if market_value is not None else None,
+                "unrealized_pnl": float(market_value - entry_cost) if market_value is not None else None,
+                "entry_fee": float(Decimal(row["entry_fee"])),
                 "opened_at": row["opened_at"],
             })
 
@@ -328,11 +333,17 @@ def _read_dashboard_snapshot() -> dict[str, Any]:
             "SELECT data_source FROM bot_market_ticks ORDER BY id DESC LIMIT 1"
         ).fetchone()
 
-        cash = float(account["cash"])
-        equity = cash + sum(
-            float(item["quantity"]) * (latest_prices.get(item["symbol"]) or 0.0)
-            for item in positions
+        accounting = reconcile_paper_ledger(connection)
+        cash_decimal = Decimal(account["cash"])
+        marked_value = sum(
+            (
+                Decimal(str(latest_prices[item["symbol"]])) * Decimal(item["quantity"])
+                for item in positions if latest_prices.get(item["symbol"]) is not None
+            ),
+            Decimal("0"),
         )
+        equity_decimal = cash_decimal + marked_value
+        unrealized_value = accounting.get("unrealized_pnl_including_entry_fees")
         return {
             "status": "ready",
             "message": "Read-only Paper ledger snapshot.",
@@ -343,9 +354,11 @@ def _read_dashboard_snapshot() -> dict[str, Any]:
             "account": {
                 "tick": int(account["tick_count"]),
                 "initial_cash": float(account["initial_cash"]),
-                "cash": cash,
-                "equity": equity,
+                "cash": float(cash_decimal),
+                "equity": float(equity_decimal),
                 "realized_pnl": float(account["realized_pnl"]),
+                "unrealized_pnl": float(unrealized_value) if unrealized_value is not None else None,
+                "accounting_status": accounting["status"],
                 "daily_pnl": equity - float(account["daily_start_equity"]),
                 "fees_paid": float(account["fees_paid"]),
                 "high_watermark": float(account["high_watermark"]),
@@ -359,6 +372,7 @@ def _read_dashboard_snapshot() -> dict[str, Any]:
             "positions": positions,
             "fills": fills,
             "equity_history": equity_history,
+            "accounting": accounting,
         }
     finally:
         connection.close()
@@ -407,7 +421,19 @@ async def dashboard_snapshot(
 ) -> dict[str, Any]:
     _dashboard_access_token(x_dashboard_token)
     snapshot = _read_dashboard_snapshot()
-    snapshot["paper_worker"] = _paper_worker_snapshot()
+    worker = _paper_worker_snapshot()
+    snapshot["paper_worker"] = worker
+    worker_status = str(worker.get("worker_status", "offline")).lower()
+    if snapshot.get("status") != "ready":
+        snapshot["engine_status"] = "OFFLINE"
+    elif snapshot.get("account", {}).get("halted"):
+        snapshot["engine_status"] = "RISK_HALTED"
+    else:
+        snapshot["engine_status"] = {
+            "running": "RUNNING",
+            "paused": "PAUSED",
+            "starting": "STARTING",
+        }.get(worker_status, "OFFLINE")
     snapshot["strategy_settings"] = _strategy_settings_snapshot()
     snapshot["control_plane"] = {
         "read_only": True,
