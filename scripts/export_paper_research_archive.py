@@ -158,14 +158,43 @@ def export_archive(database: str | Path, archive_path: str | Path, manifest_path
     macro_values_valid_rows = 0
     minute_timestamp_aligned_rows = 0
     quote_valid_rows = 0
-    replay_numeric_fields = (\n        \"price\", \"bid\", \"ask\", \"candle_open\", \"candle_high\",\n        \"candle_low\", \"candle_volume\", \"bid_depth_qty\", \"ask_depth_qty\",\n    )
-    received_by_tick = {\n        tick: max(int(row.get(\"received_at_ms\") or 0) for row in symbols.values())\n        for tick, symbols in tick_symbols.items()\n    }
+    replay_numeric_fields = (
+        "price", "bid", "ask", "candle_open", "candle_high",
+        "candle_low", "candle_volume", "bid_depth_qty", "ask_depth_qty",
+    )
+    received_by_tick = {
+        tick: max(int(row.get("received_at_ms") or 0) for row in symbols.values())
+        for tick, symbols in tick_symbols.items()
+    }
     for row in ticks:
         closes = json.loads(row.get("macro_hourly_closes_json") or "[]")
-        close_times = json.loads(row.get("macro_hourly_close_times_json") or "[]")
-        received_at = received_by_tick[int(row[\"tick\"])]
-        candle_close = row.get(\"candle_close_time_ms\")
-        if (\n            candle_close is not None\n            and int(candle_close) < received_at\n            and received_at - int(candle_close) <= 180_000\n        ):\n            minute_timestamp_aligned_rows += 1\n        try:\n            numeric_values = [Decimal(str(row[name])) for name in replay_numeric_fields]\n            if all(value.is_finite() for value in numeric_values):\n                price, bid, ask, candle_open, candle_high, candle_low, volume, bid_depth, ask_depth = numeric_values\n                if (price > 0 and bid > 0 and ask >= bid and candle_open > 0\n                    and candle_high >= candle_low and volume >= 0 and bid_depth >= 0 and ask_depth >= 0):\n                    quote_valid_rows += 1\n        except (KeyError, InvalidOperation, TypeError, ValueError):\n            pass\n        try:\n            if all(Decimal(str(value)).is_finite() for value in closes):\n                macro_values_valid_rows += 1\n        except (InvalidOperation, TypeError, ValueError):\n            pass\n        if len(closes) == 21:
+        close_times = json.loads(row.get("macro_hourly_close_times_ms_json") or row.get("macro_hourly_close_times_json") or "[]")
+        received_at = received_by_tick[int(row["tick"])]
+        candle_close = row.get("candle_close_time_ms")
+        if (
+            candle_close is not None
+            and int(candle_close) < received_at
+            and received_at - int(candle_close) <= 180_000
+        ):
+            minute_timestamp_aligned_rows += 1
+        try:
+            numeric_values = [Decimal(str(row[name])) for name in replay_numeric_fields]
+            if all(value.is_finite() for value in numeric_values):
+                price, bid, ask, candle_open, candle_high, candle_low, volume, bid_depth, ask_depth = numeric_values
+                if (
+                    price > 0 and bid > 0 and ask >= bid and candle_open > 0
+                    and candle_high >= candle_low and volume >= 0
+                    and bid_depth >= 0 and ask_depth >= 0
+                ):
+                    quote_valid_rows += 1
+        except (KeyError, InvalidOperation, TypeError, ValueError):
+            pass
+        try:
+            if all(Decimal(str(value)).is_finite() for value in closes):
+                macro_values_valid_rows += 1
+        except (InvalidOperation, TypeError, ValueError):
+            pass
+        if len(closes) == 21:
             macro_complete_rows += 1
         if (
             len(closes) == 21
