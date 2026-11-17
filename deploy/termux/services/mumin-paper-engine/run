@@ -1,0 +1,15 @@
+#!/data/data/com.termux/files/usr/bin/sh
+set -eu
+ROOT="$HOME/Mumin-AI-Trader"
+LOG_DIR="$HOME/.mumin-ai-trader/logs"
+mkdir -p "$LOG_DIR"
+cd "$ROOT"
+if [ -f "$ROOT/.env" ]; then set -a; . "$ROOT/.env"; set +a; fi
+export PYTHONUNBUFFERED=1
+export TRADING_ENV=TESTNET
+export TRADING_MODE=PAPER
+export ALLOW_MAINNET=false
+export LIVE_TRADING_ENABLED=false
+export TESTNET_ORDER_PREFLIGHT_ENABLED=false
+export TESTNET_SPOT_EXECUTION_ENABLED=false
+exec python scripts/paper_worker_supervisor.py --db data/mumin_public_paper.db --interval-seconds 30 --data-source BINANCE_PUBLIC_MARKET_DATA --restart-initial-seconds 2 --restart-max-seconds 60
