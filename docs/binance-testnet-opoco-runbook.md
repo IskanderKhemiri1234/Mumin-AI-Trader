@@ -14,7 +14,7 @@ The runner submits one `POST /api/v3/orderList/opoco` request containing:
 - A pending SELL LIMIT_MAKER take-profit leg.
 - A pending SELL STOP_LOSS_LIMIT stop leg.
 
-The pending OCO legs are placed by Binance only after the working BUY is fully filled. Binance uses the received amount, applies commission deductions as appropriate, and evaluates pending-order filters when the working order completes. Symbol support requires `otoAllowed`, `opoAllowed`, and `ocoAllowed` in Exchange Information. See the [Binance Spot Testnet REST documentation](https://developers.binance.me/en/docs/products/spot/testnet/rest-api) and [OPO FAQ](https://github.com/binance/binance-spot-api-docs/blob/master/faqs/opo.md).
+The pending OCO legs are placed by Binance only after the working BUY is fully filled. Binance uses the received amount, applies commission deductions as appropriate, and evaluates pending-order filters when the working order completes. Symbol support requires `otoAllowed`, `opoAllowed`, and `ocoAllowed` in Exchange Information. See the [Binance Spot Testnet REST documentation](https://developers.binance.com/en/docs/products/spot/testnet/rest-api) and [OPO FAQ](https://github.com/binance/binance-spot-api-docs/blob/master/faqs/opo.md).
 
 **Partial-fill limitation:** if the working BUY is only partially filled, the pending OCO protection is not yet active. The runner cancels the remaining OPOCO list when possible, halts the local execution ledger, records the partial fill, and returns a manual-review state. It does not pretend the partial inventory is protected and does not automatically sell it. If the working BUY is fully filled but a protective leg partially fills, the runner leaves the remaining protective list active and requires review.
 
