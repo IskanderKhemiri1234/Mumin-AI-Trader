@@ -466,6 +466,14 @@ async def dashboard() -> FileResponse:
     return FileResponse(DASHBOARD_FILE, media_type="text/html")
 
 
+@app.get("/operations-chat.js", include_in_schema=False)
+async def operations_chat_script() -> FileResponse:
+    script = PROJECT_ROOT / "dashboard" / "operations-chat.js"
+    if not script.is_file():
+        raise HTTPException(status_code=503, detail="Operations chat asset is missing.")
+    return FileResponse(script, media_type="application/javascript")
+
+
 @app.get("/api/market")
 async def market_snapshot(
     x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
