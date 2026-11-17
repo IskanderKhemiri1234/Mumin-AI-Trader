@@ -336,7 +336,7 @@ def submit_paper_order(
 
             tick = int(account["tick_count"]) + 1
             total_fees = Decimal(account["fees_paid"]) + fee
-            high_water = max(Decimal(account["high_watermark"]), new_cash)
+            high_water = Decimal(account["high_watermark"])
             timestamp = _now()
             db.execute(
                 """INSERT INTO bot_fills
@@ -348,9 +348,9 @@ def submit_paper_order(
             )
             db.execute(
                 """UPDATE bot_account SET cash=?,realized_pnl=?,daily_realized_pnl=?,
-                   fees_paid=?,tick_count=?,high_watermark=?,updated_at=? WHERE id=1""",
+                   fees_paid=?,tick_count=?,updated_at=? WHERE id=1""",
                 (str(new_cash), str(new_realized), str(new_daily_realized), str(total_fees),
-                 tick, str(high_water), timestamp),
+                 tick, timestamp),
             )
             positions = db.execute("SELECT symbol,quantity FROM bot_positions").fetchall()
             market_value = ZERO
@@ -365,6 +365,11 @@ def submit_paper_order(
                     break
                 market_value += Decimal(position["quantity"]) * Decimal(price_row["price"])
             equity = new_cash + market_value if marks_complete else new_cash
+            high_water = max(high_water, equity)
+            db.execute(
+                "UPDATE bot_account SET high_watermark=? WHERE id=1",
+                (str(high_water),),
+            )
             daily_pnl = equity - Decimal(account["daily_start_equity"])
             db.execute(
                 """INSERT OR REPLACE INTO bot_equity
