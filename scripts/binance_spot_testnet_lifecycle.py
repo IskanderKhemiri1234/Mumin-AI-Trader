@@ -14,6 +14,7 @@ from typing import Any
 
 from config.config import Settings, TradingEnvironment, TradingMode
 from mumin_trader.exchanges.binance.order_store import SQLiteOrderStore
+from mumin_trader.exchanges.binance.spot_testnet_oco import validate_fixed_exit_risk
 from mumin_trader.exchanges.binance.spot_testnet_execution import (
     BinanceSpotTestnetExecution,
     SpotExecutionError,
@@ -477,7 +478,8 @@ async def run_cycle(args: argparse.Namespace) -> int:
             "symbol_info": symbol_info, "buy_notional": notional,
         })
 
-        # Validate both legs before exposing any Testnet capital.
+        # Validate the configured 0.50% stop and 1.25% target before exposing any Testnet capital.
+        validate_fixed_exit_risk(buy_price, take_profit, stop_price)
         buy_params = await client._validator.validate_limit_order(
             symbol=symbol, side="BUY", quantity=quantity,
             price=buy_price, client_order_id=buy_client_id,
@@ -535,6 +537,12 @@ async def run_cycle(args: argparse.Namespace) -> int:
         buy_summary = store.order_fill_summary(
             symbol, int(buy_order_id), base_asset=base_asset,
         )
+        gross_buy_quantity = Decimal(buy_summary["gross_quantity"])
+        average_entry_price = (
+            Decimal(buy_summary["quote_quantity"]) / gross_buy_quantity
+            if gross_buy_quantity > 0 else Decimal("0")
+        )
+        exit_risk = exit_risk_metrics(average_entry_price, take_profit, stop_price)
         buy_fills = store.trade_fills_for_order(symbol, int(buy_order_id))
         buy_fee_asset_mismatches = commission_asset_mismatches(buy_fills, settings.BNB_FEE_ASSET)
         evidence.record("buy_fills_from_myTrades", {
@@ -633,6 +641,10 @@ async def run_cycle(args: argparse.Namespace) -> int:
             "buy_order_id": str(buy_order_id),
             "buy_status": str(buy_order.get("status", "")).upper(),
             "buy_fill_summary": buy_summary,
+            "actual_entry_average_price": exit_risk["average_entry_price"],
+            "actual_stop_loss_percent": exit_risk["actual_stop_loss_percent"],
+            "actual_take_profit_percent": exit_risk["actual_take_profit_percent"],
+            "exit_risk_policy_match": exit_risk["exit_risk_policy_match"],
             "bnb_fee_preflight": bnb_fee_preflight,
             "buy_fee_asset_mismatches": buy_fee_asset_mismatches,
             "oco_fee_asset_mismatches": oco_fee_asset_mismatches,
@@ -655,6 +667,7 @@ async def run_cycle(args: argparse.Namespace) -> int:
                 "TESTNET_CYCLE_VERIFIED"
                 if proof["mutual_cancel_proven"] and fifo_complete
                 and open_inventory_quantity == 0 and unprotected_dust == 0
+                and exit_risk["exit_risk_policy_match"]
                 and oco_children_cover_quantity
                 and not all_fee_asset_mismatches
                 and not fill_discrepancies and not unmatched and reconciliation_clean
