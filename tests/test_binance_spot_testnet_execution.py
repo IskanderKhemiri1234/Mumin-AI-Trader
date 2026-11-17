@@ -1206,6 +1206,9 @@ def opoco_symbol_info() -> dict[str, object]:
     symbol["otoAllowed"] = True
     symbol["opoAllowed"] = True
     symbol["ocoAllowed"] = True
+    for item in symbol["filters"]:
+        if item.get("filterType") == "MIN_NOTIONAL":
+            item["minNotional"] = "4.90"
     return payload
 
 
@@ -1290,9 +1293,9 @@ async def test_opoco_submission_uses_single_server_side_order_list_and_three_chi
             symbol="BTCUSDT",
             quantity="0.00010",
             working_price="50000.00",
-            take_profit_price="51000.00",
-            stop_price="50050.00",
-            stop_limit_price="50000.00",
+            take_profit_price="50625.00",
+            stop_price="49750.00",
+            stop_limit_price="49700.00",
             list_client_order_id="mumin-opoco-list",
             working_client_order_id="mumin-opoco-working",
             pending_above_client_order_id="mumin-opoco-above",
