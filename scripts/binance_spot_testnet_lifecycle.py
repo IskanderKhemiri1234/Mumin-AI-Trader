@@ -1019,6 +1019,13 @@ async def watch_existing(args: argparse.Namespace) -> int:
             "oco_list_client_order_id": args.list_client_order_id,
             "oco_children": proof["children"],
             "mutual_cancel_proven": proof["mutual_cancel_proven"],
+            "working_order_id": str(working_order_id or ""),
+            "working_fill_summary": buy_summary,
+            "net_base_quantity": str(net_quantity),
+            "protected_quantity": str(protected_quantity),
+            "sellable_net_quantity": str(sellable_net),
+            "unprotected_dust_quantity": str(unprotected_dust),
+            "opoco_children_cover_quantity": children_cover,
             "fifo_complete": bool(pnl.get("complete")),
             "fifo_open_inventory_quantity": str(
                 Decimal(str(pnl.get("symbols", {}).get(args.symbol.upper(), {}).get("open_quantity", "0")))
@@ -1073,6 +1080,42 @@ async def watch_opoco_existing(args: argparse.Namespace) -> int:
         pnl = store.realized_pnl_report(settings.QUOTE_ASSET)
         reconciliation = await client.reconcile()
         proof = opoco_result(result)
+        symbol_info = await client._exchange_symbol(args.symbol.upper())
+        base_asset = str(symbol_info.get("baseAsset", "")).upper()
+        working_report = proof["working_order"]
+        working_order_id = (
+            int(working_report["orderId"])
+            if working_report and str(working_report.get("orderId", "")).isdigit()
+            else None
+        )
+        buy_summary = (
+            store.order_fill_summary(
+                args.symbol.upper(), working_order_id, base_asset=base_asset
+            )
+            if working_order_id is not None else None
+        )
+        net_quantity = (
+            Decimal(buy_summary["net_base_quantity"])
+            if buy_summary is not None else Decimal("0")
+        )
+        filters = {
+            item.get("filterType"): item
+            for item in symbol_info.get("filters", [])
+            if isinstance(item, dict)
+        }
+        step = Decimal(str(filters.get("LOT_SIZE", {}).get("stepSize", "0")))
+        sellable_net = round_down_to_step(net_quantity, step) if net_quantity > 0 else Decimal("0")
+        child_quantities = [
+            Decimal(str(child.get("origQty", "0")))
+            for child in proof["protective_children"]
+        ]
+        protected_quantity = min(child_quantities) if len(child_quantities) == 2 else Decimal("0")
+        unprotected_dust = net_quantity - protected_quantity
+        children_cover = (
+            len(child_quantities) == 2
+            and child_quantities[0] == child_quantities[1] == sellable_net
+            and protected_quantity <= net_quantity
+        )
         fifo_open = Decimal(
             str(pnl.get("symbols", {}).get(args.symbol.upper(), {}).get("open_quantity", "0"))
         )
@@ -1095,6 +1138,8 @@ async def watch_opoco_existing(args: argparse.Namespace) -> int:
             proof["mutual_cancel_proven"]
             and bool(pnl.get("complete"))
             and fifo_open == 0
+            and unprotected_dust == 0
+            and children_cover
             and not fee_mismatches
             and not fill_discrepancies
             and not unmatched
