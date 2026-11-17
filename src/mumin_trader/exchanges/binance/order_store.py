@@ -570,7 +570,7 @@ class SQLiteOrderStore:
             ).fetchone() is not None
             oco_rows = (
                 db.execute(
-                    """SELECT list_client_order_id,symbol,above_order_id,below_order_id,response_json
+                    """SELECT list_client_order_id,symbol,working_order_id,above_order_id,below_order_id,response_json
                        FROM spot_oco_order_lists"""
                 ).fetchall()
                 if has_oco_table else []
@@ -599,7 +599,7 @@ class SQLiteOrderStore:
                 discrepancies.append(f"OCO_RESPONSE_INVALID:{row['list_client_order_id']}")
                 continue
             reports = response.get("orderReports", [])
-            for child_id in (row["above_order_id"], row["below_order_id"]):
+            for child_id in (row["working_order_id"], row["above_order_id"], row["below_order_id"]):
                 if child_id is None:
                     continue
                 report = next(
@@ -634,7 +634,8 @@ class SQLiteOrderStore:
                          ON o.symbol=f.symbol AND CAST(o.exchange_order_id AS INTEGER)=f.order_id
                        LEFT JOIN spot_oco_order_lists AS c
                          ON c.symbol=f.symbol
-                         AND (CAST(c.above_order_id AS INTEGER)=f.order_id
+                         AND (CAST(c.working_order_id AS INTEGER)=f.order_id
+                               OR CAST(c.above_order_id AS INTEGER)=f.order_id
                               OR CAST(c.below_order_id AS INTEGER)=f.order_id)
                        WHERE o.client_order_id IS NULL AND c.list_client_order_id IS NULL"""
                 ).fetchall()
