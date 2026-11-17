@@ -1,0 +1,84 @@
+name: Mumin Paper Research Data Archive
+
+on:
+  schedule:
+    - cron: "17 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mumin-paper-research-data-archive
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    name: Immutable public Paper observation archive
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout application source
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Checkout persistent Paper ledger
+        uses: actions/checkout@v4
+        with:
+          ref: mumin-paper-ledger
+          path: mumin-paper-ledger
+
+      - name: Checkout append-only research data branch
+        uses: actions/checkout@v4
+        with:
+          ref: mumin-research-data
+          path: mumin-research-data
+
+      - name: Export read-only provenance archive
+        run: |
+          set -euo pipefail
+          test -s mumin-paper-ledger/mumin_public_paper.db
+          mkdir -p artifacts
+          python scripts/export_paper_research_archive.py \
+            --db mumin-paper-ledger/mumin_public_paper.db \
+            --archive artifacts/paper-observations.jsonl.gz \
+            --manifest artifacts/manifest.json
+          SHA="$(python -c 'import json; print(json.load(open("artifacts/manifest.json"))["archive_sha256"])')"
+          DAY="$(date -u +%F)"
+          DEST="mumin-research-data/datasets/$DAY"
+          mkdir -p "$DEST"
+          cp artifacts/paper-observations.jsonl.gz "$DEST/$SHA.jsonl.gz"
+          cp artifacts/manifest.json "$DEST/$SHA.manifest.json"
+          {
+            echo "## Paper observation archive"
+            echo
+            echo "- UTC date: $DAY"
+            echo "- SHA-256: $SHA"
+            echo "- Archive: `datasets/$DAY/$SHA.jsonl.gz`"
+            echo
+            cat artifacts/manifest.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit immutable archive if new
+        run: |
+          set -euo pipefail
+          git -C mumin-research-data config user.name "github-actions[bot]"
+          git -C mumin-research-data config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C mumin-research-data add datasets/
+          if git -C mumin-research-data diff --cached --quiet; then
+            echo "Archive content already exists; no commit required."
+          else
+            git -C mumin-research-data commit -m "Archive public Paper observations $(date -u +%F)"
+            git -C mumin-research-data push origin HEAD:mumin-research-data
+          fi
+
+      - name: Upload archive and manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: mumin-paper-observations-${{ github.run_number }}
+          path: |
+            artifacts/paper-observations.jsonl.gz
+            artifacts/manifest.json
+          if-no-files-found: error
+          retention-days: 90
