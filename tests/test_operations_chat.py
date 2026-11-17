@@ -68,6 +68,8 @@ def test_classifies_arabic_and_english_questions() -> None:
     assert classify_intent("Show recent alerts") == "alerts"
     assert classify_intent("سجل الأحداث") == "events"
     assert classify_intent("portfolio balance") == "portfolio"
+    assert classify_intent("ملخص الحالة") == "overview"
+    assert classify_intent("Status summary") == "overview"
 
 
 def test_reads_real_ledger_and_audit_events_read_only(paper_ledger: Path) -> None:
@@ -114,3 +116,6 @@ def test_chat_api_requires_dashboard_token(monkeypatch: pytest.MonkeyPatch, pape
     assert payload["external_services_used"] is False
     assert payload["intent"] == "engine"
     assert "Paper" in payload["answer"]
+    asset = client.get("/operations-chat.js")
+    assert asset.status_code == 200
+    assert "api/operations-chat" in asset.text
