@@ -130,7 +130,11 @@ class BinanceSpotTestnetOPOCO:
         ):
             raise SpotExecutionError("OPOCO working BUY notional is outside configured trade limits.")
         notional_filters = [
-            item for item in (filters.get("NOTIONAL"), filters.get("MIN_NOTIONAL"))
+            item for item in (
+                filters.get("NOTIONAL"),
+                filters.get("MIN_NOTIONAL"),
+                filters.get("MAX_NOTIONAL"),
+            )
             if isinstance(item, dict)
         ]
         for item in notional_filters:
@@ -215,6 +219,29 @@ class BinanceSpotTestnetOPOCO:
         )
         account = await api._account()
         open_orders = await api._request("GET", "/api/v3/openOrders", signed=True)
+        symbol_filters = {
+            item.get("filterType"): item
+            for item in metadata.get("filters", [])
+            if isinstance(item, dict)
+        }
+        symbol_order_limit = symbol_filters.get("MAX_NUM_ORDERS", {}).get("maxNumOrders")
+        exchange_order_limit = symbol_filters.get("EXCHANGE_MAX_NUM_ORDERS", {}).get("maxNumOrders")
+        symbol_open_count = sum(
+            1 for item in open_orders if str(item.get("symbol", "")).upper() == symbol.upper()
+        )
+        if symbol_order_limit is not None and symbol_open_count + 3 > int(symbol_order_limit):
+            raise SpotExecutionError("OPOCO would exceed the symbol MAX_NUM_ORDERS filter.")
+        if exchange_order_limit is not None and len(open_orders) + 3 > int(exchange_order_limit):
+            raise SpotExecutionError("OPOCO would exceed the exchange EXCHANGE_MAX_NUM_ORDERS filter.")
+        algo_limit = symbol_filters.get("MAX_NUM_ALGO_ORDERS", {}).get("maxNumAlgoOrders")
+        algo_types = {"STOP_LOSS", "STOP_LOSS_LIMIT", "TAKE_PROFIT", "TAKE_PROFIT_LIMIT"}
+        symbol_algo_count = sum(
+            1 for item in open_orders
+            if str(item.get("symbol", "")).upper() == symbol.upper()
+            and str(item.get("type", "")).upper() in algo_types
+        )
+        if algo_limit is not None and symbol_algo_count + 2 > int(algo_limit):
+            raise SpotExecutionError("OPOCO would exceed the symbol MAX_NUM_ALGO_ORDERS filter.")
         await api._check_portfolio_risk(
             symbol=symbol.upper(),
             side="BUY",
