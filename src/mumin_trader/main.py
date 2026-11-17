@@ -343,7 +343,8 @@ def _read_dashboard_snapshot() -> dict[str, Any]:
             ),
             Decimal("0"),
         )
-        equity_decimal = cash_decimal + marked_value
+        marks_complete = all(latest_prices.get(item["symbol"]) is not None for item in positions)
+        equity_decimal = cash_decimal + marked_value if marks_complete else None
         unrealized_value = accounting.get("unrealized_pnl_including_entry_fees")
         return {
             "status": "ready",
@@ -356,11 +357,14 @@ def _read_dashboard_snapshot() -> dict[str, Any]:
                 "tick": int(account["tick_count"]),
                 "initial_cash": float(account["initial_cash"]),
                 "cash": float(cash_decimal),
-                "equity": float(equity_decimal),
+                "equity": float(equity_decimal) if equity_decimal is not None else None,
                 "realized_pnl": float(account["realized_pnl"]),
                 "unrealized_pnl": float(unrealized_value) if unrealized_value is not None else None,
                 "accounting_status": accounting["status"],
-                "daily_pnl": float(equity_decimal) - float(account["daily_start_equity"]),
+                "daily_pnl": (
+                    float(equity_decimal) - float(account["daily_start_equity"])
+                    if equity_decimal is not None else None
+                ),
                 "fees_paid": float(account["fees_paid"]),
                 "high_watermark": float(account["high_watermark"]),
                 "closed_trades": int(stats["closed_trades"]),
