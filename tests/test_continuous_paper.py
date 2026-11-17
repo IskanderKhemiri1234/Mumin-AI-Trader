@@ -255,6 +255,7 @@ def test_public_micro_alpha_entry_persists_atr_adaptive_position_targets(tmp_pat
             "low": Decimal("99.0"), "volume": Decimal("15"),
             "bid_depth_qty": Decimal("80"), "ask_depth_qty": Decimal("20"),
             "macro_hourly_closes": [Decimal("100")] * 21,
+            "macro_hourly_close_times_ms": [1_799_000_000_000 + i * 3_600_000 for i in range(21)],
         }},
     )
 
@@ -269,9 +270,9 @@ def test_public_micro_alpha_entry_persists_atr_adaptive_position_targets(tmp_pat
                       spread_bps, atr_pct, final_signal, action
                FROM bot_agent_decisions WHERE symbol='BTCUSDT' ORDER BY tick DESC LIMIT 1"""
         ).fetchone()
-        macro_json = db.execute(
-            "SELECT macro_hourly_closes_json FROM bot_market_ticks WHERE symbol='BTCUSDT' ORDER BY id DESC LIMIT 1"
-        ).fetchone()[0]
+        macro_json, macro_times_json = db.execute(
+            "SELECT macro_hourly_closes_json,macro_hourly_close_times_json FROM bot_market_ticks WHERE symbol='BTCUSDT' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
     assert result.signal.startswith("BTCUSDT:BUY")
     assert position is not None
     assert decision is not None
@@ -287,6 +288,10 @@ def test_public_micro_alpha_entry_persists_atr_adaptive_position_targets(tmp_pat
     assert decision[9].startswith("BTCUSDT:OPEN")
     assert len(json.loads(macro_json)) == 21
     assert Decimal(json.loads(macro_json)[-1]) == Decimal("100")
+    macro_times = json.loads(macro_times_json)
+    assert len(macro_times) == 21
+    assert macro_times == sorted(macro_times)
+    assert macro_times[-1] < 1_800_000_000_115
     stop, target = map(Decimal, position)
     assert Decimal("0.20") <= stop <= Decimal("0.50")
     assert Decimal("0.40") <= target <= Decimal("1.25")
