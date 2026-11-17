@@ -64,10 +64,12 @@ class MarketStreamService:
                 if self._last_received_at is not None
                 else None
             )
+            connected = bool(self._client.connected)
             status = (
-                "live" if age is not None and age <= 30
+                "live" if connected and age is not None and age <= 30
                 else "stale" if self._assets
-                else self._connection_state
+                else "connecting" if connected or self._connection_state == "connecting"
+                else "disconnected"
             )
             assets = [dict(self._assets[symbol]) for symbol in WATCH_SYMBOLS if symbol in self._assets]
             return {
@@ -75,9 +77,9 @@ class MarketStreamService:
                 "source": "BINANCE_PUBLIC_SERVER_STREAM",
                 "updated_at": self._last_received_at.isoformat() if self._last_received_at else None,
                 "age_seconds": round(age, 3) if age is not None else None,
-                "connection_state": self._connection_state,
-                "reconnect_count": self._reconnect_count,
-                "last_error": self._last_error,
+                "connection_state": "connected" if connected else self._connection_state,
+                "reconnect_count": max(self._reconnect_count, self._client.reconnect_count),
+                "last_error": self._client.last_error or self._last_error,
                 "assets": assets,
             }
 
