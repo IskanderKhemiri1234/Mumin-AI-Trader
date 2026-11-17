@@ -19,6 +19,7 @@ from mumin_trader.execution.paper_reconciliation import reconcile_paper_ledger
 from mumin_trader.execution.command_plane import (
     CommandRejected,
     get_command,
+    latch_emergency_stop,
     list_commands,
     submit_paper_order,
 )
@@ -68,6 +69,10 @@ class PaperOrderCommand(BaseModel):
     symbol: str
     quantity: str | None = None
     quote_amount: str | None = None
+    confirmed: bool = False
+
+
+class EmergencyStopRequest(BaseModel):
     confirmed: bool = False
 
 
@@ -529,6 +534,33 @@ async def create_paper_command(
             symbol=request.symbol,
             quantity=request.quantity,
             quote_amount=request.quote_amount,
+            confirmed=request.confirmed,
+        )
+    except CommandRejected as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@app.post("/api/emergency-stop")
+async def paper_emergency_stop(
+    request: EmergencyStopRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+) -> dict[str, Any]:
+    _dashboard_access_token(x_dashboard_token)
+    if os.getenv("TRADING_MODE", "PAPER").upper() != "PAPER":
+        raise HTTPException(status_code=409, detail="Emergency stop endpoint is Paper-only.")
+    if os.getenv("TRADING_ENV", "TESTNET").upper() != "TESTNET":
+        raise HTTPException(status_code=409, detail="Paper emergency stop requires TESTNET environment.")
+    if os.getenv("ALLOW_MAINNET", "false").lower() == "true" or os.getenv(
+        "LIVE_TRADING_ENABLED", "false"
+    ).lower() == "true":
+        raise HTTPException(status_code=409, detail="Emergency stop refuses live-enabled configuration.")
+    if not _dashboard_database().is_file():
+        raise HTTPException(status_code=409, detail="Paper ledger is unavailable.")
+    try:
+        return latch_emergency_stop(
+            _dashboard_database(),
+            idempotency_key=idempotency_key or "",
             confirmed=request.confirmed,
         )
     except CommandRejected as exc:
