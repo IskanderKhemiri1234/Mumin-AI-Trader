@@ -188,6 +188,7 @@ def reconcile_paper_ledger(connection: sqlite3.Connection) -> dict[str, Any]:
     open_cost_basis = ZERO
     market_data: dict[str, dict[str, Any]] = {}
     marks_complete = True
+    invalid_mark = False
     for symbol, lot in open_lots.items():
         mark = latest_prices.get(symbol)
         open_cost_basis += lot["gross_cost"] + lot["entry_fees"]
@@ -198,6 +199,7 @@ def reconcile_paper_ledger(connection: sqlite3.Connection) -> dict[str, Any]:
         price = _decimal(mark["price"])
         if price <= ZERO:
             marks_complete = False
+            invalid_mark = True
             issues.append(f"Market mark for {symbol} is not positive.")
             continue
         value = lot["quantity"] * price
@@ -235,7 +237,7 @@ def reconcile_paper_ledger(connection: sqlite3.Connection) -> dict[str, Any]:
     }
     if all(value is True for value in checks.values()):
         status = "PASS"
-    elif not marks_complete and all(
+    elif not marks_complete and not invalid_mark and all(
         value is True for key, value in checks.items()
         if key not in {"all_open_positions_have_marks", "equity_identity_matches"}
     ):

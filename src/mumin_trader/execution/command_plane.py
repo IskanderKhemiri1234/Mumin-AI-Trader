@@ -218,6 +218,16 @@ def submit_paper_order(
             account = db.execute("SELECT * FROM bot_account WHERE id=1").fetchone()
             if account is None:
                 raise CommandRejected("Paper account is not initialized.")
+            ledger_audit = reconcile_paper_ledger(db)
+            if ledger_audit["status"] == "FAIL":
+                raise CommandRejected(
+                    "Paper ledger reconciliation failed; all manual orders are blocked: "
+                    + "; ".join(ledger_audit["issues"][:3])
+                )
+            if side == "BUY" and ledger_audit["status"] != "PASS":
+                raise CommandRejected(
+                    "Paper ledger reconciliation is incomplete; new manual BUY entries are blocked."
+                )
             if side == "BUY":
                 runtime_table = db.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_runtime_control'"
@@ -290,9 +300,11 @@ def submit_paper_order(
                     (current_position["symbol"],),
                 ).fetchone()
                 if position_mark is None:
-                    raise CommandRejected(
-                        f"No current mark exists for open position {current_position['symbol']}."
-                    )
+                    if side == "BUY":
+                        raise CommandRejected(
+                            f"No current mark exists for open position {current_position['symbol']}."
+                        )
+                    continue
                 position_value = (
                     Decimal(current_position["quantity"]) * Decimal(position_mark["price"])
                 )

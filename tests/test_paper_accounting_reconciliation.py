@@ -122,3 +122,28 @@ def test_real_continuous_synthetic_run_reconciles_all_ledger_totals(tmp_path):
     assert result["checks"]["open_positions_match_fifo"] is True
     assert result["checks"]["equity_identity_matches"] is True
     assert result["market_data"]
+
+
+def test_step_can_manage_market_without_opening_new_entries(tmp_path):
+    database = tmp_path / "entry-gate.sqlite3"
+    bot = ContinuousPaperBot(str(database), initial_cash=Decimal("70.00"))
+    bot.swarm.evaluate = lambda *args: ("BUY", "TEST", True)
+    prices = {
+        symbol: bot.synthetic_price_for(symbol, 1)
+        for symbol in (
+            "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
+            "XRPUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT",
+        )
+    }
+
+    result = bot.step(prices, allow_new_entries=False)
+
+    assert result.tick == 1
+    with sqlite3.connect(database) as db:
+        assert db.execute("SELECT COUNT(*) FROM bot_positions").fetchone()[0] == 0
+        assert db.execute(
+            "SELECT COUNT(*) FROM bot_fills WHERE side='BUY'"
+        ).fetchone()[0] == 0
+        assert Decimal(db.execute(
+            "SELECT cash FROM bot_account WHERE id=1"
+        ).fetchone()[0]) == Decimal("70.00")
