@@ -34,7 +34,8 @@ class UnifiedDashboardActivity : Activity() {
     private val io = Executors.newSingleThreadExecutor()
     private var pendingInstall: File? = null
     private var remoteHost: String? = null
-    private var remotePort: Int = 443
+    private var remotePort: Int = 8000
+    private var remoteScheme: String? = null
 
     companion object {
         private const val PREFS = "mumin_dashboard_connection"
@@ -82,7 +83,7 @@ class UnifiedDashboardActivity : Activity() {
             setBackgroundColor(0xFF10251D.toInt())
         }
         serverAddress = EditText(this).apply {
-            hint = "رابط HTTPS للخادم (اختياري حالياً)"
+            hint = "عنوان الخادم المحلي أو رابط HTTPS"
             setSingleLine(true)
             textSize = 13f
             setTextColor(LIGHT)
@@ -153,9 +154,12 @@ class UnifiedDashboardActivity : Activity() {
                     if (target.scheme == "file") {
                         return !target.path.orEmpty().startsWith("/android_asset/dashboard/")
                     }
-                    return target.scheme != "https" ||
-                        !target.host.equals(remoteHost, ignoreCase = true) ||
-                        (if (target.port == -1) 443 else target.port) != remotePort
+                    val expectedScheme = remoteScheme ?: return true
+                    val expectedHost = remoteHost ?: return true
+                    val targetPort = target.port.takeIf { it > 0 } ?: if (expectedScheme == "https") 443 else 80
+                    return target.scheme != expectedScheme ||
+                        !target.host.equals(expectedHost, ignoreCase = true) ||
+                        targetPort != remotePort
                 }
 
                 override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
@@ -185,19 +189,22 @@ class UnifiedDashboardActivity : Activity() {
         setContentView(root)
 
         val saved = getSavedServerUrl()
-        if (saved.isNotBlank()) serverAddress.setText(saved)
-        loadLocalDemo()
+        val initialServer = saved.ifBlank { "http://127.0.0.1:8000" }
+        serverAddress.setText(initialServer)
+        connectToDashboard()
     }
 
     private fun connectToDashboard() {
         val normalized = normalizeServerUrl(serverAddress.text.toString())
         if (normalized == null) {
-            connectionStatus.text = "العنوان غير صالح. استخدم HTTPS دون مسار أو بيانات اعتماد."
+            connectionStatus.text = "العنوان غير صالح. استخدم 127.0.0.1:8000 محلياً أو HTTPS دون مسار أو بيانات اعتماد."
             return
         }
         getPreferences(MODE_PRIVATE).edit().putString(SERVER_KEY, normalized).apply()
         remoteHost = Uri.parse(normalized).host
-        remotePort = Uri.parse(normalized).port.takeIf { it > 0 } ?: 443
+        remoteScheme = Uri.parse(normalized).scheme
+        remotePort = Uri.parse(normalized).port.takeIf { it > 0 }
+            ?: if (remoteScheme == "https") 443 else 8000
         loadUnifiedDashboard(normalized)
     }
 
@@ -205,12 +212,16 @@ class UnifiedDashboardActivity : Activity() {
         val trimmed = value.trim().trimEnd('/')
         if (trimmed.isBlank()) return null
         val uri = runCatching { Uri.parse(trimmed) }.getOrNull() ?: return null
-        if (uri.scheme != "https" || uri.host.isNullOrBlank()) return null
+        val host = uri.host?.lowercase().orEmpty()
+        val localHttp = uri.scheme == "http" && host in setOf("127.0.0.1", "localhost")
+        val remoteHttps = uri.scheme == "https" && host.isNotBlank()
+        if (!localHttp && !remoteHttps) return null
         if (uri.userInfo != null || uri.query != null || uri.fragment != null) return null
-        if (uri.port != -1 && uri.port != 443) return null
+        if (remoteHttps && uri.port != -1 && uri.port != 443) return null
+        if (localHttp && uri.port != -1 && uri.port != 8000) return null
         val path = uri.path.orEmpty()
         if (path.isNotBlank() && path != "/") return null
-        return "https://${uri.host}"
+        return if (localHttp) "http://$host:8000" else "https://$host"
     }
 
     private fun getSavedServerUrl(): String =
@@ -219,6 +230,7 @@ class UnifiedDashboardActivity : Activity() {
     private fun loadLocalDemo() {
         remoteHost = null
         remotePort = 443
+        remoteScheme = null
         webView.visibility = View.VISIBLE
         connectionStatus.text = "العرض التجريبي المحلي · بيانات اصطناعية فقط · لا اتصال بخادم أو Binance."
         runCatching {
@@ -238,13 +250,18 @@ class UnifiedDashboardActivity : Activity() {
 
     private fun loadUnifiedDashboard(baseUrl: String) {
         val uri = Uri.parse(baseUrl)
-        if (uri.scheme != "https" || uri.host.isNullOrBlank()) {
-            connectionStatus.text = "اتصال مرفوض: عنوان الخادم غير آمن."
+        val host = uri.host?.lowercase().orEmpty()
+        val localHttp = uri.scheme == "http" && host in setOf("127.0.0.1", "localhost") && (uri.port == -1 || uri.port == 8000)
+        val remoteHttps = uri.scheme == "https" && host.isNotBlank() && (uri.port == -1 || uri.port == 443)
+        if (!localHttp && !remoteHttps) {
+            connectionStatus.text = "اتصال مرفوض: استخدم خادم الهاتف المحلي أو HTTPS موثوقاً."
             return
         }
-        remoteHost = uri.host
-        remotePort = uri.port.takeIf { it > 0 } ?: 443
+        remoteHost = host
+        remoteScheme = uri.scheme
+        remotePort = uri.port.takeIf { it > 0 } ?: if (localHttp) 8000 else 443
         webView.visibility = View.VISIBLE
+        connectionStatus.text = if (remoteScheme == "http") "الاتصال بخادم Termux المحلي… أدخل رمز لوحة التحكم عند الطلب." else "جارٍ الاتصال بالخادم الآمن…"
         webView.loadUrl("$baseUrl/dashboard", mapOf("Cache-Control" to "no-cache"))
     }
 

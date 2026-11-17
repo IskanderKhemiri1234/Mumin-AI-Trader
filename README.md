@@ -28,14 +28,15 @@ The API reads `MUMIN_PAPER_DB_PATH`, defaulting to `data/mumin_public_paper.db`.
 
 ## Android companion app
 
-A lightweight Android WebView companion is built in `android/`. It loads the latest static Paper report from the `mumin-paper-ledger` branch on every launch and supports pull-to-refresh. It does not contain Binance credentials and cannot place orders.
+The Android companion in `android/` is a WebView client for the **same-device live Termux operations API**. On launch it connects to `http://127.0.0.1:8000/dashboard`, so Termux's FastAPI service and Paper worker must be running on the same phone. The dashboard then reads the actual SQLite Paper ledger and loads Mumin Operations Chat from the API. The user enters the private `DASHBOARD_ACCESS_TOKEN` in the dashboard login; the token is not embedded in the APK. The app contains no Binance credentials and cannot enable exchange execution.
 
 - GitHub Actions workflow: `.github/workflows/build-apk.yml`.
 - Trigger: changes to `android/**`, workflow dispatch, or pull requests that touch the Android app.
 - Output artifact: `Mumin-AI-Trader-APK`, containing `Mumin-AI-Trader.apk` and its SHA-256 checksum.
-- The CI artifact is a debug-signed installable APK for direct testing; it is not a Play Store release or a privately release-signed production package.
-- The app reads the report from a public GitHub repository. Anyone who can access that public branch can read the same report; installing the app does not make the underlying report private.
-- The report is a snapshot from the latest successful Paper export, not a live streaming screen. The app fetches the newest snapshot on launch or manual refresh.
+- The CI artifact is a debug-signed installable APK for supervised device testing; it is not a Play Store release or a privately release-signed production package.
+- The app permits HTTP only to loopback hosts `127.0.0.1` and `localhost`; all remote server connections must use HTTPS.
+- The dashboard includes Paper-only controls. Backend execution gates remain authoritative; this Android client does not enable Testnet or Mainnet execution.
+- If Termux is stopped or the local API is unavailable, the live dashboard cannot load. The optional embedded demo is synthetic and must not be confused with live account or Paper ledger data.
 
 ## Run locally
 
