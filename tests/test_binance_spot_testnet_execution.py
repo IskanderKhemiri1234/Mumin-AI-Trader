@@ -1160,6 +1160,80 @@ async def test_bnb_fee_readiness_rejects_disabled_account_discount_before_any_or
         await client.close()
 
 
+@pytest.mark.parametrize(
+    "invalid_case",
+    [
+        "missing_discount_asset",
+        "zero_discount_multiplier",
+        "zero_commission_rates",
+        "non_numeric_commission_rate",
+    ],
+)
+@pytest.mark.asyncio
+async def test_bnb_fee_readiness_rejects_unverifiable_testnet_fee_data(
+    tmp_path, invalid_case: str,
+) -> None:
+    seen: list[httpx.Request] = []
+    base_handler = bnb_fee_handler(free_bnb="1.0")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/v3/account/commission":
+            payload = bnb_commission_response()
+
+            if invalid_case == "missing_discount_asset":
+                discount = payload["discount"]
+                assert isinstance(discount, dict)
+                discount["discountAsset"] = None
+
+            elif invalid_case == "zero_discount_multiplier":
+                discount = payload["discount"]
+                assert isinstance(discount, dict)
+                discount["discount"] = "0"
+
+            elif invalid_case == "zero_commission_rates":
+                for name in (
+                    "standardCommission",
+                    "taxCommission",
+                    "specialCommission",
+                ):
+                    rates = payload[name]
+                    assert isinstance(rates, dict)
+                    for key in ("maker", "taker", "buyer", "seller"):
+                        rates[key] = "0"
+
+            elif invalid_case == "non_numeric_commission_rate":
+                rates = payload["standardCommission"]
+                assert isinstance(rates, dict)
+                rates["maker"] = "not-a-number"
+
+            return httpx.Response(200, json=payload)
+
+        return await base_handler(request)
+
+    client = BinanceSpotTestnetExecution(
+        settings(),
+        SQLiteOrderStore(str(tmp_path / f"bnb-invalid-{invalid_case}.db")),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        with pytest.raises(
+            SpotExecutionError,
+            match="TESTNET_FEE_DATA_UNAVAILABLE",
+        ):
+            await client._bnb_fee_readiness(
+                symbol="BTCUSDT",
+                buy_notional=Decimal("5.25"),
+                sell_notional=Decimal("5.35"),
+            )
+
+        assert seen
+        assert all(request.method == "GET" for request in seen)
+        assert not any(request.method == "POST" for request in seen)
+    finally:
+        await client.close()
+
+
 @pytest.mark.asyncio
 async def test_emergency_stop_cancels_buy_entries_but_preserves_sell_protection(tmp_path) -> None:
     seen: list[httpx.Request] = []

@@ -135,11 +135,14 @@ class BinanceSpotTestnetExecution:
         buy_notional: Decimal,
         sell_notional: Decimal,
     ) -> dict[str, str]:
-        """Fail closed unless BNB fee discount and a conservative fee reserve are proven."""
+        """Fail closed unless BNB discount and its conservative fee reserve are proven."""
+        unavailable = "TESTNET_FEE_DATA_UNAVAILABLE"
+
         if not self.settings.ENABLE_BNB_FEE_DISCOUNT:
             raise SpotExecutionError("BNB fee discount is disabled in configuration.")
         if not self.settings.REQUIRE_BNB_BALANCE_FOR_DISCOUNT:
             raise SpotExecutionError("BNB fee balance is not mandatory; refusing lifecycle execution.")
+
         bnb_asset = self.settings.BNB_FEE_ASSET.upper()
         if bnb_asset != "BNB" or self.settings.QUOTE_ASSET.upper() != "USDT":
             raise SpotExecutionError("Conservative BNB fee preflight currently requires BNB and USDT.")
@@ -149,57 +152,110 @@ class BinanceSpotTestnetExecution:
             or not sell_notional.is_finite() or sell_notional <= 0
         ):
             raise SpotExecutionError("BUY and protective OCO notionals must be finite and positive.")
+
         commission = await self._request(
             "GET", "/api/v3/account/commission", {"symbol": symbol.upper()}, signed=True,
         )
-        if not isinstance(commission, dict) or str(commission.get("symbol", "")).upper() != symbol.upper():
-            raise SpotExecutionError("Binance commission response is missing or for a different symbol.")
+        if (
+            not isinstance(commission, dict)
+            or str(commission.get("symbol", "")).upper() != symbol.upper()
+        ):
+            raise SpotExecutionError(
+                f"{unavailable}: Binance commission response is missing or for a different symbol."
+            )
+
         discount = commission.get("discount")
         if not isinstance(discount, dict):
-            raise SpotExecutionError("Binance did not return symbol-specific BNB discount settings.")
-        if (
-            discount.get("enabledForAccount") is not True
-            or discount.get("enabledForSymbol") is not True
-            or str(discount.get("discountAsset", "")).upper() != bnb_asset
-        ):
-            raise SpotExecutionError("BNB fee discount is not explicitly enabled for this account and symbol.")
-        discount_multiplier = Decimal(str(discount.get("discount", "0")))
-        if not discount_multiplier.is_finite() or not (Decimal("0") < discount_multiplier <= Decimal("1")):
-            raise SpotExecutionError("Binance returned an invalid BNB commission multiplier.")
+            raise SpotExecutionError(
+                f"{unavailable}: Binance did not return symbol-specific BNB discount settings."
+            )
 
-        def conservative_component(name: str, *, required: bool) -> Decimal:
+        account_enabled = discount.get("enabledForAccount")
+        symbol_enabled = discount.get("enabledForSymbol")
+
+        if account_enabled is False or symbol_enabled is False:
+            raise SpotExecutionError(
+                "BNB fee discount is not explicitly enabled for this account and symbol."
+            )
+        if account_enabled is not True or symbol_enabled is not True:
+            raise SpotExecutionError(
+                f"{unavailable}: Binance did not explicitly confirm both BNB discount flags."
+            )
+
+        discount_asset = discount.get("discountAsset")
+        if not isinstance(discount_asset, str) or discount_asset.upper() != bnb_asset:
+            raise SpotExecutionError(
+                f"{unavailable}: Binance did not confirm BNB as the discount asset."
+            )
+
+        def parse_commission_decimal(raw: Any, field: str) -> Decimal:
+            try:
+                value = Decimal(str(raw))
+            except (ArithmeticError, TypeError, ValueError) as exc:
+                raise SpotExecutionError(
+                    f"{unavailable}: Binance returned a non-numeric {field} value."
+                ) from exc
+            if not value.is_finite() or value < 0:
+                raise SpotExecutionError(
+                    f"{unavailable}: Binance returned an invalid {field} value."
+                )
+            return value
+
+        discount_multiplier = parse_commission_decimal(
+            discount.get("discount"), "discount multiplier",
+        )
+        if not (Decimal("0") < discount_multiplier <= Decimal("1")):
+            raise SpotExecutionError(
+                f"{unavailable}: Binance returned a zero or out-of-range BNB discount multiplier."
+            )
+
+        def conservative_component(name: str) -> Decimal:
             rates = commission.get(name)
             if not isinstance(rates, dict):
-                if required:
-                    raise SpotExecutionError(f"Binance commission response is missing {name}.")
-                return Decimal("0")
+                raise SpotExecutionError(
+                    f"{unavailable}: Binance commission response is missing {name}."
+                )
+
             values: dict[str, Decimal] = {}
             for key in ("maker", "taker", "buyer", "seller"):
-                raw = rates.get(key, "0")
-                value = Decimal(str(raw))
-                if not value.is_finite() or value < 0:
-                    raise SpotExecutionError(f"Binance returned an invalid {name}.{key} rate.")
-                values[key] = value
+                if key not in rates or rates[key] is None:
+                    raise SpotExecutionError(
+                        f"{unavailable}: Binance commission response is missing {name}.{key}."
+                    )
+                values[key] = parse_commission_decimal(rates[key], f"{name}.{key}")
+
             return max(values["maker"], values["taker"]) + values["buyer"] + values["seller"]
 
-        standard_rate = conservative_component("standardCommission", required=True)
-        tax_rate = conservative_component("taxCommission", required=True)
-        special_rate = conservative_component("specialCommission", required=True)
+        standard_rate = conservative_component("standardCommission")
+        tax_rate = conservative_component("taxCommission")
+        special_rate = conservative_component("specialCommission")
         effective_rate = standard_rate * discount_multiplier + tax_rate + special_rate
-        if effective_rate <= 0:
-            raise SpotExecutionError("Commission rates do not provide a provable positive BNB fee reserve.")
+
+        if not effective_rate.is_finite() or effective_rate <= 0:
+            raise SpotExecutionError(
+                f"{unavailable}: Commission rates do not provide a provable positive BNB fee reserve."
+            )
 
         bnb_price = await self._ticker_price("BNBUSDT")
         account = await self._account()
         balances = self._balance_map(account)
         bnb_free = balances.get(bnb_asset, (Decimal("0"), Decimal("0")))[0]
+
         # Cover the BUY and the worst-priced single OCO exit, with an additional 50% reserve.
         reserve_factor = Decimal("1.50")
-        required_bnb = ((buy_notional + sell_notional) * effective_rate / bnb_price) * reserve_factor
-        if not required_bnb.is_finite() or required_bnb <= 0 or bnb_free < required_bnb:
+        required_bnb = (
+            (buy_notional + sell_notional) * effective_rate / bnb_price
+        ) * reserve_factor
+
+        if not required_bnb.is_finite() or required_bnb <= 0:
+            raise SpotExecutionError(
+                f"{unavailable}: The calculated BNB fee reserve is invalid."
+            )
+        if bnb_free < required_bnb:
             raise SpotExecutionError(
                 "Insufficient free BNB for the conservative BUY plus protective OCO commission reserve."
             )
+
         return {
             "symbol": symbol.upper(),
             "discount_asset": bnb_asset,
