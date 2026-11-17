@@ -6,6 +6,8 @@
 - Paper Engine: existing `paper_worker_supervisor.py` supervising `run_continuous_paper.py`.
 - Heartbeat: supervisor/worker heartbeats and audit events persisted in SQLite.
 - Durable state: `data/mumin_public_paper.db` on the Android Termux filesystem.
+- Local backups: a runit service makes SQLite online backups every six hours, verifies each backup with SQLite integrity and SHA-256, and retains 30 days under `data/backups/`. This is same-device redundancy, not disaster recovery; a second trusted storage destination is still required for device-loss protection.
+- Free remote mirror: the existing GitHub `mumin-paper-ledger` branch stores scheduled Paper snapshots. A 15-minute GitHub Actions watchdog checks mirror freshness, SQLite integrity, the fixed 70 USDT capital and FIFO accounting, and opens/closes a GitHub issue on incidents. GitHub notifications depend on user notification settings. This monitors the mirror, not a live phone heartbeat.
 - Recovery: runit restarts service processes; the supervisor restarts a crashed Paper child; Termux:Boot attempts service startup after device reboot.
 - Mumin AI Chat: provider-backed assistant integration is a separate phase requiring an explicitly selected model provider and budget.
 
