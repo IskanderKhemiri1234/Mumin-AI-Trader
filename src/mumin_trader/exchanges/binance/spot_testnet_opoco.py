@@ -264,13 +264,23 @@ class BinanceSpotTestnetOPOCO:
 
         orders = response.get("orders", []) if isinstance(response, dict) else []
         order_ids = [str(item.get("orderId", "")) for item in orders if isinstance(item, dict)]
+        actual_client_ids = {
+            str(item.get("clientOrderId", ""))
+            for item in orders if isinstance(item, dict)
+        }
+        expected_client_ids = {
+            working_client_order_id,
+            pending_above_client_order_id,
+            pending_below_client_order_id,
+        }
         if (
             not isinstance(response, dict)
-            or not response.get("orderListId")
+            or response.get("orderListId") is None
             or len(orders) != 3
             or len(order_ids) != 3
             or any(not item or item == "0" for item in order_ids)
             or len(set(order_ids)) != 3
+            or actual_client_ids != expected_client_ids
         ):
             self.store.update(
                 list_client_order_id,
@@ -302,7 +312,12 @@ class BinanceSpotTestnetOPOCO:
         }
         # The client IDs are persisted with the request and used as the authoritative leg mapping.
         # This method is static so callers must supply the normalized report roles explicitly.
-        if len(by_client) != 3:
+        if len(by_client) != 3 or not all(by_client):
+            return "UNKNOWN"
+        order_ids = {str(item.get("orderId", "")) for item in by_client.values()}
+        if len(order_ids) != 3 or "" in order_ids or "0" in order_ids:
+            return "UNKNOWN"
+        if response.get("orderListId") is None or not response.get("listClientOrderId"):
             return "UNKNOWN"
         values = list(by_client.values())
         working = next((item for item in values if str(item.get("type", "")).upper() == "LIMIT"), None)
@@ -330,8 +345,11 @@ class BinanceSpotTestnetOPOCO:
             return "PARTIAL_FILL_REVIEW"
         if working_status in {"CANCELED", "EXPIRED", "REJECTED"}:
             return "PARTIAL_FILL_REVIEW" if working_filled > 0 else "CANCELED"
+        list_status = str(response.get("listOrderStatus", "")).upper()
         if working_status != "FILLED":
-            return "WORKING" if working_status == "NEW" and working_filled == 0 else "UNKNOWN"
+            if working_status == "NEW" and working_filled == 0:
+                return "CANCELED" if list_status == "ALL_DONE" else "WORKING"
+            return "UNKNOWN"
         above_status = str(above.get("status", "")).upper()
         below_status = str(below.get("status", "")).upper()
         if any(
@@ -340,7 +358,6 @@ class BinanceSpotTestnetOPOCO:
             for status, amount in ((above_status, above_filled), (below_status, below_filled))
         ):
             return "PARTIAL_FILL_REVIEW"
-        list_status = str(response.get("listOrderStatus", "")).upper()
         if list_status == "ALL_DONE":
             if (
                 above_status == "FILLED"
@@ -411,6 +428,11 @@ class BinanceSpotTestnetOPOCO:
         working = await query_child(request["workingClientOrderId"])
         if working is None:
             raise SpotOrderOutcomeUnknown("OPOCO working BUY is not queryable; state remains unresolved.")
+        if (
+            str(working.get("clientOrderId", "")) != request["workingClientOrderId"]
+            or str(working.get("symbol", "")).upper() != symbol.upper()
+        ):
+            raise SpotOrderOutcomeUnknown("OPOCO working order identity does not match its persisted intent.")
         working_status = str(working.get("status", "")).upper()
         if working_status == "FILLED":
             above = await query_child(request["pendingAboveClientOrderId"])
@@ -419,6 +441,13 @@ class BinanceSpotTestnetOPOCO:
                 raise SpotOrderOutcomeUnknown(
                     "Working BUY is filled but both pending OCO legs are not queryable."
                 )
+            if (
+                str(above.get("clientOrderId", "")) != request["pendingAboveClientOrderId"]
+                or str(below.get("clientOrderId", "")) != request["pendingBelowClientOrderId"]
+                or str(above.get("symbol", "")).upper() != symbol.upper()
+                or str(below.get("symbol", "")).upper() != symbol.upper()
+            ):
+                raise SpotOrderOutcomeUnknown("OPOCO pending leg identities do not match the persisted intent.")
         else:
             above_parent = parent_orders[request["pendingAboveClientOrderId"]]
             below_parent = parent_orders[request["pendingBelowClientOrderId"]]
