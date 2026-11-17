@@ -4,6 +4,7 @@ import hmac
 from contextlib import asynccontextmanager
 import os
 import sqlite3
+from decimal import Decimal
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -14,6 +15,15 @@ from pydantic import BaseModel
 
 from config.config import get_settings
 from mumin_trader.exchanges.binance.market_stream_service import MarketStreamService, WATCH_SYMBOLS
+from mumin_trader.execution.paper_reconciliation import reconcile_paper_ledger
+from mumin_trader.execution.command_plane import (
+    CommandRejected,
+    get_command,
+    latch_emergency_stop,
+    list_command_events,
+    list_commands,
+    submit_paper_order,
+)
 
 PROJECT_ROOT = (
     Path("/app")
@@ -53,6 +63,18 @@ def _dashboard_database() -> Path:
 
 class PaperControlRequest(BaseModel):
     action: Literal["pause", "resume"]
+
+
+class PaperOrderCommand(BaseModel):
+    side: Literal["BUY", "SELL"]
+    symbol: str
+    quantity: str | None = None
+    quote_amount: str | None = None
+    confirmed: bool = False
+
+
+class EmergencyStopRequest(BaseModel):
+    confirmed: bool = False
 
 
 def _dashboard_access_token(x_dashboard_token: str | None) -> str:
@@ -290,18 +312,22 @@ def _read_dashboard_snapshot() -> dict[str, Any]:
         }
         positions = []
         for row in connection.execute(
-            "SELECT symbol, quantity, entry_price, opened_at FROM bot_positions ORDER BY symbol"
+            "SELECT symbol, quantity, entry_price, entry_gross, entry_fee, opened_at FROM bot_positions ORDER BY symbol"
         ).fetchall():
-            quantity = float(row["quantity"])
-            entry = float(row["entry_price"])
-            mark = latest_prices.get(row["symbol"])
+            quantity_decimal = Decimal(row["quantity"])
+            entry = Decimal(row["entry_price"])
+            entry_cost = Decimal(row["entry_gross"]) + Decimal(row["entry_fee"])
+            mark_value = latest_prices.get(row["symbol"])
+            mark = Decimal(str(mark_value)) if mark_value is not None else None
+            market_value = quantity_decimal * mark if mark is not None else None
             positions.append({
                 "symbol": row["symbol"],
-                "quantity": quantity,
-                "entry_price": entry,
-                "mark_price": mark,
-                "market_value": quantity * mark if mark is not None else None,
-                "unrealized_pnl": quantity * (mark - entry) if mark is not None else None,
+                "quantity": float(quantity_decimal),
+                "entry_price": float(entry),
+                "mark_price": float(mark) if mark is not None else None,
+                "market_value": float(market_value) if market_value is not None else None,
+                "unrealized_pnl": float(market_value - entry_cost) if market_value is not None else None,
+                "entry_fee": float(Decimal(row["entry_fee"])),
                 "opened_at": row["opened_at"],
             })
 
@@ -327,12 +353,38 @@ def _read_dashboard_snapshot() -> dict[str, Any]:
         source_row = connection.execute(
             "SELECT data_source FROM bot_market_ticks ORDER BY id DESC LIMIT 1"
         ).fetchone()
+        decision_table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_agent_decisions'"
+        ).fetchone()
+        strategy_decisions = []
+        if decision_table is not None:
+            strategy_decisions = [
+                dict(row) for row in connection.execute(
+                    """SELECT d.symbol,d.final_signal,d.action,d.liquidity_sweep_vote,
+                              d.liquidity_sweep_reason,d.depth_imbalance_vote,
+                              d.depth_imbalance_reason,d.micro_alpha_filter_vote,
+                              d.micro_alpha_filter_reason,d.spread_bps,d.spread_pass,
+                              d.agent_consensus,d.agent_consensus_pass,d.created_at
+                       FROM bot_agent_decisions d
+                       JOIN (SELECT symbol,MAX(decision_id) AS latest_id
+                             FROM bot_agent_decisions GROUP BY symbol) latest
+                         ON latest.latest_id=d.decision_id
+                       ORDER BY d.symbol"""
+                ).fetchall()
+            ]
 
-        cash = float(account["cash"])
-        equity = cash + sum(
-            float(item["quantity"]) * (latest_prices.get(item["symbol"]) or 0.0)
-            for item in positions
+        accounting = reconcile_paper_ledger(connection)
+        cash_decimal = Decimal(account["cash"])
+        marked_value = sum(
+            (
+                Decimal(str(latest_prices[item["symbol"]])) * Decimal(str(item["quantity"]))
+                for item in positions if latest_prices.get(item["symbol"]) is not None
+            ),
+            Decimal("0"),
         )
+        marks_complete = all(latest_prices.get(item["symbol"]) is not None for item in positions)
+        equity_decimal = cash_decimal + marked_value if marks_complete else None
+        unrealized_value = accounting.get("unrealized_pnl_including_entry_fees")
         return {
             "status": "ready",
             "message": "Read-only Paper ledger snapshot.",
@@ -343,10 +395,15 @@ def _read_dashboard_snapshot() -> dict[str, Any]:
             "account": {
                 "tick": int(account["tick_count"]),
                 "initial_cash": float(account["initial_cash"]),
-                "cash": cash,
-                "equity": equity,
+                "cash": float(cash_decimal),
+                "equity": float(equity_decimal) if equity_decimal is not None else None,
                 "realized_pnl": float(account["realized_pnl"]),
-                "daily_pnl": equity - float(account["daily_start_equity"]),
+                "unrealized_pnl": float(unrealized_value) if unrealized_value is not None else None,
+                "accounting_status": accounting["status"],
+                "daily_pnl": (
+                    float(equity_decimal) - float(account["daily_start_equity"])
+                    if equity_decimal is not None else None
+                ),
                 "fees_paid": float(account["fees_paid"]),
                 "high_watermark": float(account["high_watermark"]),
                 "closed_trades": int(stats["closed_trades"]),
@@ -359,6 +416,20 @@ def _read_dashboard_snapshot() -> dict[str, Any]:
             "positions": positions,
             "fills": fills,
             "equity_history": equity_history,
+            "accounting": accounting,
+            "strategy_decisions": strategy_decisions,
+            "risk_status": {
+                "halted": bool(account["halted"]),
+                "halt_reason": account["halt_reason"],
+                "daily_pnl": (
+                    float(equity_decimal) - float(account["daily_start_equity"])
+                    if equity_decimal is not None else None
+                ),
+                "daily_loss_limit_percent": "2.00",
+                "max_drawdown_percent": "5.00",
+                "max_trade_usdt": "5.00",
+                "cash_reserve_percent": "20.00",
+            },
         }
     finally:
         connection.close()
@@ -371,7 +442,7 @@ async def health() -> dict[str, str]:
         "status": "ok",
         "environment": settings.TRADING_ENV.value,
         "mode": settings.TRADING_MODE.value,
-        "execution": "disabled_in_foundation",
+        "execution": "PAPER_ONLY; TESTNET_DISABLED; MAINNET_BLOCKED",
     }
 
 
@@ -407,17 +478,143 @@ async def dashboard_snapshot(
 ) -> dict[str, Any]:
     _dashboard_access_token(x_dashboard_token)
     snapshot = _read_dashboard_snapshot()
-    snapshot["paper_worker"] = _paper_worker_snapshot()
+    worker = _paper_worker_snapshot()
+    snapshot["paper_worker"] = worker
+    worker_status = str(worker.get("worker_status", "offline")).lower()
+    if snapshot.get("status") != "ready":
+        snapshot["engine_status"] = "OFFLINE"
+    elif snapshot.get("account", {}).get("halted"):
+        snapshot["engine_status"] = "RISK_HALTED"
+    else:
+        snapshot["engine_status"] = {
+            "running": "RUNNING",
+            "paused": "PAUSED",
+            "starting": "STARTING",
+        }.get(worker_status, "OFFLINE")
     snapshot["strategy_settings"] = _strategy_settings_snapshot()
+    snapshot["commands"] = (
+        list_commands(_dashboard_database(), limit=20)
+        if _dashboard_database().is_file() else []
+    )
     snapshot["control_plane"] = {
-        "read_only": True,
+        "read_only": False,
+        "paper_order_submission": "CONFIRMED_PAPER_ONLY",
         "paper_engine_control": "AUTHENTICATED_PAUSE_RESUME_ONLY",
-        "testnet_order_submission": "DISABLED",
+        "testnet_order_submission": "DISABLED_PENDING_EXPLICIT_OPERATIONAL_APPROVAL",
         "mainnet_order_submission": "BLOCKED",
         "execution_authorized": False,
-        "available_actions": ["PAPER_PAUSE", "PAPER_RESUME"],
+        "available_actions": [
+            "PAPER_BUY", "PAPER_SELL", "PAPER_PAUSE", "PAPER_RESUME"
+        ],
     }
     return snapshot
+
+
+@app.post("/api/commands")
+async def create_paper_command(
+    request: PaperOrderCommand,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+) -> dict[str, Any]:
+    _dashboard_access_token(x_dashboard_token)
+    if os.getenv("TRADING_MODE", "PAPER").upper() != "PAPER":
+        raise HTTPException(status_code=409, detail="Order commands require TRADING_MODE=PAPER.")
+    if os.getenv("TRADING_ENV", "TESTNET").upper() != "TESTNET":
+        raise HTTPException(status_code=409, detail="Paper commands require TRADING_ENV=TESTNET.")
+    if os.getenv("ALLOW_MAINNET", "false").lower() == "true" or os.getenv(
+        "LIVE_TRADING_ENABLED", "false"
+    ).lower() == "true":
+        raise HTTPException(status_code=409, detail="Paper commands refuse live-enabled configuration.")
+    if not _dashboard_database().is_file():
+        raise HTTPException(status_code=409, detail="Paper ledger is unavailable.")
+    try:
+        return submit_paper_order(
+            _dashboard_database(),
+            idempotency_key=idempotency_key or "",
+            side=request.side,
+            symbol=request.symbol,
+            quantity=request.quantity,
+            quote_amount=request.quote_amount,
+            confirmed=request.confirmed,
+        )
+    except CommandRejected as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@app.post("/api/emergency-stop")
+async def paper_emergency_stop(
+    request: EmergencyStopRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+) -> dict[str, Any]:
+    _dashboard_access_token(x_dashboard_token)
+    if os.getenv("TRADING_MODE", "PAPER").upper() != "PAPER":
+        raise HTTPException(status_code=409, detail="Emergency stop endpoint is Paper-only.")
+    if os.getenv("TRADING_ENV", "TESTNET").upper() != "TESTNET":
+        raise HTTPException(status_code=409, detail="Paper emergency stop requires TESTNET environment.")
+    if os.getenv("ALLOW_MAINNET", "false").lower() == "true" or os.getenv(
+        "LIVE_TRADING_ENABLED", "false"
+    ).lower() == "true":
+        raise HTTPException(status_code=409, detail="Emergency stop refuses live-enabled configuration.")
+    if not _dashboard_database().is_file():
+        raise HTTPException(status_code=409, detail="Paper ledger is unavailable.")
+    try:
+        return latch_emergency_stop(
+            _dashboard_database(),
+            idempotency_key=idempotency_key or "",
+            confirmed=request.confirmed,
+        )
+    except CommandRejected as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@app.get("/api/commands")
+async def read_paper_commands(
+    limit: int = 50,
+    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+) -> dict[str, Any]:
+    _dashboard_access_token(x_dashboard_token)
+    database = _dashboard_database()
+    return {"commands": list_commands(database, limit) if database.is_file() else []}
+
+
+@app.get("/api/commands/{command_id}")
+async def read_paper_command(
+    command_id: str,
+    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+) -> dict[str, Any]:
+    _dashboard_access_token(x_dashboard_token)
+    database = _dashboard_database()
+    command = get_command(database, command_id) if database.is_file() else None
+    if command is None:
+        raise HTTPException(status_code=404, detail="Command not found.")
+    return command
+
+
+@app.get("/api/commands/{command_id}/events")
+async def read_paper_command_events(
+    command_id: str,
+    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+) -> dict[str, Any]:
+    _dashboard_access_token(x_dashboard_token)
+    database = _dashboard_database()
+    if not database.is_file():
+        raise HTTPException(status_code=404, detail="Command not found.")
+    command = get_command(database, command_id)
+    if command is None:
+        raise HTTPException(status_code=404, detail="Command not found.")
+    return {"events": list_command_events(database, command_id)}
+
+
+@app.post("/api/testnet/orders")
+async def blocked_testnet_order(
+    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+) -> dict[str, Any]:
+    _dashboard_access_token(x_dashboard_token)
+    raise HTTPException(
+        status_code=423,
+        detail="Binance Testnet order submission is locked pending a separate explicit operational approval.",
+    )
 
 
 @app.post("/api/paper-control")

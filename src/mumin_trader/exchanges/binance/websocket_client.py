@@ -33,6 +33,9 @@ class BinanceWebSocketClient:
         self.reconnect_max_seconds = reconnect_max_seconds
         self.heartbeat_seconds = heartbeat_seconds
         self._stop = asyncio.Event()
+        self.connected = False
+        self.reconnect_count = 0
+        self.last_error: str | None = None
 
     @property
     def url(self) -> str:
@@ -40,6 +43,7 @@ class BinanceWebSocketClient:
 
     def stop(self) -> None:
         self._stop.set()
+        self.connected = False
 
     @staticmethod
     def decode_message(raw: str | bytes) -> dict[str, Any]:
@@ -63,6 +67,8 @@ class BinanceWebSocketClient:
                     max_queue=1000,
                 ) as socket:
                     logger.info("Connected to Binance market stream")
+                    self.connected = True
+                    self.last_error = None
                     delay = self.reconnect_initial_seconds
                     async for raw in socket:
                         if self._stop.is_set():
@@ -74,9 +80,13 @@ class BinanceWebSocketClient:
             except asyncio.CancelledError:
                 raise
             except (OSError, TimeoutError, ConnectionClosed, WebSocketException) as exc:
+                self.connected = False
+                self.reconnect_count += 1
+                self.last_error = type(exc).__name__
                 if self._stop.is_set():
                     break
                 logger.warning("Binance stream disconnected: %s", type(exc).__name__)
             if not self._stop.is_set():
+                self.connected = False
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, self.reconnect_max_seconds)

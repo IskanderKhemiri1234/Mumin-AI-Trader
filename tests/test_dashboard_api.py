@@ -91,11 +91,13 @@ def test_dashboard_api_exposes_read_only_control_plane(monkeypatch, tmp_path):
     )
     assert response.status_code == 200
     control = response.json()["control_plane"]
-    assert control["read_only"] is True
+    assert control["read_only"] is False
     assert control["execution_authorized"] is False
-    assert control["testnet_order_submission"] == "DISABLED"
+    assert control["paper_order_submission"] == "CONFIRMED_PAPER_ONLY"
+    assert control["testnet_order_submission"] == "DISABLED_PENDING_EXPLICIT_OPERATIONAL_APPROVAL"
     assert control["mainnet_order_submission"] == "BLOCKED"
-    assert control["available_actions"] == ["PAPER_PAUSE", "PAPER_RESUME"]
+    assert "PAPER_BUY" in control["available_actions"]
+    assert "PAPER_SELL" in control["available_actions"]
 
 
 def test_dashboard_page_exposes_live_control_center():
@@ -293,3 +295,119 @@ def test_dashboard_exposes_locked_strategy_and_risk_settings(monkeypatch, tmp_pa
     assert settings["risk_limits_locked"] is True
     assert settings["approval_required_for_changes"] is True
     assert settings["settings_mutation_enabled"] is False
+
+
+
+def test_paper_command_api_executes_and_lists_fifo_order(monkeypatch, tmp_path):
+    database = tmp_path / "paper.sqlite3"
+    bot = ContinuousPaperBot(str(database))
+    import time
+    with bot._connect() as db:
+        db.execute(
+            """INSERT INTO bot_market_ticks
+               (tick,symbol,price,bid,ask,data_source,received_at_ms)
+               VALUES (0,'BTCUSDT','60000','59999','60001','MOCK_SYNTHETIC',?)""",
+            (int(time.time() * 1000),),
+        )
+    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
+    monkeypatch.setenv("TRADING_MODE", "PAPER")
+    monkeypatch.setenv("TRADING_ENV", "TESTNET")
+    monkeypatch.setenv("ALLOW_MAINNET", "false")
+    monkeypatch.setenv("LIVE_TRADING_ENABLED", "false")
+    client = TestClient(app)
+    headers = {
+        "X-Dashboard-Token": "server-only-token",
+        "Idempotency-Key": "api-paper-buy-001",
+    }
+    response = client.post(
+        "/api/commands",
+        json={"side": "BUY", "symbol": "BTCUSDT", "quote_amount": "5", "confirmed": True},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "COMPLETED"
+    assert response.json()["result"]["fifo_status"] == "PASS"
+    listed = client.get(
+        "/api/commands", headers={"X-Dashboard-Token": "server-only-token"}
+    )
+    assert listed.status_code == 200
+    assert listed.json()["commands"][0]["status"] == "COMPLETED"
+
+
+def test_testnet_order_api_is_locked(monkeypatch):
+    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    response = TestClient(app).post(
+        "/api/testnet/orders",
+        headers={"X-Dashboard-Token": "server-only-token"},
+    )
+    assert response.status_code == 423
+    assert "explicit operational approval" in response.json()["detail"]
+
+
+def test_paper_command_api_requires_idempotency_and_confirmation(monkeypatch, tmp_path):
+    database = tmp_path / "paper.sqlite3"
+    bot = ContinuousPaperBot(str(database))
+    import time
+    with bot._connect() as db:
+        db.execute(
+            """INSERT INTO bot_market_ticks
+               (tick,symbol,price,bid,ask,data_source,received_at_ms)
+               VALUES (0,'BTCUSDT','60000','59999','60001','MOCK_SYNTHETIC',?)""",
+            (int(time.time() * 1000),),
+        )
+    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
+    client = TestClient(app)
+    response = client.post(
+        "/api/commands",
+        json={"side": "BUY", "symbol": "BTCUSDT", "quote_amount": "5"},
+        headers={"X-Dashboard-Token": "server-only-token"},
+    )
+    assert response.status_code == 422
+    response = client.post(
+        "/api/commands",
+        json={"side": "BUY", "symbol": "BTCUSDT", "quote_amount": "5", "confirmed": False},
+        headers={
+            "X-Dashboard-Token": "server-only-token",
+            "Idempotency-Key": "missing-confirmation",
+        },
+    )
+    assert response.status_code == 428
+
+
+
+def test_emergency_stop_api_latches_without_closing_positions(monkeypatch, tmp_path):
+    database = tmp_path / "paper.sqlite3"
+    bot = ContinuousPaperBot(str(database))
+    import time
+    with bot._connect() as db:
+        db.execute(
+            """INSERT INTO bot_market_ticks
+               (tick,symbol,price,bid,ask,data_source,received_at_ms)
+               VALUES (0,'BTCUSDT','60000','59999','60001','MOCK_SYNTHETIC',?)""",
+            (int(time.time() * 1000),),
+        )
+    from mumin_trader.execution.command_plane import submit_paper_order
+    submit_paper_order(
+        database, idempotency_key="api-before-stop", side="BUY",
+        symbol="BTCUSDT", quote_amount="5", confirmed=True,
+    )
+    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
+    monkeypatch.setenv("TRADING_MODE", "PAPER")
+    monkeypatch.setenv("TRADING_ENV", "TESTNET")
+    monkeypatch.setenv("ALLOW_MAINNET", "false")
+    monkeypatch.setenv("LIVE_TRADING_ENABLED", "false")
+    response = TestClient(app).post(
+        "/api/emergency-stop",
+        json={"confirmed": True},
+        headers={
+            "X-Dashboard-Token": "server-only-token",
+            "Idempotency-Key": "api-emergency-stop",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["open_positions_closed"] is False
+    with bot._connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM bot_positions").fetchone()[0] == 1

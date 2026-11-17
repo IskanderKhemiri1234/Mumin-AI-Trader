@@ -84,3 +84,13 @@ Scope: current `main` Paper engine plus the isolated Testnet implementation prop
 - OCO child order IDs are now included in unmatched-fill and executed-quantity reconciliation, rather than being incorrectly classified as trades without local intents.
 - CI on commit `60dcca3271bc020f7e019680bf3f6fed841a2425`: 126 tests passed and Ruff passed. This is software/MockTransport evidence only.
 - **No real Spot Testnet BUY, SELL, or OCO has been submitted by this work.** Operator execution and exchange-generated evidence are still pending; Mainnet remains NO-GO.
+
+
+## Unified Paper command center integration (2026-11-17)
+- PR #39 and PR #41 are integrated on the operations branch; the final integration is proposed to main by PR #42.
+- The Android dashboard includes a local synthetic demo and an authenticated remote Paper command panel. The local demo remains disconnected and cannot submit commands.
+- Remote Paper BUY/SELL commands are written only to the existing continuous Paper SQLite ledger. The command plane enforces idempotency, explicit confirmation, allowlisted symbols, fresh quotes, spread, cash reserve, position count, total exposure, daily-loss and drawdown entry checks, plus FIFO reconciliation.
+- Command transitions and outcomes are persisted in the command audit tables. The emergency stop latches the Paper entry halt and does not claim to close open positions; risk-reducing SELL remains available.
+- The public Binance market stream is server-owned and exposes connection, stale/disconnected state, reconnect count, and last error. It is market data only and has no order capability.
+- The dashboard /api/testnet/orders route remains locked (HTTP 423). The separate Spot Testnet adapter still requires its two disabled-by-default gates and dedicated Testnet credentials. No exchange order has been submitted by this integration.
+- Mainnet remains hard-blocked by Settings validation. ALLOW_MAINNET=false and LIVE_TRADING_ENABLED=false remain mandatory. This integration is not authorization to use real funds.
