@@ -7,7 +7,6 @@ import json
 import statistics
 import tempfile
 from pathlib import Path
-from typing import Any
 
 from scripts.replay_paper_observations import _prepare_cycles, replay_archive
 
@@ -29,7 +28,7 @@ def run_walk_forward(
 
     rows = []
     with gzip.open(archive, "rt", encoding="utf-8") as stream:
-        for line_number, line in enumerate(stream, start=1):
+        for line in stream:
             item = json.loads(line)
             if item.get("record_type") == "market_snapshot":
                 row = item.get("record")
