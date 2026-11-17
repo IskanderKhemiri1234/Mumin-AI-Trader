@@ -35,7 +35,6 @@ class UnifiedDashboardActivity : Activity() {
     private var pendingInstall: File? = null
     private var remoteHost: String? = null
     private var remotePort: Int = 443
-    private val localDemoUrl = "file:///android_asset/dashboard/index.html"
 
     companion object {
         private const val PREFS = "mumin_dashboard_connection"
@@ -77,8 +76,6 @@ class UnifiedDashboardActivity : Activity() {
             setTextColor(MUTED)
             setPadding(0, dp(3), 0, dp(8))
         })
-        root.addView(header)
-
         val connectionPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(10), dp(14), dp(10))
@@ -119,13 +116,24 @@ class UnifiedDashboardActivity : Activity() {
             setPadding(0, dp(6), 0, 0)
         }
         connectionPanel.addView(connectionStatus)
+        connectionPanel.visibility = View.GONE
+        header.addView(Button(this).apply {
+            text = "اتصال بالخادم (اختياري)"
+            setOnClickListener {
+                connectionPanel.visibility =
+                    if (connectionPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            }
+        }, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+        root.addView(header)
         root.addView(connectionPanel)
 
         webView = WebView(this).apply {
             setBackgroundColor(EMERALD)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
-            settings.allowFileAccess = true
+            settings.allowFileAccess = false
             settings.allowFileAccessFromFileURLs = false
             settings.allowUniversalAccessFromFileURLs = false
             settings.allowContentAccess = false
@@ -213,7 +221,19 @@ class UnifiedDashboardActivity : Activity() {
         remotePort = 443
         webView.visibility = View.VISIBLE
         connectionStatus.text = "العرض التجريبي المحلي · بيانات اصطناعية فقط · لا اتصال بخادم أو Binance."
-        webView.loadUrl(localDemoUrl)
+        runCatching {
+            assets.open("dashboard/index.html").bufferedReader(Charsets.UTF_8).use { it.readText() }
+        }.onSuccess { html ->
+            webView.loadDataWithBaseURL(
+                "https://appassets.androidplatform.net/assets/dashboard/index.html",
+                html,
+                "text/html",
+                "UTF-8",
+                null
+            )
+        }.onFailure {
+            connectionStatus.text = "تعذر تحميل لوحة العرض المحلية المضمّنة."
+        }
     }
 
     private fun loadUnifiedDashboard(baseUrl: String) {
