@@ -68,7 +68,11 @@ class Evidence:
         os.chmod(self.summary_path, 0o600)
 
 
-def require_testnet(settings: Settings) -> None:
+def require_testnet(
+    settings: Settings,
+    *,
+    allow_trade_cap_override: bool = False,
+) -> None:
     if settings.TRADING_ENV is not TradingEnvironment.TESTNET:
         raise SpotExecutionError("Refusing: TRADING_ENV must be TESTNET.")
     if settings.TRADING_MODE is not TradingMode.TESTNET:
@@ -82,6 +86,38 @@ def require_testnet(settings: Settings) -> None:
         )
     if not settings.BINANCE_API_KEY.get_secret_value() or not settings.BINANCE_API_SECRET.get_secret_value():
         raise SpotExecutionError("Spot Testnet API credentials are missing from the private environment.")
+
+    fixed_limits = {
+        "INITIAL_CAPITAL_USD": Decimal("70.00"),
+        "MAX_CAPITAL_ALLOCATION_USD": Decimal("70.00"),
+        "MIN_TRADE_ALLOCATION_USD": Decimal("5.00"),
+        "CAPITAL_RESERVE_PERCENT": Decimal("20.00"),
+        "MAX_RISK_PER_TRADE_PERCENT": Decimal("0.50"),
+        "MAX_DAILY_LOSS_PERCENT": Decimal("2.00"),
+        "MAX_DRAWDOWN_PERCENT": Decimal("5.00"),
+        "MAX_OPEN_POSITIONS": 2,
+    }
+    for name, expected in fixed_limits.items():
+        if getattr(settings, name) != expected:
+            raise SpotExecutionError(
+                f"Refusing: {name} differs from the approved fixed Testnet risk policy."
+            )
+    trade_cap = settings.MAX_TRADE_ALLOCATION_USD
+    if trade_cap != Decimal("5.00"):
+        if (
+            not allow_trade_cap_override
+            or trade_cap <= Decimal("5.00")
+            or trade_cap > Decimal("6.00")
+        ):
+            raise SpotExecutionError(
+                "Refusing: Testnet trade cap is fixed at 5.00 USDT; a one-run override requires explicit operator action and cannot exceed 6.00 USDT."
+            )
+    if settings.QUOTE_ASSET.upper() != "USDT":
+        raise SpotExecutionError("Refusing: Testnet execution quote asset is fixed to USDT.")
+    if settings.BNB_FEE_ASSET.upper() != "BNB":
+        raise SpotExecutionError("Refusing: Testnet fee reserve asset is fixed to BNB.")
+    if not settings.ENABLE_BNB_FEE_DISCOUNT or not settings.REQUIRE_BNB_BALANCE_FOR_DISCOUNT:
+        raise SpotExecutionError("Refusing: explicit BNB fee-discount and balance-reserve checks are required.")
 
 
 def safe_error_message(exc: Exception, settings: Settings) -> str:
@@ -328,7 +364,7 @@ async def run_cycle(args: argparse.Namespace) -> int:
         if not testnet_cap.is_finite() or testnet_cap <= 0 or testnet_cap > Decimal("6.00"):
             raise SpotExecutionError("The Testnet-only order-cap override must be between 0 and 6.00 USDT.")
         settings = Settings(MAX_TRADE_ALLOCATION_USD=testnet_cap)
-    require_testnet(settings)
+    require_testnet(settings, allow_trade_cap_override=args.testnet_max_order_usdt is not None)
     if args.confirm_testnet_cycle != "TESTNET_ONLY":
         raise SpotExecutionError("Explicit TESTNET_ONLY confirmation is required.")
     symbol = args.symbol.upper()
@@ -631,7 +667,7 @@ async def run_opoco_cycle(args: argparse.Namespace) -> int:
         if not testnet_cap.is_finite() or testnet_cap <= 0 or testnet_cap > Decimal("6.00"):
             raise SpotExecutionError("The Testnet-only order-cap override must be between 0 and 6.00 USDT.")
         settings = Settings(MAX_TRADE_ALLOCATION_USD=testnet_cap)
-    require_testnet(settings)
+    require_testnet(settings, allow_trade_cap_override=args.testnet_max_order_usdt is not None)
     if args.confirm_testnet_cycle != "TESTNET_ONLY":
         raise SpotExecutionError("Explicit TESTNET_ONLY confirmation is required.")
 
