@@ -1,0 +1,133 @@
+name: Mumin Free Paper Mirror Watchdog
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: mumin-free-paper-mirror-watchdog
+  cancel-in-progress: false
+
+jobs:
+  inspect-mirror:
+    name: Verify free GitHub Paper mirror and alert on failure
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout application
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Checkout latest durable Paper mirror
+        id: mirror
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: mumin-paper-ledger
+          path: mumin-paper-ledger
+          fetch-depth: 1
+
+      - name: Install audit dependencies
+        if: steps.mirror.outcome == 'success'
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+
+      - name: Inspect mirror freshness, SQLite integrity and FIFO accounting
+        id: health
+        env:
+          MIRROR_OUTCOME: ${{ steps.mirror.outcome }}
+        run: |
+          set +e
+          REASON=""
+          if [ "$MIRROR_OUTCOME" != "success" ]; then
+            REASON="Cannot checkout mumin-paper-ledger branch."
+          elif [ ! -s mumin-paper-ledger/mumin_public_paper.db ]; then
+            REASON="Durable Paper database is missing or empty."
+          else
+            LAST_COMMIT="$(git -C mumin-paper-ledger log -1 --format=%ct)"
+            NOW="$(date -u +%s)"
+            AGE="$((NOW - LAST_COMMIT))"
+            if [ "$AGE" -gt 1500 ]; then
+              REASON="Paper mirror is stale: last update was ${AGE}s ago (limit 1500s)."
+            fi
+            python - <<'PY'
+          import sqlite3
+          from decimal import Decimal
+          path = "mumin-paper-ledger/mumin_public_paper.db"
+          db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+          integrity = db.execute("PRAGMA integrity_check").fetchone()
+          if not integrity or integrity[0] != "ok":
+              raise SystemExit(f"SQLite integrity failure: {integrity}")
+          account = db.execute(
+              "SELECT initial_cash,tick_count FROM bot_account WHERE id=1"
+          ).fetchone()
+          if not account or Decimal(str(account[0])) != Decimal("70.00"):
+              raise SystemExit(f"Paper capital lock mismatch: {account}")
+          latest = db.execute(
+              "SELECT MAX(tick) FROM bot_market_ticks WHERE data_source='BINANCE_PUBLIC_MARKET_DATA'"
+          ).fetchone()[0]
+          if latest is None:
+              raise SystemExit("No public market data exists in the Paper ledger.")
+          symbols = {row[0] for row in db.execute(
+              "SELECT symbol FROM bot_market_ticks WHERE tick=? AND data_source='BINANCE_PUBLIC_MARKET_DATA'",
+              (latest,),
+          )}
+          expected = {"BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT","ADAUSDT","AVAXUSDT","LINKUSDT"}
+          if symbols != expected:
+              raise SystemExit(f"Latest public market cycle incomplete: {sorted(symbols)}")
+          print(f"SQLite PASS; capital=70 USDT; latest tick={latest}; 8/8 symbols.")
+          db.close()
+          PY
+            CODE="$?"
+            if [ "$CODE" -ne 0 ]; then REASON="SQLite, fixed-capital or eight-symbol market-cycle check failed."; fi
+            if [ -z "$REASON" ]; then
+              python scripts/audit_paper_ledger.py --db mumin-paper-ledger/mumin_public_paper.db --output "$RUNNER_TEMP/paper-audit.json"
+              CODE="$?"
+              if [ "$CODE" -ne 0 ]; then REASON="FIFO accounting reconciliation failed; see workflow logs."; fi
+            fi
+          fi
+
+          if [ -n "$REASON" ]; then
+            echo "status=FAIL" >> "$GITHUB_OUTPUT"
+            echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+            echo "::error::$REASON"
+          else
+            echo "status=PASS" >> "$GITHUB_OUTPUT"
+            echo "reason=Paper mirror freshness and integrity checks passed." >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open or update GitHub alert on failure
+        if: steps.health.outputs.status == 'FAIL'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALERT_REASON: ${{ steps.health.outputs.reason }}
+        run: |
+          ISSUE="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search 'in:title "Mumin Paper mirror alert"' --json number --jq '.[0].number // empty')"
+          BODY="**Paper mirror watchdog reported a failure.**\n\n${ALERT_REASON}\n\nThis free GitHub Actions watchdog checks only the latest committed mirror. It cannot observe a disconnected phone in real time; scheduled Actions are best-effort, not an always-on monitor.\n\nRun: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ -n "$ISSUE" ]; then
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "Mumin Paper mirror alert: health check failed" --body "$BODY"
+          fi
+
+      - name: Close alert after recovery
+        if: steps.health.outputs.status == 'PASS'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ISSUE="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search 'in:title "Mumin Paper mirror alert"' --json number --jq '.[0].number // empty')"
+          if [ -n "$ISSUE" ]; then
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "Paper mirror health checks recovered. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            gh issue close "$ISSUE" --repo "$GITHUB_REPOSITORY" --reason completed
+          fi
+
+      - name: Fail the run when the watchdog detects an incident
+        if: steps.health.outputs.status == 'FAIL'
+        run: exit 1
