@@ -1,0 +1,136 @@
+{
+  "all_expected_symbols_present": true,
+  "archive_bytes": 289423,
+  "archive_sha256": "b32277cb9e5abd18ffcb43eee7c3c8577d4052079ff0f2442520ed25cb055ec8",
+  "complete_eight_symbol_cycles": 271,
+  "expected_symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "SOLUSDT",
+    "XRPUSDT",
+    "ADAUSDT",
+    "AVAXUSDT",
+    "LINKUSDT"
+  ],
+  "generated_at_utc": "2026-11-17T22:21:03.370240+00:00",
+  "incomplete_cycle_count": 98,
+  "limitations": [
+    "The archive includes only recorded public Paper snapshots; missing intervals are not reconstructed.",
+    "Order-book depth exists only at captured snapshot times and is not historical exchange depth for skipped intervals.",
+    "Legacy snapshots created before the macro-input schema migration contain no raw hourly closes or close timestamps and cannot be independently replayed.",
+    "Replay readiness requires 21 closed hourly values and their exact close timestamps for every row, complete eight-symbol cycles, at least 30 cycles, and no missing one-minute slots or duplicate candle snapshots.",
+    "The current schedule is best-effort and is not a guaranteed continuous 24/7 feed.",
+    "This archive is not a sealed Holdout and must not be used to claim out-of-sample profitability."
+  ],
+  "observed_cycle_count": 369,
+  "per_symbol": {
+    "ADAUSDT": {
+      "duplicate_candle_snapshots": 0,
+      "estimated_missing_one_minute_slots": 3302,
+      "first_candle_close_ms": 1794739499999,
+      "largest_observed_gap_ms": 9780000,
+      "last_candle_close_ms": 1794953819999,
+      "market_snapshot_rows": 271,
+      "unique_closed_candles": 271
+    },
+    "AVAXUSDT": {
+      "duplicate_candle_snapshots": 0,
+      "estimated_missing_one_minute_slots": 3302,
+      "first_candle_close_ms": 1794739499999,
+      "largest_observed_gap_ms": 9780000,
+      "last_candle_close_ms": 1794953819999,
+      "market_snapshot_rows": 271,
+      "unique_closed_candles": 271
+    },
+    "BNBUSDT": {
+      "duplicate_candle_snapshots": 4,
+      "estimated_missing_one_minute_slots": 6292,
+      "first_candle_close_ms": 1794554459999,
+      "largest_observed_gap_ms": 9780000,
+      "last_candle_close_ms": 1794953819999,
+      "market_snapshot_rows": 369,
+      "unique_closed_candles": 365
+    },
+    "BTCUSDT": {
+      "duplicate_candle_snapshots": 4,
+      "estimated_missing_one_minute_slots": 6292,
+      "first_candle_close_ms": 1794554459999,
+      "largest_observed_gap_ms": 9720000,
+      "last_candle_close_ms": 1794953819999,
+      "market_snapshot_rows": 369,
+      "unique_closed_candles": 365
+    },
+    "ETHUSDT": {
+      "duplicate_candle_snapshots": 4,
+      "estimated_missing_one_minute_slots": 6292,
+      "first_candle_close_ms": 1794554459999,
+      "largest_observed_gap_ms": 9780000,
+      "last_candle_close_ms": 1794953819999,
+      "market_snapshot_rows": 369,
+      "unique_closed_candles": 365
+    },
+    "LINKUSDT": {
+      "duplicate_candle_snapshots": 0,
+      "estimated_missing_one_minute_slots": 3302,
+      "first_candle_close_ms": 1794739499999,
+      "largest_observed_gap_ms": 9780000,
+      "last_candle_close_ms": 1794953819999,
+      "market_snapshot_rows": 271,
+      "unique_closed_candles": 271
+    },
+    "SOLUSDT": {
+      "duplicate_candle_snapshots": 0,
+      "estimated_missing_one_minute_slots": 3302,
+      "first_candle_close_ms": 1794739499999,
+      "largest_observed_gap_ms": 9780000,
+      "last_candle_close_ms": 1794953819999,
+      "market_snapshot_rows": 271,
+      "unique_closed_candles": 271
+    },
+    "XRPUSDT": {
+      "duplicate_candle_snapshots": 0,
+      "estimated_missing_one_minute_slots": 3302,
+      "first_candle_close_ms": 1794739499999,
+      "largest_observed_gap_ms": 9780000,
+      "last_candle_close_ms": 1794953819999,
+      "market_snapshot_rows": 271,
+      "unique_closed_candles": 271
+    }
+  },
+  "quality": {
+    "duplicate_candle_snapshots": 12,
+    "estimated_missing_one_minute_slots": 35386,
+    "first_candle_close_ms": 1794554459999,
+    "historical_depth_available_only_at_recorded_snapshots": true,
+    "holdout_eligible": false,
+    "largest_observed_gap_ms": 9780000,
+    "last_candle_close_ms": 1794953819999,
+    "macro_complete_rows": 48,
+    "macro_timestamp_aligned_rows": 24,
+    "minute_timestamp_aligned_rows": 2453,
+    "one_minute_close_timestamp_alignment_passed": false,
+    "raw_21_hourly_close_timestamp_alignment_passed": false,
+    "raw_21_hourly_closes_persisted": false,
+    "replay_ready": false,
+    "status": "OBSERVATION_ARCHIVE_ONLY",
+    "synthetic_rows_excluded": true
+  },
+  "record_counts": {
+    "agent_decisions": 1992,
+    "market_snapshots": 2462,
+    "paper_fills": 92
+  },
+  "schema_version": 1,
+  "source": "BINANCE_PUBLIC_MARKET_DATA",
+  "symbols_present": [
+    "ADAUSDT",
+    "AVAXUSDT",
+    "BNBUSDT",
+    "BTCUSDT",
+    "ETHUSDT",
+    "LINKUSDT",
+    "SOLUSDT",
+    "XRPUSDT"
+  ]
+}
