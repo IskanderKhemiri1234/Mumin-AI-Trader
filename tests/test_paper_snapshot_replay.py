@@ -10,15 +10,16 @@ from decimal import Decimal
 import pytest
 
 from scripts.replay_paper_observations import replay_archive
+from scripts.run_paper_walk_forward import run_walk_forward
 from scripts.run_continuous_paper import PUBLIC_SOURCE, SYMBOLS, ContinuousPaperBot
 
 
-def _write_archive(tmp_path, *, future_macro_time=False):
+def _write_archive(tmp_path, *, future_macro_time=False, cycles=16, replay_ready=False):
     archive = tmp_path / "observations.jsonl.gz"
     manifest = tmp_path / "manifest.json"
     rows = []
     base_close = 1_800_000_000_000
-    for tick in range(1, 17):
+    for tick in range(1, cycles + 1):
         received = base_close + tick * 60_000 + 1_000
         close = received - 1_000
         macro_times = [base_close - 90_000_000 + index * 3_600_000 for index in range(21)]
@@ -54,7 +55,7 @@ def _write_archive(tmp_path, *, future_macro_time=False):
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     manifest.write_text(json.dumps({
         "archive_sha256": digest,
-        "quality": {"replay_ready": False},
+        "quality": {"replay_ready": replay_ready},
     }), encoding="utf-8")
     return archive, manifest
 
@@ -110,3 +111,18 @@ def test_formal_replay_refuses_unqualified_dataset(tmp_path):
         replay_archive(
             archive, manifest, tmp_path / "replay.json", require_ready=True
         )
+
+def test_walk_forward_uses_prior_30_cycles_as_entry_disabled_warmup(tmp_path):
+    archive, manifest = _write_archive(tmp_path, cycles=60, replay_ready=True)
+
+    result = run_walk_forward(
+        archive, manifest, tmp_path / "walk-forward.json", folds=1
+    )
+
+    assert result["evaluation"] == "WALK_FORWARD_OOS"
+    assert result["aggregate"]["fold_count"] == 1
+    assert result["aggregate"]["total_closed_trades"] == 0
+    assert result["tuning_performed"] is False
+    assert result["holdout_used"] is False
+    assert result["folds"][0]["evaluation_cycles"] == 30
+    assert result["folds"][0]["accounting_status"] == "PASS"
