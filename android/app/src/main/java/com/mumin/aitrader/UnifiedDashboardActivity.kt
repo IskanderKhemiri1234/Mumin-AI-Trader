@@ -33,6 +33,8 @@ class UnifiedDashboardActivity : Activity() {
     private lateinit var connectionStatus: TextView
     private val io = Executors.newSingleThreadExecutor()
     private var pendingInstall: File? = null
+    private var remoteHost: String? = null
+    private var remotePort: Int = 443
 
     companion object {
         private const val PREFS = "mumin_dashboard_connection"
@@ -74,15 +76,13 @@ class UnifiedDashboardActivity : Activity() {
             setTextColor(MUTED)
             setPadding(0, dp(3), 0, dp(8))
         })
-        root.addView(header)
-
         val connectionPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(10), dp(14), dp(10))
             setBackgroundColor(0xFF10251D.toInt())
         }
         serverAddress = EditText(this).apply {
-            hint = "https://your-mumin-service.onrender.com"
+            hint = "رابط HTTPS للخادم (اختياري حالياً)"
             setSingleLine(true)
             textSize = 13f
             setTextColor(LIGHT)
@@ -97,21 +97,36 @@ class UnifiedDashboardActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
         }
         actions.addView(Button(this).apply {
-            text = "اتصال بمركز التحكم"
+            text = "اتصال بالخادم"
             setOnClickListener { connectToDashboard() }
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         actions.addView(Button(this).apply {
             text = "تحديث التطبيق"
             setOnClickListener { checkForUpdates() }
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        actions.addView(Button(this).apply {
+            text = "العرض التجريبي المحلي"
+            setOnClickListener { loadLocalDemo() }
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         connectionPanel.addView(actions)
         connectionStatus = TextView(this).apply {
-            text = "أدخل عنوان خدمة Mumin المنشورة عبر HTTPS. لن تُحفظ مفاتيح API في التطبيق."
+            text = "الوضع الحالي: عرض تجريبي محلي دون خادم. البيانات اصطناعية وليست من Binance."
             textSize = 11f
             setTextColor(MUTED)
             setPadding(0, dp(6), 0, 0)
         }
         connectionPanel.addView(connectionStatus)
+        connectionPanel.visibility = View.GONE
+        header.addView(Button(this).apply {
+            text = "اتصال بالخادم (اختياري)"
+            setOnClickListener {
+                connectionPanel.visibility =
+                    if (connectionPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            }
+        }, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+        root.addView(header)
         root.addView(connectionPanel)
 
         webView = WebView(this).apply {
@@ -119,6 +134,8 @@ class UnifiedDashboardActivity : Activity() {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.allowFileAccess = false
+            settings.allowFileAccessFromFileURLs = false
+            settings.allowUniversalAccessFromFileURLs = false
             settings.allowContentAccess = false
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             settings.cacheMode = WebSettings.LOAD_NO_CACHE
@@ -132,19 +149,21 @@ class UnifiedDashboardActivity : Activity() {
                     view: WebView,
                     request: WebResourceRequest
                 ): Boolean {
-                    val current = Uri.parse(getSavedServerUrl())
                     val target = request.url
+                    if (target.scheme == "file") {
+                        return !target.path.orEmpty().startsWith("/android_asset/dashboard/")
+                    }
                     return target.scheme != "https" ||
-                        !target.host.equals(current.host, ignoreCase = true) ||
-                        target.port != current.port
+                        !target.host.equals(remoteHost, ignoreCase = true) ||
+                        (if (target.port == -1) 443 else target.port) != remotePort
                 }
 
                 override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
-                    connectionStatus.text = "جارٍ فتح لوحة الويب الموحدة…"
+                    connectionStatus.text = if (remoteHost == null) "جارٍ فتح العرض التجريبي المحلي…" else "جارٍ فتح لوحة الويب من الخادم…"
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
-                    connectionStatus.text = "تم تحميل لوحة التحكم من الخادم. أدخل رمز لوحة التحكم داخل الصفحة."
+                    connectionStatus.text = if (remoteHost == null) "العرض التجريبي المحلي جاهز · بيانات اصطناعية · لا اتصال بـ Binance." else "تم تحميل لوحة التحكم من الخادم. أدخل رمز لوحة التحكم داخل الصفحة."
                 }
 
                 override fun onReceivedError(
@@ -166,10 +185,8 @@ class UnifiedDashboardActivity : Activity() {
         setContentView(root)
 
         val saved = getSavedServerUrl()
-        if (saved.isNotBlank()) {
-            serverAddress.setText(saved)
-            loadUnifiedDashboard(saved)
-        }
+        if (saved.isNotBlank()) serverAddress.setText(saved)
+        loadLocalDemo()
     }
 
     private fun connectToDashboard() {
@@ -179,6 +196,8 @@ class UnifiedDashboardActivity : Activity() {
             return
         }
         getPreferences(MODE_PRIVATE).edit().putString(SERVER_KEY, normalized).apply()
+        remoteHost = Uri.parse(normalized).host
+        remotePort = Uri.parse(normalized).port.takeIf { it > 0 } ?: 443
         loadUnifiedDashboard(normalized)
     }
 
@@ -197,12 +216,34 @@ class UnifiedDashboardActivity : Activity() {
     private fun getSavedServerUrl(): String =
         getPreferences(MODE_PRIVATE).getString(SERVER_KEY, "").orEmpty()
 
+    private fun loadLocalDemo() {
+        remoteHost = null
+        remotePort = 443
+        webView.visibility = View.VISIBLE
+        connectionStatus.text = "العرض التجريبي المحلي · بيانات اصطناعية فقط · لا اتصال بخادم أو Binance."
+        runCatching {
+            assets.open("dashboard/index.html").bufferedReader(Charsets.UTF_8).use { it.readText() }
+        }.onSuccess { html ->
+            webView.loadDataWithBaseURL(
+                "https://appassets.androidplatform.net/assets/dashboard/index.html",
+                html,
+                "text/html",
+                "UTF-8",
+                null
+            )
+        }.onFailure {
+            connectionStatus.text = "تعذر تحميل لوحة العرض المحلية المضمّنة."
+        }
+    }
+
     private fun loadUnifiedDashboard(baseUrl: String) {
         val uri = Uri.parse(baseUrl)
         if (uri.scheme != "https" || uri.host.isNullOrBlank()) {
             connectionStatus.text = "اتصال مرفوض: عنوان الخادم غير آمن."
             return
         }
+        remoteHost = uri.host
+        remotePort = uri.port.takeIf { it > 0 } ?: 443
         webView.visibility = View.VISIBLE
         webView.loadUrl("$baseUrl/dashboard", mapOf("Cache-Control" to "no-cache"))
     }
