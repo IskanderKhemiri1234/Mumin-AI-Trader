@@ -65,9 +65,10 @@ def test_audit_reconstructs_fifo_pnl_fees_and_entry_exit_context(tmp_path):
     assert report["account"]["closed_round_trips"] == 1
     btc = report["per_symbol"]["BTCUSDT"]
     assert btc["gross_pnl_usdt"] == "1"
-    assert btc["entry_fees_usdt"] == "0.01"
-    assert btc["exit_fees_usdt"] == "0.011"
+    assert btc["closed_round_trip_entry_fees_usdt"] == "0.01"
+    assert btc["closed_round_trip_exit_fees_usdt"] == "0.011"
     assert btc["net_pnl_usdt"] == "0.979"
+    assert btc["fill_total_fees_usdt"] == "0.021"
     assert btc["entry_reason_counts"] == {"strict consensus": 1}
     assert btc["exit_signal_context_counts"] == {"HOLD": 1}
     trip = report["round_trips"][0]
