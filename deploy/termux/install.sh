@@ -12,7 +12,6 @@ fi
 pkg update -y
 pkg install -y python git termux-services
 cd "$ROOT"
-python -m pip install --upgrade pip
 python -m pip install -e .
 if [ ! -f "$ROOT/.env" ]; then
   cp .env.example .env
