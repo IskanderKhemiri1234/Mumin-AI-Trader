@@ -97,3 +97,28 @@ def test_dashboard_reports_fifo_audit_entry_fee_and_real_worker_state(monkeypatc
     assert payload["engine_status"] == "OFFLINE"
     assert payload["paper_worker"]["worker_status"] == "offline"
     assert payload["control_plane"]["mainnet_order_submission"] == "BLOCKED"
+
+
+
+def test_real_continuous_synthetic_run_reconciles_all_ledger_totals(tmp_path):
+    database = tmp_path / "forty-cycle-ledger.sqlite3"
+    bot = ContinuousPaperBot(str(database), initial_cash=Decimal("70.00"))
+    for _ in range(40):
+        bot.step()
+
+    connection = sqlite3.connect(database)
+    connection.row_factory = sqlite3.Row
+    try:
+        result = reconcile_paper_ledger(connection)
+    finally:
+        connection.close()
+
+    assert result["status"] == "PASS"
+    assert all(value is True for value in result["checks"].values())
+    assert result["checks"]["fills_match_fifo"] is True
+    assert result["checks"]["cash_matches_fills"] is True
+    assert result["checks"]["fees_match_fills"] is True
+    assert result["checks"]["realized_pnl_matches_fifo"] is True
+    assert result["checks"]["open_positions_match_fifo"] is True
+    assert result["checks"]["equity_identity_matches"] is True
+    assert result["market_data"]
