@@ -1312,3 +1312,99 @@ async def test_opoco_submission_uses_single_server_side_order_list_and_three_chi
         assert saved["below_order_id"] == "8804"
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_opoco_recovery_queries_parent_and_all_three_children_after_restart(tmp_path) -> None:
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/orderList":
+            return httpx.Response(200, json={
+                "orderListId": 8801,
+                "listClientOrderId": "mumin-opoco-recovery",
+                "listOrderStatus": "EXECUTING",
+                "orders": [
+                    {"symbol": "BTCUSDT", "orderId": 8802, "clientOrderId": "mumin-opoco-working"},
+                    {"symbol": "BTCUSDT", "orderId": 8803, "clientOrderId": "mumin-opoco-above"},
+                    {"symbol": "BTCUSDT", "orderId": 8804, "clientOrderId": "mumin-opoco-below"},
+                ],
+            })
+        if request.url.path == "/api/v3/order":
+            client_id = request.url.params["origClientOrderId"]
+            reports = {
+                "mumin-opoco-working": {
+                    "symbol": "BTCUSDT", "orderId": 8802, "clientOrderId": client_id,
+                    "type": "LIMIT", "side": "BUY", "status": "FILLED",
+                    "executedQty": "0.00010", "origQty": "0.00010",
+                },
+                "mumin-opoco-above": {
+                    "symbol": "BTCUSDT", "orderId": 8803, "clientOrderId": client_id,
+                    "type": "LIMIT_MAKER", "side": "SELL", "status": "NEW",
+                    "executedQty": "0", "origQty": "0.00010",
+                },
+                "mumin-opoco-below": {
+                    "symbol": "BTCUSDT", "orderId": 8804, "clientOrderId": client_id,
+                    "type": "STOP_LOSS_LIMIT", "side": "SELL", "status": "NEW",
+                    "executedQty": "0", "origQty": "0.00010",
+                },
+            }
+            return httpx.Response(200, json=reports[client_id])
+        if request.url.path == "/api/v3/myTrades":
+            return httpx.Response(200, json=[])
+        return httpx.Response(404, json={"code": -2013, "msg": "Not found."})
+
+    store = SQLiteOrderStore(str(tmp_path / "opoco-recovery.db"))
+    client = BinanceSpotTestnetExecution(
+        settings(), store, transport=httpx.MockTransport(handler),
+    )
+    request_record = {
+        "symbol": "BTCUSDT",
+        "side": "BUY",
+        "quantity": "0.00010",
+        "listClientOrderId": "mumin-opoco-recovery",
+        "workingClientOrderId": "mumin-opoco-working",
+        "pendingAboveClientOrderId": "mumin-opoco-above",
+        "pendingBelowClientOrderId": "mumin-opoco-below",
+    }
+    try:
+        store.register(request_record)
+        assert store.claim("mumin-opoco-recovery") is True
+        store.update(
+            "mumin-opoco-recovery",
+            state="UNKNOWN",
+            response={
+                "orderListId": 8801,
+                "orders": [
+                    {"orderId": 8802, "clientOrderId": "mumin-opoco-working"},
+                    {"orderId": 8803, "clientOrderId": "mumin-opoco-above"},
+                    {"orderId": 8804, "clientOrderId": "mumin-opoco-below"},
+                ],
+            },
+        )
+
+        recovered = await client.opoco.get_order_list(
+            symbol="BTCUSDT",
+            list_client_order_id="mumin-opoco-recovery",
+        )
+
+        assert recovered is not None
+        assert client.opoco._state(recovered) == "PROTECTION_ARMED"
+        list_queries = [
+            request for request in seen
+            if request.url.path == "/api/v3/orderList" and request.method == "GET"
+        ]
+        assert len(list_queries) == 1
+        assert list_queries[0].url.params.get("origClientOrderId") == "mumin-opoco-recovery"
+        assert list_queries[0].url.params.get("symbol") is None
+        assert len([
+            request for request in seen
+            if request.url.path == "/api/v3/order" and request.method == "GET"
+        ]) == 3
+        saved = client.oco.store.get("mumin-opoco-recovery")
+        assert saved["state"] == "PROTECTION_ARMED"
+    finally:
+        await client.close()
