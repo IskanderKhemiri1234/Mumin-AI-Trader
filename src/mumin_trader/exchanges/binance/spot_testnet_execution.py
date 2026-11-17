@@ -387,8 +387,9 @@ class BinanceSpotTestnetExecution:
                 )
 
         equity = free_quote + locked_quote + marked_assets
+        risk_equity = min(equity, self.settings.MAX_CAPITAL_ALLOCATION_USD)
         risk_reason = self.store.update_risk_state(
-            equity=str(equity),
+            equity=str(risk_equity),
             trading_day=datetime.now(timezone.utc).date().isoformat(),
             max_daily_loss_percent=str(self.settings.MAX_DAILY_LOSS_PERCENT),
             max_drawdown_percent=str(self.settings.MAX_DRAWDOWN_PERCENT),
@@ -721,8 +722,9 @@ class BinanceSpotTestnetExecution:
                         * await self._ticker_price(f"{bnb_asset}{quote_asset}")
                     )
             account_equity = quote_free + quote_locked + marked_assets
+            risk_equity = min(account_equity, self.settings.MAX_CAPITAL_ALLOCATION_USD)
             risk_reason = self.store.update_risk_state(
-                equity=str(account_equity),
+                equity=str(risk_equity),
                 trading_day=datetime.now(timezone.utc).date().isoformat(),
                 max_daily_loss_percent=str(self.settings.MAX_DAILY_LOSS_PERCENT),
                 max_drawdown_percent=str(self.settings.MAX_DRAWDOWN_PERCENT),
