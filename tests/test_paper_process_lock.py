@@ -2,28 +2,20 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import time
 from pathlib import Path
-
-import pytest
 
 from mumin_trader.execution.process_lock import paper_process_lock
 
 
-def _child_code(database: Path, role: str, sleep_seconds: float = 0) -> str:
-    return (
-        "import sys,time; "
-        "from mumin_trader.execution.process_lock import paper_process_lock; "
-        f"lock=paper_process_lock({str(database)!r},{role!r}); "
-        "try_acquire=True; "
-        "try:\n"
-        " lock.acquire()\n"
-        "except RuntimeError:\n"
-        " print('BLOCKED',flush=True); sys.exit(0)\n"
-        "print('ACQUIRED',flush=True); "
-        f"time.sleep({sleep_seconds!r}); "
-        "lock.release()"
-    )
+def _child_code(database: Path, role: str) -> str:
+    return f"""
+from mumin_trader.execution.process_lock import paper_process_lock
+try:
+    with paper_process_lock({str(database)!r}, {role!r}):
+        print("ACQUIRED", flush=True)
+except RuntimeError:
+    print("BLOCKED", flush=True)
+"""
 
 
 def test_second_process_cannot_acquire_same_role_lock(tmp_path: Path) -> None:
@@ -48,12 +40,13 @@ def test_supervisor_and_worker_roles_have_independent_locks(tmp_path: Path) -> N
 
 def test_kernel_releases_lock_after_process_crash(tmp_path: Path) -> None:
     database = tmp_path / "paper.db"
-    code = (
-        "import sys,time; "
-        "from mumin_trader.execution.process_lock import paper_process_lock; "
-        f"lock=paper_process_lock({str(database)!r},'worker').acquire(); "
-        "print('READY',flush=True); time.sleep(30)"
-    )
+    code = f"""
+import time
+from mumin_trader.execution.process_lock import paper_process_lock
+lock = paper_process_lock({str(database)!r}, "worker").acquire()
+print("READY", flush=True)
+time.sleep(30)
+"""
     child = subprocess.Popen(
         [sys.executable, "-c", code],
         stdout=subprocess.PIPE,
