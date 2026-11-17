@@ -10,6 +10,7 @@ from mumin_trader.exchanges.binance.spot_testnet_execution import (
 )
 from mumin_trader.exchanges.binance.spot_testnet_oco import (
     SQLiteOCOOrderStore,
+    validate_fixed_exit_risk,
     validate_oco_leg_notionals,
 )
 
@@ -122,6 +123,7 @@ class BinanceSpotTestnetOPOCO:
             )
         if stop_limit > stop:
             raise SpotExecutionError("SELL stop-limit price must not exceed its stop trigger.")
+        validate_fixed_exit_risk(working, take_profit, stop)
 
         quote_notional = qty * working
         if (
