@@ -30,6 +30,7 @@ class PublicMarketSnapshot:
     bid_depth_qty: Decimal
     ask_depth_qty: Decimal
     macro_hourly_closes: tuple[Decimal, ...]
+    macro_hourly_close_times_ms: tuple[int, ...]
     source: str = "BINANCE_PUBLIC_MARKET_DATA"
 
 
@@ -116,6 +117,7 @@ class PublicMarketData:
             bid_depth_qty=bid_depth_qty,
             ask_depth_qty=ask_depth_qty,
             macro_hourly_closes=macro_hourly_closes,
+            macro_hourly_close_times_ms=tuple(int(row[6]) for row in closed_hourly[-21:]),
         )
 
     async def snapshots(self, symbols: tuple[str, ...] = tuple(sorted(ALLOWED_SYMBOLS))) -> tuple[dict[str, PublicMarketSnapshot], dict[str, str]]:
