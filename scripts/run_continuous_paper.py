@@ -453,10 +453,14 @@ class ContinuousPaperBot:
         received_at_ms: int | None = None,
         market_features: dict[str, dict[str, Decimal]] | None = None,
         allow_new_entries: bool = True,
+        event_time: datetime | None = None,
     ) -> TickResult:
         if source not in {SYNTHETIC_SOURCE, PUBLIC_SOURCE}:
             raise ValueError("Unknown market data source.")
-        now = datetime.now(timezone.utc)
+        now = event_time or datetime.now(timezone.utc)
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("event_time must be timezone-aware.")
+        now = now.astimezone(timezone.utc)
         timestamp = now.isoformat()
         received = int(received_at_ms or now.timestamp() * 1000)
         if prices is None:

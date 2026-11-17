@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -48,6 +49,27 @@ def test_continuous_paper_loop_persists_multi_symbol_portfolio(tmp_path):
     assert report["cash"] >= 0
     assert reopened.report()["tick"] == 40
     assert report["fees"] >= 0
+
+
+def test_paper_step_uses_explicit_timezone_aware_event_time(tmp_path):
+    database = tmp_path / "event-time.sqlite3"
+    bot = ContinuousPaperBot(str(database), initial_cash=Decimal("70.00"))
+    event_time = datetime(2025, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+
+    bot.step({"BTCUSDT": Decimal("100")}, event_time=event_time)
+
+    with sqlite3.connect(database) as db:
+        stored = db.execute("SELECT created_at FROM bot_equity WHERE tick=1").fetchone()[0]
+    assert stored == event_time.isoformat()
+
+
+def test_paper_step_rejects_naive_event_time(tmp_path):
+    bot = ContinuousPaperBot(str(tmp_path / "naive.sqlite3"), initial_cash=Decimal("70.00"))
+    with pytest.raises(ValueError, match="timezone-aware"):
+        bot.step(
+            {"BTCUSDT": Decimal("100")},
+            event_time=datetime(2025, 1, 2, 3, 4, 5),
+        )
 
 
 def test_synthetic_prices_are_repeatable_and_symbol_specific():
