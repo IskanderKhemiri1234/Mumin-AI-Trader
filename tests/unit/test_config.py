@@ -14,6 +14,8 @@ def test_safe_defaults(monkeypatch):
     assert Settings.model_fields["WATCHLIST"].default == (
         "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,AVAXUSDT,LINKUSDT"
     )
+    assert settings.rest_base_url == "https://testnet.binance.vision"
+    assert settings.websocket_base_url == "wss://stream.testnet.binance.vision/ws"
 
 
 def test_mainnet_is_blocked_without_explicit_flags():
@@ -21,6 +23,39 @@ def test_mainnet_is_blocked_without_explicit_flags():
         Settings(_env_file=None, TRADING_ENV="MAINNET")
 
 
+def test_mainnet_is_hard_blocked_even_if_all_opt_in_flags_are_set():
+    with pytest.raises(ValidationError, match="MAINNET is disabled"):
+        Settings(
+            _env_file=None,
+            TRADING_ENV="MAINNET",
+            TRADING_MODE="LIVE",
+            ALLOW_MAINNET=True,
+            LIVE_TRADING_ENABLED=True,
+            MAINNET_CONFIRMATION="I_UNDERSTAND_LIVE_RISK",
+            MAINNET_LEGAL_ELIGIBILITY_CONFIRMED=True,
+            BINANCE_API_KEY="test-key",
+            BINANCE_API_SECRET="test-secret",
+        )
+
+
+def test_endpoint_properties_fail_closed_if_model_validation_is_bypassed():
+    unvalidated = Settings.model_construct(TRADING_ENV=TradingEnvironment.MAINNET)
+    with pytest.raises(ValueError, match="REST access is hard-blocked"):
+        _ = unvalidated.rest_base_url
+    with pytest.raises(ValueError, match="WebSocket access is hard-blocked"):
+        _ = unvalidated.websocket_base_url
+
+
 def test_testnet_rejects_live_execution():
     with pytest.raises(ValidationError):
         Settings(_env_file=None, LIVE_TRADING_ENABLED=True)
+
+
+def test_testnet_execution_requires_both_explicit_gates():
+    with pytest.raises(ValidationError, match="requires the order preflight gate"):
+        Settings(
+            _env_file=None,
+            TRADING_MODE=TradingMode.TESTNET,
+            TESTNET_SPOT_EXECUTION_ENABLED=True,
+            TESTNET_ORDER_PREFLIGHT_ENABLED=False,
+        )

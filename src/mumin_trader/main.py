@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import hmac
+from contextlib import asynccontextmanager
 import os
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from config.config import get_settings
+from mumin_trader.exchanges.binance.market_stream_service import MarketStreamService, WATCH_SYMBOLS
 
 PROJECT_ROOT = (
     Path("/app")
@@ -20,10 +24,22 @@ DASHBOARD_FILE = PROJECT_ROOT / "dashboard" / "index.html"
 DEFAULT_PAPER_DB = PROJECT_ROOT / "data" / "mumin_public_paper.db"
 
 
+_market_stream = MarketStreamService()
+
+
+@asynccontextmanager
+async def app_lifespan(_app: FastAPI):
+    try:
+        yield
+    finally:
+        await _market_stream.close()
+
+
 app = FastAPI(
     title="Mumin AI Trader",
     version="0.2.0",
     description="Private, read-only trading operations dashboard and safety-first Spot research service.",
+    lifespan=app_lifespan,
 )
 
 
@@ -31,6 +47,175 @@ def _dashboard_database() -> Path:
     configured = os.getenv("MUMIN_PAPER_DB_PATH", str(DEFAULT_PAPER_DB))
     path = Path(configured)
     return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+
+
+class PaperControlRequest(BaseModel):
+    action: Literal["pause", "resume"]
+
+
+def _dashboard_access_token(x_dashboard_token: str | None) -> str:
+    access_token = os.getenv("DASHBOARD_ACCESS_TOKEN", "")
+    if not access_token:
+        raise HTTPException(
+            status_code=503,
+            detail="Dashboard access is not configured. Set DASHBOARD_ACCESS_TOKEN on the server.",
+        )
+    if not x_dashboard_token or not hmac.compare_digest(x_dashboard_token, access_token):
+        raise HTTPException(status_code=401, detail="Dashboard access token is invalid.")
+    return access_token
+
+
+def _paper_worker_snapshot() -> dict[str, Any]:
+    database = _dashboard_database()
+    if not database.is_file():
+        return {
+            "status": "offline",
+            "supervisor_status": "offline",
+            "worker_status": "offline",
+            "desired_state": "UNKNOWN",
+            "heartbeat_at": None,
+            "supervisor_heartbeat_at": None,
+            "audit": [],
+        }
+    connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=3)
+    connection.row_factory = sqlite3.Row
+    try:
+        table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_runtime_control'"
+        ).fetchone()
+        if table is None:
+            return {
+                "status": "unmanaged",
+                "supervisor_status": "unmanaged",
+                "worker_status": "unmanaged",
+                "desired_state": "UNKNOWN",
+                "heartbeat_at": None,
+                "supervisor_heartbeat_at": None,
+                "audit": [],
+            }
+        columns = {
+            row["name"] for row in connection.execute(
+                "PRAGMA table_info(bot_runtime_control)"
+            ).fetchall()
+        }
+        selected = [
+            name for name in (
+                "desired_state",
+                "heartbeat_at",
+                "worker_instance_id",
+                "supervisor_heartbeat_at",
+                "supervisor_instance_id",
+                "worker_pid",
+            ) if name in columns
+        ]
+        row = connection.execute(
+            "SELECT " + ", ".join(selected) + " FROM bot_runtime_control WHERE id=1"
+        ).fetchone()
+        if row is None:
+            return {
+                "status": "unmanaged",
+                "supervisor_status": "unmanaged",
+                "worker_status": "unmanaged",
+                "desired_state": "UNKNOWN",
+                "heartbeat_at": None,
+                "supervisor_heartbeat_at": None,
+                "audit": [],
+            }
+
+        def heartbeat_age(value: str | None) -> float | None:
+            if not value:
+                return None
+            try:
+                stamp = datetime.fromisoformat(value)
+                return (datetime.now(timezone.utc) - stamp).total_seconds()
+            except (TypeError, ValueError):
+                return None
+
+        worker_heartbeat = row["heartbeat_at"] if "heartbeat_at" in columns else None
+        supervisor_heartbeat = (
+            row["supervisor_heartbeat_at"]
+            if "supervisor_heartbeat_at" in columns else None
+        )
+        worker_age = heartbeat_age(worker_heartbeat)
+        supervisor_age = heartbeat_age(supervisor_heartbeat)
+        worker_online = worker_age is not None and -5 <= worker_age <= 90
+        supervisor_online = supervisor_age is not None and -5 <= supervisor_age <= 90
+        desired = str(row["desired_state"])
+        if desired == "PAUSED":
+            worker_status = "paused" if supervisor_online else "offline"
+        elif worker_online:
+            worker_status = "running"
+        elif supervisor_online:
+            worker_status = "starting"
+        else:
+            worker_status = "offline"
+
+        audit_table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_runtime_audit'"
+        ).fetchone()
+        audit = []
+        if audit_table is not None:
+            audit = [
+                dict(item)
+                for item in connection.execute(
+                    """SELECT event_type, actor, desired_state, detail, created_at
+                       FROM bot_runtime_audit ORDER BY audit_id DESC LIMIT 20"""
+                ).fetchall()
+            ]
+        return {
+            "status": "online" if supervisor_online or worker_online else "offline",
+            "supervisor_status": "online" if supervisor_online else "offline",
+            "worker_status": worker_status,
+            "desired_state": desired,
+            "heartbeat_at": worker_heartbeat,
+            "heartbeat_age_seconds": worker_age,
+            "supervisor_heartbeat_at": supervisor_heartbeat,
+            "supervisor_heartbeat_age_seconds": supervisor_age,
+            "supervisor_instance_id": (
+                row["supervisor_instance_id"]
+                if "supervisor_instance_id" in columns else None
+            ),
+            "worker_instance_id": (
+                row["worker_instance_id"] if "worker_instance_id" in columns else None
+            ),
+            "worker_pid": row["worker_pid"] if "worker_pid" in columns else None,
+            "audit": audit,
+        }
+    finally:
+        connection.close()
+
+
+def _strategy_settings_snapshot() -> dict[str, Any]:
+    return {
+        "symbols": list(WATCH_SYMBOLS),
+        "strategy": {
+            "profile": "MUMIN_3_OF_3_SWARM",
+            "entry_consensus": "3/3",
+            "required_agents": [
+                "Liquidity Sweep",
+                "Depth Imbalance",
+                "Micro-Alpha Filter",
+            ],
+            "direction": "LONG_ONLY",
+        },
+        "risk_limits": {
+            "initial_capital_usdt": "70.00",
+            "max_trade_usdt": "5.00",
+            "reserve_percent": "20.00",
+            "max_open_positions": 2,
+            "max_daily_loss_percent": "2.00",
+            "max_drawdown_percent": "5.00",
+            "stop_loss_percent": "0.50",
+            "take_profit_percent": "1.25",
+            "max_spread_bps": "8.00",
+        },
+        "risk_limits_locked": True,
+        "approval_required_for_changes": True,
+        "settings_mutation_enabled": False,
+        "execution_authorized": False,
+    }
 
 
 def _read_dashboard_snapshot() -> dict[str, Any]:
@@ -207,16 +392,141 @@ async def dashboard() -> FileResponse:
     return FileResponse(DASHBOARD_FILE, media_type="text/html")
 
 
+@app.get("/api/market")
+async def market_snapshot(
+    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+) -> dict[str, Any]:
+    _dashboard_access_token(x_dashboard_token)
+    await _market_stream.start()
+    return await _market_stream.snapshot()
+
+
 @app.get("/api/dashboard")
 async def dashboard_snapshot(
     x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
 ) -> dict[str, Any]:
-    access_token = os.getenv("DASHBOARD_ACCESS_TOKEN", "")
-    if not access_token:
-        raise HTTPException(
-            status_code=503,
-            detail="Dashboard access is not configured. Set DASHBOARD_ACCESS_TOKEN on the server.",
+    _dashboard_access_token(x_dashboard_token)
+    snapshot = _read_dashboard_snapshot()
+    snapshot["paper_worker"] = _paper_worker_snapshot()
+    snapshot["strategy_settings"] = _strategy_settings_snapshot()
+    snapshot["control_plane"] = {
+        "read_only": True,
+        "paper_engine_control": "AUTHENTICATED_PAUSE_RESUME_ONLY",
+        "testnet_order_submission": "DISABLED",
+        "mainnet_order_submission": "BLOCKED",
+        "execution_authorized": False,
+        "available_actions": ["PAPER_PAUSE", "PAPER_RESUME"],
+    }
+    return snapshot
+
+
+@app.post("/api/paper-control")
+async def control_paper_worker(
+    request: PaperControlRequest,
+    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+) -> dict[str, Any]:
+    _dashboard_access_token(x_dashboard_token)
+    if os.getenv("TRADING_MODE", "PAPER").upper() != "PAPER":
+        raise HTTPException(status_code=409, detail="Paper controls require TRADING_MODE=PAPER.")
+    if os.getenv("TRADING_ENV", "TESTNET").upper() != "TESTNET":
+        raise HTTPException(status_code=409, detail="Paper controls require TRADING_ENV=TESTNET.")
+    if os.getenv("ALLOW_MAINNET", "false").lower() == "true" or os.getenv(
+        "LIVE_TRADING_ENABLED", "false"
+    ).lower() == "true":
+        raise HTTPException(status_code=409, detail="Paper controls refuse live-enabled environments.")
+
+    database = _dashboard_database()
+    if not database.is_file():
+        raise HTTPException(status_code=409, detail="Paper ledger is unavailable; worker is not running.")
+    connection = sqlite3.connect(database, timeout=3)
+    connection.row_factory = sqlite3.Row
+    try:
+        table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_runtime_control'"
+        ).fetchone()
+        if table is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Paper worker does not support remote pause/resume yet.",
+            )
+        columns = {
+            item["name"] for item in connection.execute(
+                "PRAGMA table_info(bot_runtime_control)"
+            ).fetchall()
+        }
+        selected = [
+            name for name in ("desired_state", "heartbeat_at", "supervisor_heartbeat_at",
+                              "worker_instance_id")
+            if name in columns
+        ]
+        row = connection.execute(
+            "SELECT " + ", ".join(selected) + " FROM bot_runtime_control WHERE id=1"
+        ).fetchone()
+        if row is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Paper worker manager does not support remote control yet.",
+            )
+
+        def heartbeat_is_live(value: str | None) -> bool:
+            if not value:
+                return False
+            try:
+                stamp = datetime.fromisoformat(value)
+                age = (datetime.now(timezone.utc) - stamp).total_seconds()
+                return -5 <= age <= 90
+            except (TypeError, ValueError):
+                return False
+
+        worker_live = (
+            heartbeat_is_live(row["heartbeat_at"])
+            if "heartbeat_at" in columns else False
         )
-    if not x_dashboard_token or not hmac.compare_digest(x_dashboard_token, access_token):
-        raise HTTPException(status_code=401, detail="Dashboard access token is invalid.")
-    return _read_dashboard_snapshot()
+        supervisor_live = (
+            heartbeat_is_live(row["supervisor_heartbeat_at"])
+            if "supervisor_heartbeat_at" in columns else False
+        )
+        if not supervisor_live and not worker_live:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Paper worker heartbeat is stale and supervisor heartbeat is stale; "
+                    "refusing to queue a control request."
+                ),
+            )
+
+        desired = "PAUSED" if request.action == "pause" else "RUNNING"
+        now = datetime.now(timezone.utc).isoformat()
+        connection.execute(
+            """UPDATE bot_runtime_control SET desired_state=?, requested_at=? WHERE id=1""",
+            (desired, now),
+        )
+        audit_table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_runtime_audit'"
+        ).fetchone()
+        if audit_table is not None:
+            connection.execute(
+                """INSERT INTO bot_runtime_audit
+                   (event_type, actor, desired_state, worker_instance_id, detail, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    "CONTROL_REQUESTED",
+                    "dashboard_authenticated",
+                    desired,
+                    row["worker_instance_id"] if "worker_instance_id" in columns else None,
+                    f"action={request.action}",
+                    now,
+                ),
+            )
+        connection.commit()
+        return {
+            "status": "accepted",
+            "desired_state": desired,
+            "message": (
+                "Persistent supervisor will start or stop the Paper worker "
+                "at its next process-control interval."
+            ),
+            "execution_authorized": False,
+        }
+    finally:
+        connection.close()

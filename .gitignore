@@ -11,3 +11,6 @@ data/*.db
 data/*.sqlite3
 *.pem
 *.key
+
+# Private Binance Spot Testnet evidence and account/order exports
+/artifacts/binance-spot-testnet-evidence/

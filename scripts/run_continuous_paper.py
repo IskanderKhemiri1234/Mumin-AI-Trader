@@ -43,6 +43,16 @@ MAX_DRAWDOWN_PERCENT = Decimal(os.getenv("MAX_DRAWDOWN_PERCENT", "5.00"))
 # weaken the agreed risk policy.
 if INITIAL_CASH != Decimal("70.00"):
     raise RuntimeError("Paper engine requires the configured 70.00 USDT starting capital.")
+if MAX_TRADE != Decimal("5.00"):
+    raise RuntimeError("Paper maximum trade allocation is fixed at 5.00 USDT.")
+if RESERVE_PERCENT != Decimal("20"):
+    raise RuntimeError("Paper capital reserve is fixed at 20%.")
+if MAX_CAPITAL != Decimal("70.00"):
+    raise RuntimeError("Paper maximum capital allocation is fixed at 70.00 USDT.")
+if MAX_OPEN_POSITIONS != 2:
+    raise RuntimeError("Paper maximum open positions is fixed at two.")
+if MAX_DRAWDOWN_PERCENT != Decimal("5.00"):
+    raise RuntimeError("Paper maximum drawdown limit is fixed at 5.00%.")
 if STOP_LOSS_PERCENT != Decimal("0.50"):
     raise RuntimeError("Paper maximum stop-loss cap is fixed at 0.50%.")
 if TAKE_PROFIT_PERCENT != Decimal("1.25"):
@@ -247,6 +257,47 @@ class ContinuousPaperBot:
             for name in ("candle_open", "candle_high", "candle_low", "candle_volume", "bid_depth_qty", "ask_depth_qty"):
                 if name not in market_columns:
                     db.execute(f"ALTER TABLE bot_market_ticks ADD COLUMN {name} TEXT NOT NULL DEFAULT '0'")
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS bot_runtime_control (
+                    id INTEGER PRIMARY KEY CHECK(id=1),
+                    desired_state TEXT NOT NULL CHECK(desired_state IN ('RUNNING','PAUSED')),
+                    requested_at TEXT NOT NULL,
+                    heartbeat_at TEXT,
+                    worker_instance_id TEXT,
+                    supervisor_heartbeat_at TEXT,
+                    supervisor_instance_id TEXT,
+                    worker_pid INTEGER
+                )"""
+            )
+            runtime_columns = {
+                row[1] for row in db.execute("PRAGMA table_info(bot_runtime_control)")
+            }
+            runtime_migrations = {
+                "supervisor_heartbeat_at": "TEXT",
+                "supervisor_instance_id": "TEXT",
+                "worker_pid": "INTEGER",
+            }
+            for name, definition in runtime_migrations.items():
+                if name not in runtime_columns:
+                    db.execute(
+                        f"ALTER TABLE bot_runtime_control ADD COLUMN {name} {definition}"
+                    )
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS bot_runtime_audit (
+                    audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_type TEXT NOT NULL,
+                    actor TEXT NOT NULL,
+                    desired_state TEXT,
+                    worker_instance_id TEXT,
+                    detail TEXT,
+                    created_at TEXT NOT NULL
+                )"""
+            )
+            db.execute(
+                """INSERT OR IGNORE INTO bot_runtime_control
+                   (id, desired_state, requested_at) VALUES (1, 'RUNNING', ?)""",
+                (datetime.now(timezone.utc).isoformat(),),
+            )
             row = db.execute("SELECT initial_cash FROM bot_account WHERE id=1").fetchone()
             if row is None:
                 db.execute(
@@ -260,6 +311,57 @@ class ContinuousPaperBot:
                 raise RuntimeError(
                     "Configured initial capital differs from stored ledger; refusing reset."
                 )
+
+    def heartbeat(self, worker_id: str) -> str:
+        """Refresh the Paper worker heartbeat and return its durable desired state."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT desired_state FROM bot_runtime_control WHERE id=1"
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("Paper runtime control row is missing.")
+            db.execute(
+                """UPDATE bot_runtime_control
+                   SET worker_instance_id=?, heartbeat_at=? WHERE id=1""",
+                (worker_id, now),
+            )
+            return str(row["desired_state"])
+
+    def supervisor_heartbeat(self, supervisor_id: str, worker_pid: int | None) -> None:
+        """Refresh the always-on supervisor heartbeat independently of its child worker."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as db:
+            db.execute(
+                """UPDATE bot_runtime_control
+                   SET supervisor_instance_id=?, supervisor_heartbeat_at=?, worker_pid=?
+                   WHERE id=1""",
+                (supervisor_id, now, worker_pid),
+            )
+
+    def record_runtime_audit(
+        self,
+        event_type: str,
+        actor: str,
+        desired_state: str | None = None,
+        worker_instance_id: str | None = None,
+        detail: str | None = None,
+    ) -> None:
+        """Append a durable, credential-free worker lifecycle audit event."""
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO bot_runtime_audit
+                   (event_type, actor, desired_state, worker_instance_id, detail, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    event_type,
+                    actor,
+                    desired_state,
+                    worker_instance_id,
+                    detail,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
 
     def finalize_database_batch(self) -> dict[str, object]:
         """Verify SQLite integrity and flush the WAL after a completed cycle batch."""
@@ -756,7 +858,17 @@ async def run_bot(
     last_report = loop.time()
     completed = 0
     try:
+        worker_id = f"paper-{os.getpid()}"
         while not stop.is_set() and (cycles is None or completed < cycles):
+            desired_state = bot.heartbeat(worker_id)
+            while desired_state == "PAUSED" and not stop.is_set():
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    pass
+                desired_state = bot.heartbeat(worker_id)
+            if stop.is_set():
+                break
             completed += 1
             if feed is None:
                 result = bot.step()

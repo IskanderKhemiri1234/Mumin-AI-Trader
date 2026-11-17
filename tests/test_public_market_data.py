@@ -92,3 +92,70 @@ def test_allowlist_contains_all_eight_approved_spot_pairs():
         "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
         "XRPUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT",
     }
+
+
+
+@pytest.mark.asyncio
+async def test_public_market_data_rejects_stale_one_minute_candle():
+    server_time = 1_700_000_000_000
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/ticker/bookTicker"):
+            return httpx.Response(200, json={"symbol": "BTCUSDT", "bidPrice": "60000", "askPrice": "60001"})
+        if path.endswith("/klines"):
+            if request.url.params.get("interval") == "1h":
+                return httpx.Response(200, json=[
+                    [index, "60000", "60100", "59900", "60000", "10", server_time - 1000]
+                    for index in range(21)
+                ])
+            return httpx.Response(200, json=[
+                [1, "60000", "60100", "59900", "60000", "10", server_time - 181_000]
+            ])
+        if path.endswith("/depth"):
+            return httpx.Response(200, json={"bids": [["60000", "1"]], "asks": [["60001", "1"]]})
+        if path.endswith("/time"):
+            return httpx.Response(200, json={"serverTime": server_time})
+        return httpx.Response(404)
+
+    client = httpx.AsyncClient(base_url=BASE_URL, transport=httpx.MockTransport(handler))
+    feed = PublicMarketData(client=client)
+    try:
+        with pytest.raises(ValueError, match="stale"):
+            await feed.snapshot("BTCUSDT")
+    finally:
+        await feed.close()
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_public_market_data_rejects_stale_hourly_macro_candles():
+    server_time = 1_700_000_000_000
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/ticker/bookTicker"):
+            return httpx.Response(200, json={"symbol": "BTCUSDT", "bidPrice": "60000", "askPrice": "60001"})
+        if path.endswith("/klines"):
+            if request.url.params.get("interval") == "1h":
+                return httpx.Response(200, json=[
+                    [index, "60000", "60100", "59900", "60000", "10", server_time - 7_201_000]
+                    for index in range(21)
+                ])
+            return httpx.Response(200, json=[
+                [1, "60000", "60100", "59900", "60000", "10", server_time - 1000]
+            ])
+        if path.endswith("/depth"):
+            return httpx.Response(200, json={"bids": [["60000", "1"]], "asks": [["60001", "1"]]})
+        if path.endswith("/time"):
+            return httpx.Response(200, json={"serverTime": server_time})
+        return httpx.Response(404)
+
+    client = httpx.AsyncClient(base_url=BASE_URL, transport=httpx.MockTransport(handler))
+    feed = PublicMarketData(client=client)
+    try:
+        with pytest.raises(ValueError, match="Hourly macro-trend data is stale"):
+            await feed.snapshot("BTCUSDT")
+    finally:
+        await feed.close()
+        await client.aclose()

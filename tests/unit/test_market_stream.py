@@ -1,6 +1,7 @@
 import json
 from decimal import Decimal
 
+from mumin_trader.exchanges.binance.market_stream_service import MarketStreamService
 from mumin_trader.exchanges.binance.websocket_client import BinanceWebSocketClient
 from mumin_trader.market_scanner.scanner import MarketScanner
 
@@ -22,3 +23,13 @@ def test_scanner_rejects_wide_spread():
     scanner = MarketScanner(min_quote_volume=Decimal("1"), max_spread_bps=Decimal("2"))
     scanner.ingest({"s": "ETHUSDT", "q": "100000", "P": "0.2"})
     assert scanner.ingest({"s": "ETHUSDT", "b": "100", "a": "101"}) is None
+
+
+
+async def test_shared_market_stream_starts_in_connecting_state_without_exchange_data():
+    service = MarketStreamService()
+    snapshot = await service.snapshot()
+
+    assert snapshot["status"] == "connecting"
+    assert snapshot["source"] == "BINANCE_PUBLIC_SERVER_STREAM"
+    assert snapshot["assets"] == []

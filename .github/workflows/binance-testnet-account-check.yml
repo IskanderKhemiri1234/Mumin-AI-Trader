@@ -19,6 +19,8 @@ jobs:
       TRADING_MODE: PAPER
       ALLOW_MAINNET: "false"
       LIVE_TRADING_ENABLED: "false"
+      TESTNET_ORDER_PREFLIGHT_ENABLED: "false"
+      TESTNET_SPOT_EXECUTION_ENABLED: "false"
       INITIAL_CAPITAL_USD: "70.00"
       MAX_CAPITAL_ALLOCATION_USD: "70.00"
       BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
@@ -35,5 +37,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install .
-      - name: Verify read-only Testnet account access
+      - name: Verify read-only Testnet account access (451 becomes warning-only skip)
+        id: account_check
         run: python scripts/check_binance_testnet_account.py
