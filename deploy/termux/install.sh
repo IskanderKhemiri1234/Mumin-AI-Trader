@@ -23,7 +23,7 @@ if [ ! -f "$ROOT/.env" ]; then
 fi
 python scripts/validate_termux_runtime.py
 mkdir -p "$SERVICE_ROOT" "$HOME/.mumin-ai-trader/logs" "$BOOT_DIR"
-for service in mumin-api mumin-paper-engine; do
+for service in mumin-api mumin-paper-engine mumin-paper-backup; do
   mkdir -p "$SERVICE_ROOT/$service"
   cp "$ROOT/deploy/termux/services/$service/run" "$SERVICE_ROOT/$service/run"
   chmod 700 "$SERVICE_ROOT/$service/run"
