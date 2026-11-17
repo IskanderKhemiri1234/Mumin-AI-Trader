@@ -442,7 +442,7 @@ async def health() -> dict[str, str]:
         "status": "ok",
         "environment": settings.TRADING_ENV.value,
         "mode": settings.TRADING_MODE.value,
-        "execution": "disabled_in_foundation",
+        "execution": "PAPER_ONLY; TESTNET_DISABLED; MAINNET_BLOCKED",
     }
 
 
