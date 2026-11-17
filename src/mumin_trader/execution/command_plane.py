@@ -247,6 +247,28 @@ def submit_paper_order(
             fill_price = price * (Decimal(1) + SLIPPAGE if side == "BUY" else Decimal(1) - SLIPPAGE)
             cash = Decimal(account["cash"])
             fee_rate = FEE_RATE
+            current_positions = db.execute(
+                "SELECT symbol,quantity FROM bot_positions"
+            ).fetchall()
+            marked_equity = cash
+            for current_position in current_positions:
+                position_mark = db.execute(
+                    "SELECT price FROM bot_market_ticks WHERE symbol=? ORDER BY id DESC LIMIT 1",
+                    (current_position["symbol"],),
+                ).fetchone()
+                if position_mark is None:
+                    raise CommandRejected(
+                        f"No current mark exists for open position {current_position['symbol']}."
+                    )
+                marked_equity += (
+                    Decimal(current_position["quantity"]) * Decimal(position_mark["price"])
+                )
+            daily_start = Decimal(account["daily_start_equity"])
+            high_water = Decimal(account["high_watermark"])
+            if marked_equity <= daily_start * Decimal("0.98"):
+                raise CommandRejected("Daily loss limit reached; new Paper orders are blocked.")
+            if high_water > ZERO and marked_equity <= high_water * Decimal("0.95"):
+                raise CommandRejected("Maximum drawdown limit reached; new Paper orders are blocked.")
 
             if side == "BUY":
                 open_count = int(db.execute("SELECT COUNT(*) FROM bot_positions").fetchone()[0])
