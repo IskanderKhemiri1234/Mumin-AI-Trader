@@ -199,6 +199,7 @@ class ContinuousPaperBot:
                     candle_close_time_ms INTEGER,
                     received_at_ms INTEGER NOT NULL,
                     macro_hourly_closes_json TEXT NOT NULL DEFAULT '[]',
+                    macro_hourly_close_times_json TEXT NOT NULL DEFAULT '[]',
                     UNIQUE(tick, symbol)
                 );
                 CREATE INDEX IF NOT EXISTS idx_market_ticks_symbol_source
@@ -268,6 +269,8 @@ class ContinuousPaperBot:
                     db.execute(f"ALTER TABLE bot_market_ticks ADD COLUMN {name} TEXT NOT NULL DEFAULT '0'")
             if "macro_hourly_closes_json" not in market_columns:
                 db.execute("ALTER TABLE bot_market_ticks ADD COLUMN macro_hourly_closes_json TEXT NOT NULL DEFAULT '[]'")
+            if "macro_hourly_close_times_json" not in market_columns:
+                db.execute("ALTER TABLE bot_market_ticks ADD COLUMN macro_hourly_close_times_json TEXT NOT NULL DEFAULT '[]'")
             fill_columns = {row[1] for row in db.execute("PRAGMA table_info(bot_fills)")}
             if "exit_reason" not in fill_columns:
                 db.execute("ALTER TABLE bot_fills ADD COLUMN exit_reason TEXT")
@@ -513,16 +516,21 @@ class ContinuousPaperBot:
                 macro_hourly_closes_json = json.dumps(
                     [str(value) for value in macro_hourly_closes], separators=(",", ":")
                 )
+                macro_hourly_close_times = feature.get("macro_hourly_close_times_ms", [])
+                macro_hourly_close_times_json = json.dumps(
+                    [int(value) for value in macro_hourly_close_times], separators=(",", ":")
+                )
                 db.execute(
                     """INSERT INTO bot_market_ticks
                     (tick,symbol,price,bid,ask,candle_open,candle_high,candle_low,candle_volume,
                      bid_depth_qty,ask_depth_qty,data_source,candle_close_time_ms,received_at_ms,
-                     macro_hourly_closes_json)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     macro_hourly_closes_json,macro_hourly_close_times_json)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (tick, symbol, str(price), str(bid), str(ask), str(candle_open),
                      str(candle_high), str(candle_low), str(candle_volume),
                      str(bid_depth_qty), str(ask_depth_qty), source,
-                     candle_close_times.get(symbol), received, macro_hourly_closes_json),
+                     candle_close_times.get(symbol), received, macro_hourly_closes_json,
+                     macro_hourly_close_times_json),
                 )
 
             latest_prices = self._latest_prices(db, source)
@@ -950,6 +958,7 @@ async def _run_bot_unlocked(
                         "bid_depth_qty": item.bid_depth_qty,
                         "ask_depth_qty": item.ask_depth_qty,
                         "macro_hourly_closes": item.macro_hourly_closes,
+                        "macro_hourly_close_times_ms": item.macro_hourly_close_times_ms,
                     }
                     for symbol, item in snapshots.items()
                 }

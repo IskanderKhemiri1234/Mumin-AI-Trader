@@ -12,7 +12,8 @@ def _ledger(path):
     db.executescript("""
         CREATE TABLE bot_market_ticks (
             id INTEGER PRIMARY KEY, tick INTEGER, symbol TEXT,
-            candle_close_time_ms INTEGER, data_source TEXT
+            candle_close_time_ms INTEGER, data_source TEXT, received_at_ms INTEGER,
+            macro_hourly_closes_json TEXT, macro_hourly_close_times_json TEXT
         );
         CREATE TABLE bot_agent_decisions (
             decision_id INTEGER PRIMARY KEY, tick INTEGER, symbol TEXT,
@@ -23,13 +24,16 @@ def _ledger(path):
             data_source TEXT, side TEXT
         );
     """)
+    closes = json.dumps(["100"] * 21)
+    close_times = json.dumps([1_799_000_000_000 + i * 3_600_000 for i in range(21)])
     for index, symbol in enumerate(EXPECTED_SYMBOLS, start=1):
         db.execute(
-            "INSERT INTO bot_market_ticks VALUES (?,?,?,?,?)",
-            (index, 1, symbol, 1_800_000_000_000, "BINANCE_PUBLIC_MARKET_DATA"),
+            "INSERT INTO bot_market_ticks VALUES (?,?,?,?,?,?,?,?)",
+            (index, 1, symbol, 1_800_000_000_000, "BINANCE_PUBLIC_MARKET_DATA",
+             1_800_000_000_100, closes, close_times),
         )
     db.execute(
-        "INSERT INTO bot_market_ticks VALUES (9,1,'BTCUSDT',1800000000000,'MOCK_SYNTHETIC')"
+        "INSERT INTO bot_market_ticks VALUES (9,1,'BTCUSDT',1800000000000,'MOCK_SYNTHETIC',1800000000100,'[]','[]')"
     )
     db.execute(
         "INSERT INTO bot_agent_decisions VALUES (1,1,'BTCUSDT','BINANCE_PUBLIC_MARKET_DATA','HOLD')"
@@ -63,6 +67,10 @@ def test_archive_is_deterministic_and_excludes_synthetic_rows(tmp_path):
         "market_snapshots": 8, "agent_decisions": 1, "paper_fills": 1
     }
     assert all("MOCK_SYNTHETIC" not in json.dumps(row) for row in records)
+    assert manifest["quality"]["raw_21_hourly_closes_persisted"] is True
+    assert manifest["quality"]["raw_21_hourly_close_timestamp_alignment_passed"] is True
+    assert manifest["quality"]["one_minute_close_timestamp_alignment_passed"] is True
+    assert manifest["quality"]["macro_complete_rows"] == 8
     assert manifest["quality"]["replay_ready"] is False
     assert manifest["quality"]["holdout_eligible"] is False
 

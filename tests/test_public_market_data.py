@@ -59,6 +59,8 @@ async def test_public_market_data_uses_unauthenticated_endpoints_and_closed_cand
     assert snapshot.ask_depth_qty == Decimal("2.0")
     assert len(snapshot.macro_hourly_closes) == 21
     assert snapshot.macro_hourly_closes[-1] == Decimal("3000")
+    assert len(snapshot.macro_hourly_close_times_ms) == 21
+    assert snapshot.macro_hourly_close_times_ms[-1] == 1_699_999_999_000
     assert snapshot.source == "BINANCE_PUBLIC_MARKET_DATA"
     assert len(calls) == 5
     assert all("X-MBX-APIKEY" not in request.headers for request in calls)
