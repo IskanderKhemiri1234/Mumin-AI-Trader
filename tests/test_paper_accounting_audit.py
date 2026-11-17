@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sqlite3
 
 from scripts.audit_paper_ledger import build_audit
