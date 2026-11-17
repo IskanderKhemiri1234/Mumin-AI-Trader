@@ -13,6 +13,40 @@ from mumin_trader.exchanges.binance.spot_testnet_execution import (
 )
 
 
+def validate_fixed_exit_risk(
+    entry_price: Decimal | str,
+    take_profit_price: Decimal | str,
+    stop_price: Decimal | str,
+    *,
+    tolerance_percentage_points: Decimal = Decimal("0.02"),
+) -> dict[str, str]:
+    entry = Decimal(str(entry_price))
+    take_profit = Decimal(str(take_profit_price))
+    stop = Decimal(str(stop_price))
+    if (
+        not entry.is_finite() or not take_profit.is_finite() or not stop.is_finite()
+        or entry <= 0 or take_profit <= entry or stop >= entry or stop <= 0
+    ):
+        raise SpotExecutionError("Exit prices must satisfy 0 < stop < entry < take-profit.")
+    stop_loss_percent = (entry - stop) / entry * Decimal("100")
+    take_profit_percent = (take_profit - entry) / entry * Decimal("100")
+    if abs(stop_loss_percent - Decimal("0.50")) > tolerance_percentage_points:
+        raise SpotExecutionError(
+            "Stop trigger differs from the approved 0.50% stop-loss policy."
+        )
+    if abs(take_profit_percent - Decimal("1.25")) > tolerance_percentage_points:
+        raise SpotExecutionError(
+            "Take-profit price differs from the approved 1.25% take-profit policy."
+        )
+    return {
+        "entry_price": str(entry),
+        "stop_loss_percent": str(stop_loss_percent),
+        "take_profit_percent": str(take_profit_percent),
+        "policy_stop_loss_percent": "0.50",
+        "policy_take_profit_percent": "1.25",
+    }
+
+
 def validate_oco_leg_notionals(
     quantity: Decimal,
     take_profit_price: Decimal,
