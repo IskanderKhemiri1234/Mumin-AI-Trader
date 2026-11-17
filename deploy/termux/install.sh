@@ -36,12 +36,14 @@ if [ -f "$PREFIX/etc/profile.d/start-services.sh" ]; then . "$PREFIX/etc/profile
 sleep 3
 sv up mumin-api >/dev/null 2>&1 || true
 sv up mumin-paper-engine >/dev/null 2>&1 || true
+sv up mumin-paper-backup >/dev/null 2>&1 || true
 BOOT
 chmod 700 "$BOOT_DIR/00-mumin-ai-trader"
 if [ -f "$PREFIX/etc/profile.d/start-services.sh" ]; then . "$PREFIX/etc/profile.d/start-services.sh"; fi
 sleep 2
 sv up mumin-api
 sv up mumin-paper-engine
+sv up mumin-paper-backup
 printf "\nMumin node installed. Dashboard: http://127.0.0.1:8000/dashboard\n"
 printf "Health: http://127.0.0.1:8000/health\nLogs: %s\n" "$HOME/.mumin-ai-trader/logs"
 printf "Install and open Termux:Boot separately; disable battery optimization for Termux.\n"
