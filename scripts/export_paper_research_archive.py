@@ -74,7 +74,7 @@ def _latest_contiguous_cycles(
         selected_ticks.add(tick)
         selected_rows.extend(symbols[symbol] for symbol in EXPECTED_SYMBOLS)
 
-    source_duplicate_rows = max(0, len(source_rows) - len(complete_by_close) * len(EXPECTED_SYMBOLS))
+    source_duplicate_rows = max(0, len(source_rows) - len(selected_rows))
     selection = {
         "policy": (
             "For each closed one-minute candle, select the latest complete eight-symbol "
