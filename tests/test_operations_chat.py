@@ -48,12 +48,15 @@ def paper_ledger(tmp_path: Path) -> Path:
             );
             INSERT INTO bot_account VALUES
                 (1, '100.00', '100.00', '0', '0', 0, NULL, 12);
-            INSERT INTO bot_runtime_control VALUES
-                (1, 'RUNNING', ?, ?, 1234);
-            INSERT INTO bot_runtime_audit VALUES
-                (1, 'SUPERVISOR_STARTED', 'test', 'RUNNING', 'fixture started', ?);
-            """,
-            (now, now, now),
+            """
+        )
+        db.execute(
+            "INSERT INTO bot_runtime_control VALUES (1, 'RUNNING', ?, ?, 1234)",
+            (now, now),
+        )
+        db.execute(
+            "INSERT INTO bot_runtime_audit VALUES (1, 'SUPERVISOR_STARTED', 'test', 'RUNNING', 'fixture started', ?)",
+            (now,),
         )
     return path
 
