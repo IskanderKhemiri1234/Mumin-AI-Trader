@@ -188,4 +188,5 @@ $('marketReconnect').addEventListener('click',()=>connectMarketFeed(true));$('ma
 $('langBtn').addEventListener('click',()=>setLanguage(language==='ar'?'en':'ar'));$('refreshBtn').addEventListener('click',()=>{refresh();toast(t('refreshing'))});window.addEventListener('resize',()=>{if(snapshot)drawChart(snapshot.equity_history||[])});
 setLanguage('ar');renderMarket();connectMarketFeed();const existing=sessionStorage.getItem('mumin_dashboard_token');if(existing){$('accessToken').value=existing;refresh()}refreshTimer=setInterval(refresh,20000);
 </script>
+<script src="/operations-chat.js" defer></script>
 </body></html>
