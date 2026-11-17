@@ -26,6 +26,7 @@ Health: `http://127.0.0.1:8000/health`
 sv status mumin-api
 sv status mumin-paper-engine
 sv status mumin-paper-backup
+sv status mumin-paper-watchdog
 sv restart mumin-api
 sv restart mumin-paper-engine
 sv down mumin-paper-engine
@@ -53,6 +54,34 @@ python scripts/monitor_paper_node.py --db data/mumin_public_paper.db
 ```
 
 The command checks SQLite integrity, the fixed 70 USDT Paper capital, supervisor heartbeat, desired RUNNING state, freshness and completeness of the latest eight-symbol public market cycle, and FIFO accounting reconciliation. It is read-only and exits nonzero if a required operational check fails. It does not start or restart services.
+
+A local watchdog service runs this read-only check every five minutes. When health changes to WARN or FAIL it attempts an Android notification through `termux-notification`; install the matching Termux:API app and grant notification permission to receive phone notifications. Without Termux:API, transitions are still recorded in `~/.mumin-ai-trader/logs/paper-watchdog.log`. The watchdog does not restart or modify the Paper engine.
+
+## Local research archive and Walk-forward
+
+After updating the repository, export a read-only archive from the phone's own Paper database:
+
+```sh
+cd ~/Mumin-AI-Trader
+mkdir -p data/research
+python scripts/export_paper_research_archive.py \
+  --db data/mumin_public_paper.db \
+  --archive data/research/paper-observations.jsonl.gz \
+  --manifest data/research/manifest.json
+python -c 'import json; m=json.load(open("data/research/manifest.json")); print(json.dumps({"cycles":m["observed_cycle_count"],"selection":m["selection"],"quality":m["quality"]}, indent=2))'
+```
+
+The exporter selects the latest complete eight-symbol snapshot for each minute and retains only the latest contiguous gap-free suffix. It never invents missing candles; earlier gaps and excluded snapshots are disclosed in the manifest. Formal Walk-forward is allowed only when `quality.replay_ready` is true and at least 120 cycles are available:
+
+```sh
+python scripts/run_paper_walk_forward.py \
+  --archive data/research/paper-observations.jsonl.gz \
+  --manifest data/research/manifest.json \
+  --output data/research/walk-forward.json \
+  --folds 3
+```
+
+If the archive is not ready or has fewer than 120 cycles, do not bypass the gate. Continue collecting and export a new manifest later. This Walk-forward is development/validation evidence, not the sealed Holdout and not a Mainnet authorization.
 
 ## Update
 ```sh

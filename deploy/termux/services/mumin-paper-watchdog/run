@@ -1,0 +1,40 @@
+#!/data/data/com.termux/files/usr/bin/sh
+set -eu
+ROOT="$HOME/Mumin-AI-Trader"
+LOG_DIR="$HOME/.mumin-ai-trader/logs"
+STATE_FILE="$LOG_DIR/paper-health.json"
+LOG_FILE="$LOG_DIR/paper-watchdog.log"
+mkdir -p "$LOG_DIR"
+cd "$ROOT"
+export PYTHONUNBUFFERED=1
+LAST_STATUS="UNKNOWN"
+
+while true; do
+  rm -f "$STATE_FILE"
+  if python scripts/monitor_paper_node.py \
+      --db data/mumin_public_paper.db \
+      --output "$STATE_FILE" > /dev/null 2>&1; then
+    STATUS="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["overall"])' "$STATE_FILE" 2>/dev/null || printf 'FAIL')"
+  else
+    STATUS="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["overall"])' "$STATE_FILE" 2>/dev/null || printf 'FAIL')"
+  fi
+
+  if [ "$STATUS" != "$LAST_STATUS" ]; then
+    MESSAGE="Mumin Paper node health changed to $STATUS. Inspect $LOG_DIR/paper-health.json"
+    printf '%s status=%s\n' "$(date -u +%FT%TZ)" "$STATUS" >> "$LOG_FILE"
+    if command -v termux-notification >/dev/null 2>&1; then
+      case "$STATUS" in
+        PASS)
+          if [ "$LAST_STATUS" = "WARN" ] || [ "$LAST_STATUS" = "FAIL" ]; then
+            termux-notification --id 702 --title "Mumin Paper recovered" --content "$MESSAGE" --priority default >/dev/null 2>&1 || true
+          fi
+          ;;
+        WARN|FAIL)
+          termux-notification --id 702 --title "Mumin Paper health alert" --content "$MESSAGE" --priority high >/dev/null 2>&1 || true
+          ;;
+      esac
+    fi
+    LAST_STATUS="$STATUS"
+  fi
+  sleep 300
+done
