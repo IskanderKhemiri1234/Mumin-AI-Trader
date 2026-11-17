@@ -20,6 +20,7 @@ from mumin_trader.execution.command_plane import (
     CommandRejected,
     get_command,
     latch_emergency_stop,
+    list_command_events,
     list_commands,
     submit_paper_order,
 )
@@ -588,6 +589,21 @@ async def read_paper_command(
     if command is None:
         raise HTTPException(status_code=404, detail="Command not found.")
     return command
+
+
+@app.get("/api/commands/{command_id}/events")
+async def read_paper_command_events(
+    command_id: str,
+    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+) -> dict[str, Any]:
+    _dashboard_access_token(x_dashboard_token)
+    database = _dashboard_database()
+    if not database.is_file():
+        raise HTTPException(status_code=404, detail="Command not found.")
+    command = get_command(database, command_id)
+    if command is None:
+        raise HTTPException(status_code=404, detail="Command not found.")
+    return {"events": list_command_events(database, command_id)}
 
 
 @app.post("/api/testnet/orders")
