@@ -25,6 +25,7 @@ Health: `http://127.0.0.1:8000/health`
 ```sh
 sv status mumin-api
 sv status mumin-paper-engine
+sv status mumin-paper-backup
 sv restart mumin-api
 sv restart mumin-paper-engine
 sv down mumin-paper-engine
@@ -33,7 +34,14 @@ tail -f ~/.mumin-ai-trader/logs/api.log
 tail -f ~/.mumin-ai-trader/logs/paper-engine.log
 ```
 
-SQLite remains at `data/mumin_public_paper.db`. A runit backup service creates an SQLite online-backup snapshot every six hours under `data/backups/`, verifies SQLite integrity and SHA-256, and retains 30 days. These snapshots are on the same phone and are not disaster-proof; periodically copy them to a separate trusted device/storage. Back up before replacing/reinstalling Termux. Never delete `data/` during updates.\n\nTo verify a backup, use the exact filename returned by the backup service:\n\n```sh\ncd ~/Mumin-AI-Trader\npython scripts/backup_paper_ledger.py --db data/mumin_public_paper.db --verify data/backups/EXACT_BACKUP_FILENAME.sqlite3\n```
+SQLite remains at `data/mumin_public_paper.db`. A runit backup service creates an SQLite online-backup snapshot every six hours under `data/backups/`, verifies SQLite integrity and SHA-256, and retains 30 days. These snapshots are on the same phone and are not disaster-proof; periodically copy them to a separate trusted device/storage. Back up before replacing/reinstalling Termux. Never delete `data/` during updates.
+
+To verify a backup, use the exact filename returned by the backup service:
+
+```sh
+cd ~/Mumin-AI-Trader
+python scripts/backup_paper_ledger.py --db data/mumin_public_paper.db --verify data/backups/EXACT_BACKUP_FILENAME.sqlite3
+```
 
 ## Read-only node health check
 
