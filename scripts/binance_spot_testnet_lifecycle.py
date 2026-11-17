@@ -580,9 +580,7 @@ async def run_cycle(args: argparse.Namespace) -> int:
             Decimal(buy_summary["quote_quantity"]) / gross_buy_quantity
             if gross_buy_quantity > 0 else Decimal("0")
         )
-        exit_risk = opoco_exit_risk_metrics(
-            average_entry_price, protective_children,
-        )
+        exit_risk = exit_risk_metrics(average_entry_price, take_profit, stop_price)
         buy_fills = store.trade_fills_for_order(symbol, int(buy_order_id))
         buy_fee_asset_mismatches = commission_asset_mismatches(buy_fills, settings.BNB_FEE_ASSET)
         evidence.record("buy_fills_from_myTrades", {
@@ -954,7 +952,9 @@ async def run_opoco_cycle(args: argparse.Namespace) -> int:
             Decimal(buy_summary["quote_quantity"]) / gross_buy_quantity
             if gross_buy_quantity > 0 else Decimal("0")
         )
-        exit_risk = exit_risk_metrics(average_entry_price, take_profit, stop_price)
+        exit_risk = opoco_exit_risk_metrics(
+            average_entry_price, protective_children,
+        )
         buy_fills = (
             store.trade_fills_for_order(symbol, working_order_id)
             if working_order_id is not None else []
