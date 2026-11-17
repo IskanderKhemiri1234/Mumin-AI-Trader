@@ -107,7 +107,8 @@ def test_dashboard_page_exposes_live_control_center():
     assert 'id="marketReconnect"' in page
     assert "/api/market" in page
     assert "new WebSocket(" not in page
-    assert "no fake browser-only start button" in page
+    assert 'id="workerAuditRows"' in page
+    assert "approvalRequired" in page
 
 
 
