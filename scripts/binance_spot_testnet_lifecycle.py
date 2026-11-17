@@ -248,6 +248,78 @@ async def watch_oco(
     return last or {}
 
 
+def opoco_result(list_response: dict[str, Any]) -> dict[str, Any]:
+    reports = list_response.get("orderReports", [])
+    normalized = [
+        {
+            "orderId": str(item.get("orderId", "")),
+            "clientOrderId": str(item.get("clientOrderId", "")),
+            "type": str(item.get("type", "")).upper(),
+            "side": str(item.get("side", "")).upper(),
+            "status": str(item.get("status", "")).upper(),
+            "executedQty": str(item.get("executedQty", "0")),
+            "origQty": str(item.get("origQty", "0")),
+        }
+        for item in reports if isinstance(item, dict)
+    ]
+    working = next(
+        (item for item in normalized if item["side"] == "BUY" and item["type"] == "LIMIT"),
+        None,
+    )
+    above = next((item for item in normalized if item["type"] == "LIMIT_MAKER"), None)
+    below = next((item for item in normalized if item["type"] == "STOP_LOSS_LIMIT"), None)
+    order_list_id = str(list_response.get("orderListId", ""))
+    list_status = str(list_response.get("listOrderStatus", "")).upper()
+    ids = [item["orderId"] for item in normalized]
+    mutual_cancel = bool(
+        working and above and below
+        and order_list_id and list_response.get("listClientOrderId")
+        and list_status == "ALL_DONE"
+        and len(normalized) == 3
+        and len(set(ids)) == 3 and all(ids)
+        and working["status"] == "FILLED"
+        and (
+            (above["status"] == "FILLED" and below["status"] in {"CANCELED", "EXPIRED"})
+            or (below["status"] == "FILLED" and above["status"] in {"CANCELED", "EXPIRED"})
+        )
+    )
+    return {
+        "orderListId": order_list_id,
+        "listClientOrderId": str(list_response.get("listClientOrderId", "")),
+        "listOrderStatus": list_status,
+        "working_order": working,
+        "protective_children": [item for item in (above, below) if item],
+        "children": normalized,
+        "mutual_cancel_proven": mutual_cancel,
+    }
+
+
+async def watch_opoco(
+    client: BinanceSpotTestnetExecution,
+    *,
+    symbol: str,
+    list_client_order_id: str,
+    timeout_seconds: int,
+    poll_seconds: float,
+    evidence: Evidence,
+) -> dict[str, Any]:
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    last: dict[str, Any] | None = None
+    while asyncio.get_running_loop().time() < deadline:
+        last = await client.opoco.get_order_list(
+            symbol=symbol,
+            list_client_order_id=list_client_order_id,
+        )
+        if last is None:
+            raise SpotOrderOutcomeUnknown("OPOCO list is not visible; its exchange outcome is unresolved.")
+        evidence.record("opoco_order_list_observed", last)
+        state = client.opoco._state(last)
+        if state in {"COMPLETE", "CANCELED", "PARTIAL_FILL_REVIEW"}:
+            return last
+        await asyncio.sleep(poll_seconds)
+    return last or {}
+
+
 async def run_cycle(args: argparse.Namespace) -> int:
     if args.testnet_max_order_usdt is None:
         settings = Settings()
