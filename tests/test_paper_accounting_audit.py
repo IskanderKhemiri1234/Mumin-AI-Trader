@@ -19,7 +19,7 @@ def _make_ledger(path):
         CREATE TABLE bot_fills (
             fill_id INTEGER PRIMARY KEY, tick INTEGER, symbol TEXT, side TEXT,
             quantity TEXT, reference_price TEXT, fill_price TEXT, gross_quote TEXT,
-            fee_quote TEXT, net_pnl TEXT, data_source TEXT, created_at TEXT
+            fee_quote TEXT, net_pnl TEXT, data_source TEXT, exit_reason TEXT, created_at TEXT
         );
         CREATE TABLE bot_market_ticks (
             id INTEGER PRIMARY KEY, symbol TEXT, price TEXT,
@@ -38,8 +38,8 @@ def _make_ledger(path):
     )
     db.execute(
         """INSERT INTO bot_fills VALUES
-        (1,1,'BTCUSDT','BUY','1','10','10','10','0.01','0','BINANCE_PUBLIC_MARKET_DATA','t1'),
-        (2,2,'BTCUSDT','SELL','1','11','11','11','0.011','0.979','BINANCE_PUBLIC_MARKET_DATA','t2')"""
+        (1,1,'BTCUSDT','BUY','1','10','10','10','0.01','0','BINANCE_PUBLIC_MARKET_DATA',NULL,'t1'),
+        (2,2,'BTCUSDT','SELL','1','11','11','11','0.011','0.979','BINANCE_PUBLIC_MARKET_DATA','TAKE_PROFIT','t2')"""
     )
     db.execute(
         """INSERT INTO bot_agent_decisions VALUES
@@ -65,13 +65,14 @@ def test_audit_reconstructs_fifo_pnl_fees_and_entry_exit_context(tmp_path):
     assert report["account"]["closed_round_trips"] == 1
     btc = report["per_symbol"]["BTCUSDT"]
     assert btc["gross_pnl_usdt"] == "1"
-    assert btc["entry_fees_usdt"] == "0.01"
-    assert btc["exit_fees_usdt"] == "0.011"
+    assert btc["closed_round_trip_entry_fees_usdt"] == "0.01"
+    assert btc["closed_round_trip_exit_fees_usdt"] == "0.011"
     assert btc["net_pnl_usdt"] == "0.979"
+    assert btc["fill_total_fees_usdt"] == "0.021"
     assert btc["entry_reason_counts"] == {"strict consensus": 1}
     assert btc["exit_signal_context_counts"] == {"HOLD": 1}
     trip = report["round_trips"][0]
-    assert trip["exit_trigger_reason"] == "NOT_PERSISTED_IN_LEGACY_FILL_SCHEMA"
+    assert trip["exit_trigger_reason"] == "TAKE_PROFIT"
 
 
 def test_audit_is_read_only(tmp_path):

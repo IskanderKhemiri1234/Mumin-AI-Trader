@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import math
 import os
 import signal
@@ -153,6 +154,7 @@ class ContinuousPaperBot:
                     fee_quote TEXT NOT NULL,
                     net_pnl TEXT NOT NULL,
                     data_source TEXT NOT NULL DEFAULT 'MOCK_SYNTHETIC',
+                    exit_reason TEXT,
                     created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS bot_equity (
@@ -196,6 +198,7 @@ class ContinuousPaperBot:
                     data_source TEXT NOT NULL,
                     candle_close_time_ms INTEGER,
                     received_at_ms INTEGER NOT NULL,
+                    macro_hourly_closes_json TEXT NOT NULL DEFAULT '[]',
                     UNIQUE(tick, symbol)
                 );
                 CREATE INDEX IF NOT EXISTS idx_market_ticks_symbol_source
@@ -263,6 +266,11 @@ class ContinuousPaperBot:
             for name in ("candle_open", "candle_high", "candle_low", "candle_volume", "bid_depth_qty", "ask_depth_qty"):
                 if name not in market_columns:
                     db.execute(f"ALTER TABLE bot_market_ticks ADD COLUMN {name} TEXT NOT NULL DEFAULT '0'")
+            if "macro_hourly_closes_json" not in market_columns:
+                db.execute("ALTER TABLE bot_market_ticks ADD COLUMN macro_hourly_closes_json TEXT NOT NULL DEFAULT '[]'")
+            fill_columns = {row[1] for row in db.execute("PRAGMA table_info(bot_fills)")}
+            if "exit_reason" not in fill_columns:
+                db.execute("ALTER TABLE bot_fills ADD COLUMN exit_reason TEXT")
             db.execute(
                 """CREATE TABLE IF NOT EXISTS bot_runtime_control (
                     id INTEGER PRIMARY KEY CHECK(id=1),
@@ -501,15 +509,20 @@ class ContinuousPaperBot:
                 ask_depth_qty = Decimal(feature.get("ask_depth_qty", 0))
                 if candle_low <= 0 or candle_high < candle_low or candle_volume < 0:
                     raise ValueError(f"Invalid candle features for {symbol}")
+                macro_hourly_closes = feature.get("macro_hourly_closes", [])
+                macro_hourly_closes_json = json.dumps(
+                    [str(value) for value in macro_hourly_closes], separators=(",", ":")
+                )
                 db.execute(
                     """INSERT INTO bot_market_ticks
                     (tick,symbol,price,bid,ask,candle_open,candle_high,candle_low,candle_volume,
-                     bid_depth_qty,ask_depth_qty,data_source,candle_close_time_ms,received_at_ms)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     bid_depth_qty,ask_depth_qty,data_source,candle_close_time_ms,received_at_ms,
+                     macro_hourly_closes_json)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (tick, symbol, str(price), str(bid), str(ask), str(candle_open),
                      str(candle_high), str(candle_low), str(candle_volume),
                      str(bid_depth_qty), str(ask_depth_qty), source,
-                     candle_close_times.get(symbol), received),
+                     candle_close_times.get(symbol), received, macro_hourly_closes_json),
                 )
 
             latest_prices = self._latest_prices(db, source)
@@ -610,11 +623,15 @@ class ContinuousPaperBot:
                         projected_net / entry_cost * Decimal("100")
                         if entry_cost > 0 else Decimal("-100")
                     )
-                    if (
-                        net_return_pct <= -Decimal(position["stop_loss_pct"])
-                        or net_return_pct >= Decimal(position["take_profit_pct"])
-                        or signal_name == "SELL"
-                    ):
+                    stop_triggered = net_return_pct <= -Decimal(position["stop_loss_pct"])
+                    target_triggered = net_return_pct >= Decimal(position["take_profit_pct"])
+                    signal_triggered = signal_name == "SELL"
+                    if stop_triggered or target_triggered or signal_triggered:
+                        exit_reason = (
+                            "STOP_LOSS" if stop_triggered
+                            else "TAKE_PROFIT" if target_triggered
+                            else "SELL_SIGNAL"
+                        )
                         net_trade = projected_net
                         cash += gross - fee
                         realized += net_trade
@@ -624,10 +641,10 @@ class ContinuousPaperBot:
                         db.execute(
                             """INSERT INTO bot_fills
                             (tick,symbol,side,quantity,reference_price,fill_price,gross_quote,
-                             fee_quote,net_pnl,data_source,created_at)
-                            VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                             fee_quote,net_pnl,data_source,exit_reason,created_at)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                             (tick, symbol, "SELL", str(quantity), str(price), str(fill),
-                             str(gross), str(fee), str(net_trade), source, timestamp),
+                             str(gross), str(fee), str(net_trade), source, exit_reason, timestamp),
                         )
                         action = f"{symbol}:CLOSE net={net_trade:.8f}"
                         open_positions.pop(symbol, None)
@@ -685,10 +702,10 @@ class ContinuousPaperBot:
                             db.execute(
                                 """INSERT INTO bot_fills
                                 (tick,symbol,side,quantity,reference_price,fill_price,gross_quote,
-                                 fee_quote,net_pnl,data_source,created_at)
-                                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                                 fee_quote,net_pnl,data_source,exit_reason,created_at)
+                                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                                 (tick, symbol, "BUY", str(quantity), str(price), str(fill),
-                                 str(gross), str(fee), "0", source, timestamp),
+                                 str(gross), str(fee), "0", source, None, timestamp),
                             )
                             action = f"{symbol}:OPEN qty={quantity}"
                             open_positions[symbol] = {

@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from decimal import Decimal
 
@@ -128,11 +129,59 @@ def test_stop_loss_uses_net_exit_value_after_fees_and_slippage(tmp_path):
             "SELECT COUNT(*) FROM bot_positions WHERE symbol='BTCUSDT'"
         ).fetchone()[0]
         exit_row = db.execute(
-            "SELECT net_pnl FROM bot_fills WHERE symbol='BTCUSDT' AND side='SELL'"
+            "SELECT net_pnl,exit_reason FROM bot_fills WHERE symbol='BTCUSDT' AND side='SELL'"
         ).fetchone()
     assert remaining == 0
     assert exit_row is not None
     assert Decimal(exit_row[0]) <= Decimal("-0.25")
+    assert exit_row[1] == "STOP_LOSS"
+
+
+def test_take_profit_exit_reason_is_persisted(tmp_path):
+    database = tmp_path / "net-target.sqlite3"
+    bot = ContinuousPaperBot(str(database), initial_cash=Decimal("70.00"))
+    with sqlite3.connect(database) as db:
+        db.execute("UPDATE bot_account SET cash='19.95' WHERE id=1")
+        db.execute(
+            """INSERT INTO bot_positions
+               (symbol,quantity,entry_price,entry_gross,entry_fee,opened_at)
+               VALUES ('BTCUSDT','0.5','100','50','0.05','2026-11-13T00:00:00+00:00')"""
+        )
+
+    bot.step(
+        {"BTCUSDT": Decimal("103.5")},
+        source="BINANCE_PUBLIC_MARKET_DATA",
+        quotes={"BTCUSDT": (Decimal("103.4"), Decimal("103.5"))},
+        candle_close_times={"BTCUSDT": 1_800_000_000_000},
+        received_at_ms=1_800_000_000_100,
+    )
+
+    with sqlite3.connect(database) as db:
+        row = db.execute(
+            "SELECT exit_reason FROM bot_fills WHERE symbol='BTCUSDT' AND side='SELL'"
+        ).fetchone()
+    assert row == ("TAKE_PROFIT",)
+
+
+def test_sell_signal_exit_reason_is_persisted(tmp_path):
+    database = tmp_path / "signal-exit.sqlite3"
+    bot = ContinuousPaperBot(str(database), initial_cash=Decimal("70.00"))
+    bot.swarm.evaluate = lambda *args: ("SELL", "SELL", True)
+    with sqlite3.connect(database) as db:
+        db.execute("UPDATE bot_account SET cash='19.95' WHERE id=1")
+        db.execute(
+            """INSERT INTO bot_positions
+               (symbol,quantity,entry_price,entry_gross,entry_fee,opened_at)
+               VALUES ('BTCUSDT','0.5','100','50','0.05','2026-11-13T00:00:00+00:00')"""
+        )
+
+    bot.step({"BTCUSDT": Decimal("100")})
+
+    with sqlite3.connect(database) as db:
+        row = db.execute(
+            "SELECT exit_reason FROM bot_fills WHERE symbol='BTCUSDT' AND side='SELL'"
+        ).fetchone()
+    assert row == ("SELL_SIGNAL",)
 
 
 def test_daily_loss_halts_entries_before_another_symbol_can_open(tmp_path):
@@ -220,6 +269,9 @@ def test_public_micro_alpha_entry_persists_atr_adaptive_position_targets(tmp_pat
                       spread_bps, atr_pct, final_signal, action
                FROM bot_agent_decisions WHERE symbol='BTCUSDT' ORDER BY tick DESC LIMIT 1"""
         ).fetchone()
+        macro_json = db.execute(
+            "SELECT macro_hourly_closes_json FROM bot_market_ticks WHERE symbol='BTCUSDT' ORDER BY id DESC LIMIT 1"
+        ).fetchone()[0]
     assert result.signal.startswith("BTCUSDT:BUY")
     assert position is not None
     assert decision is not None
@@ -233,6 +285,8 @@ def test_public_micro_alpha_entry_persists_atr_adaptive_position_targets(tmp_pat
     assert Decimal(decision[7]) > 0
     assert decision[8] == "BUY"
     assert decision[9].startswith("BTCUSDT:OPEN")
+    assert len(json.loads(macro_json)) == 21
+    assert Decimal(json.loads(macro_json)[-1]) == Decimal("100")
     stop, target = map(Decimal, position)
     assert Decimal("0.20") <= stop <= Decimal("0.50")
     assert Decimal("0.40") <= target <= Decimal("1.25")
