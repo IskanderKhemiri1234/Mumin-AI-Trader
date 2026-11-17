@@ -338,7 +338,7 @@ def _read_dashboard_snapshot() -> dict[str, Any]:
         cash_decimal = Decimal(account["cash"])
         marked_value = sum(
             (
-                Decimal(str(latest_prices[item["symbol"]])) * Decimal(item["quantity"])
+                Decimal(str(latest_prices[item["symbol"]])) * Decimal(str(item["quantity"]))
                 for item in positions if latest_prices.get(item["symbol"]) is not None
             ),
             Decimal("0"),
@@ -360,7 +360,7 @@ def _read_dashboard_snapshot() -> dict[str, Any]:
                 "realized_pnl": float(account["realized_pnl"]),
                 "unrealized_pnl": float(unrealized_value) if unrealized_value is not None else None,
                 "accounting_status": accounting["status"],
-                "daily_pnl": equity - float(account["daily_start_equity"]),
+                "daily_pnl": float(equity_decimal) - float(account["daily_start_equity"]),
                 "fees_paid": float(account["fees_paid"]),
                 "high_watermark": float(account["high_watermark"]),
                 "closed_trades": int(stats["closed_trades"]),
