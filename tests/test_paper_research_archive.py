@@ -5,6 +5,7 @@ import json
 import sqlite3
 
 from scripts.export_paper_research_archive import EXPECTED_SYMBOLS, export_archive
+from scripts.replay_paper_observations import replay_archive
 
 
 def _ledger(path):
@@ -148,3 +149,39 @@ def test_archive_uses_only_latest_gap_free_suffix_and_discloses_older_gap(tmp_pa
     assert {row["tick"] for row in market} == {3}
     assert manifest["quality"]["estimated_missing_one_minute_slots"] == 0
     assert manifest["quality"]["replay_ready"] is False
+
+
+
+def test_thirty_clean_cycles_are_replay_ready_and_replay_without_lookahead(tmp_path):
+    database = tmp_path / "paper.db"
+    archive = tmp_path / "observations.jsonl.gz"
+    manifest_path = tmp_path / "manifest.json"
+    replay_path = tmp_path / "replay.json"
+    _ledger(database)
+
+    base_close = 1_800_000_000_000
+    for offset in range(30):
+        tick = offset + 2
+        close_time = base_close + offset * 60_000
+        _add_cycle(
+            database,
+            tick,
+            close_time,
+            close_time + 100,
+            100 + offset * len(EXPECTED_SYMBOLS),
+        )
+
+    manifest = export_archive(database, archive, manifest_path)
+    assert manifest["observed_cycle_count"] == 30
+    assert manifest["quality"]["replay_ready"] is True
+
+    replay = replay_archive(
+        archive,
+        manifest_path,
+        replay_path,
+        require_ready=True,
+        warmup_cycles=0,
+    )
+    assert replay["metrics"]["cycles_replayed"] == 30
+    assert replay["metrics"]["accounting_status"] == "PASS"
+    assert replay["source_archive_sha256"] == manifest["archive_sha256"]
