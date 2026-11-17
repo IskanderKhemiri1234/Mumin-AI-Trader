@@ -2,6 +2,9 @@ package com.mumin.aitrader
 
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
+import android.content.pm.Signature
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -265,10 +268,63 @@ class UnifiedDashboardActivity : Activity() {
         webView.loadUrl("$baseUrl/dashboard", mapOf("Cache-Control" to "no-cache"))
     }
 
+    private fun packageInfoFlags(): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            @Suppress("DEPRECATION")
+            PackageManager.GET_SIGNATURES
+        }
+
+    @Suppress("DEPRECATION")
+    private fun archiveSignatures(info: PackageInfo): Array<Signature> =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.signingInfo?.apkContentsSigners ?: emptyArray()
+        } else {
+            info.signatures ?: emptyArray()
+        }
+
+    private fun hasCompatibleSigningCertificate(archiveInfo: PackageInfo): Boolean {
+        val archiveSigners = archiveSignatures(archiveInfo)
+        if (archiveSigners.isEmpty()) return false
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            return archiveSigners.all { signer ->
+                packageManager.hasSigningCertificate(
+                    packageName,
+                    signer.toByteArray(),
+                    PackageManager.CERT_INPUT_RAW_X509
+                )
+            }
+        }
+
+        val installedInfo = packageManager.getPackageInfo(
+            packageName,
+            PackageManager.GET_SIGNATURES
+        )
+        val installedSigners = archiveSignatures(installedInfo)
+        return installedSigners.isNotEmpty() &&
+            archiveSigners.map { it.toCharsString() }.toSet() ==
+            installedSigners.map { it.toCharsString() }.toSet()
+    }
+
+    private fun packageVersionCode(info: PackageInfo): Long =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            info.versionCode.toLong()
+        }
+
     private fun checkForUpdates() {
         connectionStatus.text = "جارٍ التحقق من إصدارات التطبيق…"
         io.execute {
+            var downloadedApk: File? = null
             try {
+                val installedInfo = packageManager.getPackageInfo(packageName, packageInfoFlags())
+                val installedVersionCode = packageVersionCode(installedInfo)
+                val currentVersionName = installedInfo.versionName.orEmpty()
+
                 val connection = (URL(RELEASE_API).openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
                     connectTimeout = 15000
@@ -276,77 +332,110 @@ class UnifiedDashboardActivity : Activity() {
                     setRequestProperty("Accept", "application/vnd.github+json")
                     setRequestProperty("User-Agent", USER_AGENT)
                 }
-                val release = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
-                connection.disconnect()
-                val tag = release.optString("tag_name").removePrefix("v")
-                val current = packageManager.getPackageInfo(packageName, 0).versionName.orEmpty()
+                val release = try {
+                    if (connection.responseCode !in 200..299) {
+                        throw IllegalStateException("GitHub release lookup failed: HTTP ${connection.responseCode}")
+                    }
+                    JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                } finally {
+                    connection.disconnect()
+                }
+
+                val tag = release.optString("tag_name")
                 val assets = release.optJSONArray("assets")
                 var apkUrl: String? = null
                 if (assets != null) {
                     for (index in 0 until assets.length()) {
                         val asset = assets.getJSONObject(index)
-                        if (asset.optString("name").endsWith(".apk", ignoreCase = true)) {
+                        if (asset.optString("name").equals("Mumin-AI-Trader.apk", ignoreCase = true)) {
                             apkUrl = asset.optString("browser_download_url")
                             break
                         }
                     }
                 }
-                if (tag.isBlank() || apkUrl.isNullOrBlank() || compareVersions(tag, current) <= 0) {
-                    runOnUiThread {
-                        connectionStatus.text = if (apkUrl.isNullOrBlank()) {
-                            "لا يوجد ملف APK في أحدث إصدار منشور."
-                        } else {
-                            "التطبيق محدّث بالفعل · $current"
-                        }
-                    }
+                if (apkUrl.isNullOrBlank()) {
+                    runOnUiThread { connectionStatus.text = "لا يوجد ملف APK موثوق في أحدث إصدار منشور." }
                     return@execute
                 }
-                val downloadUrl = apkUrl
-                if (!downloadUrl.startsWith("https://github.com/")) {
+
+                val downloadUri = Uri.parse(apkUrl)
+                if (
+                    downloadUri.scheme != "https" ||
+                    !downloadUri.host.equals("github.com", ignoreCase = true) ||
+                    downloadUri.userInfo != null
+                ) {
                     throw IllegalStateException("Release asset URL is not an approved GitHub HTTPS URL.")
                 }
-                runOnUiThread { connectionStatus.text = "الإصدار $tag متاح. جارٍ التنزيل…" }
-                val download = (URL(downloadUrl).openConnection() as HttpURLConnection).apply {
+
+                runOnUiThread { connectionStatus.text = "الإصدار ${tag.ifBlank { "الجديد" }} متاح للفحص…" }
+                val download = (URL(apkUrl).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 20000
                     readTimeout = 30000
+                    instanceFollowRedirects = true
                     setRequestProperty("User-Agent", USER_AGENT)
                 }
                 val directory = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
                     ?: throw IllegalStateException("App download directory is unavailable.")
-                if (!directory.exists()) directory.mkdirs()
-                val apk = File(directory, "Mumin-AI-Trader-$tag.apk")
-                download.inputStream.use { input -> apk.outputStream().use { output -> input.copyTo(output) } }
-                download.disconnect()
+                if (!directory.exists() && !directory.mkdirs()) {
+                    throw IllegalStateException("App download directory could not be created.")
+                }
+                val apk = File(directory, "Mumin-AI-Trader-update.apk")
+                downloadedApk = apk
+                try {
+                    if (download.responseCode !in 200..299) {
+                        throw IllegalStateException("APK download failed: HTTP ${download.responseCode}")
+                    }
+                    download.inputStream.use { input ->
+                        apk.outputStream().use { output -> input.copyTo(output) }
+                    }
+                } finally {
+                    download.disconnect()
+                }
+
                 if (!apk.isFile || apk.length() < 1024) {
                     throw IllegalStateException("Downloaded APK is incomplete.")
                 }
-                val archiveInfo = packageManager.getPackageArchiveInfo(apk.absolutePath, 0)
-                if (archiveInfo?.packageName != packageName) {
-                    apk.delete()
+
+                val archiveInfo = packageManager.getPackageArchiveInfo(
+                    apk.absolutePath,
+                    packageInfoFlags()
+                ) ?: throw IllegalStateException("Downloaded file is not a valid Android APK.")
+
+                if (archiveInfo.packageName != packageName) {
                     throw IllegalStateException("Downloaded APK package does not match this application.")
                 }
+
+                if (!hasCompatibleSigningCertificate(archiveInfo)) {
+                    throw IllegalStateException(
+                        "توقيع APK لا يطابق شهادة التطبيق المثبّت؛ أوقفنا التثبيت لحماية بياناتك."
+                    )
+                }
+
+                val candidateVersionCode = packageVersionCode(archiveInfo)
+                if (candidateVersionCode <= installedVersionCode) {
+                    apk.delete()
+                    downloadedApk = null
+                    runOnUiThread {
+                        connectionStatus.text =
+                            "لا يوجد تحديث أحدث. المثبّت $currentVersionName (code $installedVersionCode)."
+                    }
+                    return@execute
+                }
+
                 pendingInstall = apk
                 runOnUiThread {
-                    connectionStatus.text = "اكتمل التنزيل. جارٍ فتح مثبت Android…"
+                    connectionStatus.text =
+                        "تم التحقق من الحزمة والتوقيع والإصدار ${archiveInfo.versionName ?: tag}. جارٍ فتح مثبت Android…"
                     installDownloadedApk(apk)
                 }
             } catch (error: Exception) {
+                downloadedApk?.delete()
                 runOnUiThread {
-                    connectionStatus.text = "تعذر التحقق من التحديث: ${error.message ?: "unknown error"}"
+                    connectionStatus.text =
+                        "تعذر اعتماد التحديث؛ لم يبدأ التثبيت: ${error.message ?: "unknown error"}"
                 }
             }
         }
-    }
-
-    private fun compareVersions(first: String, second: String): Int {
-        val left = first.split(".", "-", "+").map { it.toIntOrNull() ?: 0 }
-        val right = second.split(".", "-", "+").map { it.toIntOrNull() ?: 0 }
-        for (index in 0 until maxOf(left.size, right.size)) {
-            val a = left.getOrElse(index) { 0 }
-            val b = right.getOrElse(index) { 0 }
-            if (a != b) return a.compareTo(b)
-        }
-        return 0
     }
 
     private fun installDownloadedApk(apk: File) {
