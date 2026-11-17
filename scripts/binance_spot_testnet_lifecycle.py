@@ -623,6 +623,327 @@ async def run_cycle(args: argparse.Namespace) -> int:
         }, indent=2))
 
 
+async def run_opoco_cycle(args: argparse.Namespace) -> int:
+    if args.testnet_max_order_usdt is None:
+        settings = Settings()
+    else:
+        testnet_cap = Decimal(args.testnet_max_order_usdt)
+        if not testnet_cap.is_finite() or testnet_cap <= 0 or testnet_cap > Decimal("6.00"):
+            raise SpotExecutionError("The Testnet-only order-cap override must be between 0 and 6.00 USDT.")
+        settings = Settings(MAX_TRADE_ALLOCATION_USD=testnet_cap)
+    require_testnet(settings)
+    if args.confirm_testnet_cycle != "TESTNET_ONLY":
+        raise SpotExecutionError("Explicit TESTNET_ONLY confirmation is required.")
+
+    symbol = args.symbol.upper()
+    if symbol not in settings.watchlist_symbols:
+        raise SpotExecutionError("The selected symbol is not in the configured watchlist.")
+    quantity = Decimal(args.quantity)
+    working_price = Decimal(args.working_price)
+    take_profit = Decimal(args.take_profit_price)
+    stop_price = Decimal(args.stop_price)
+    stop_limit = Decimal(args.stop_limit_price)
+    values = (quantity, working_price, take_profit, stop_price, stop_limit)
+    if not all(value.is_finite() and value > 0 for value in values):
+        raise SpotExecutionError("OPOCO quantity and prices must be finite positive decimals.")
+    if (
+        args.buy_timeout_seconds < 10 or args.buy_timeout_seconds > 3600
+        or args.oco_timeout_seconds < 10 or args.oco_timeout_seconds > 3600
+        or args.poll_seconds <= 0 or args.poll_seconds > 60
+    ):
+        raise SpotExecutionError("OPOCO timeouts or polling interval are outside safe bounds.")
+
+    run_id = make_run_id()
+    directory = Path(args.evidence_root).expanduser() / run_id
+    directory.mkdir(parents=True, exist_ok=False)
+    os.chmod(directory, 0o700)
+    database = directory / "testnet-ledger.sqlite3"
+    os.chmod(directory, 0o700)
+    store = SQLiteOrderStore(str(database))
+    client = BinanceSpotTestnetExecution(settings, store)
+    list_client_id = f"mumin-opoco-{uuid.uuid4().hex[:10]}"
+    working_client_id = f"mumin-work-{uuid.uuid4().hex[:10]}"
+    above_client_id = f"mumin-tp-{uuid.uuid4().hex[:10]}"
+    below_client_id = f"mumin-sl-{uuid.uuid4().hex[:10]}"
+    evidence = Evidence(directory)
+    summary: dict[str, Any] = {
+        "run_id": run_id,
+        "environment": "BINANCE_SPOT_TESTNET",
+        "protection_mode": "OPOCO",
+        "rest_base_url": TESTNET_REST_BASE_URL,
+        "symbol": symbol,
+        "testnet_max_order_usdt": str(settings.MAX_TRADE_ALLOCATION_USD),
+        "testnet_cap_override_used": args.testnet_max_order_usdt is not None,
+        "opoco_list_client_order_id": list_client_id,
+        "working_client_order_id": working_client_id,
+        "pending_above_client_order_id": above_client_id,
+        "pending_below_client_order_id": below_client_id,
+        "database": str(database),
+        "evidence_directory": str(directory),
+        "started_at": utc_now(),
+        "status": "RUNNING",
+        "mainnet_used": False,
+        "secrets_written": False,
+    }
+    evidence.record("opoco_run_started", {
+        "run_id": run_id,
+        "symbol": symbol,
+        "quantity": quantity,
+        "working_price": working_price,
+        "take_profit_price": take_profit,
+        "stop_price": stop_price,
+        "stop_limit_price": stop_limit,
+        "rest_base_url": TESTNET_REST_BASE_URL,
+    })
+    try:
+        initial = await client.reconcile()
+        evidence.record("initial_reconciliation", initial)
+        if initial["discrepancies"] or initial["halted"]:
+            raise SpotExecutionError(
+                "Initial Testnet reconciliation is not clean. No OPOCO was submitted; inspect evidence."
+            )
+        if not initial["realized_pnl"]["complete"]:
+            raise SpotExecutionError("Initial FIFO/fee ledger is incomplete; no OPOCO was submitted.")
+
+        ticker = await client._ticker_price(symbol)
+        symbol_info = await client._exchange_symbol(symbol)
+        capability = opoco_capability(symbol_info)
+        base_asset = str(symbol_info.get("baseAsset", "")).upper()
+        quote_asset = str(symbol_info.get("quoteAsset", "")).upper()
+        if quote_asset != settings.QUOTE_ASSET.upper():
+            raise SpotExecutionError("OPOCO lifecycle runner only permits the configured USDT quote asset.")
+        if not capability["supported_by_exchange_info"]:
+            raise SpotExecutionError(
+                "Exchange Information does not enable OPOCO for this symbol; no order was submitted."
+            )
+        working_notional = quantity * working_price
+        if (
+            working_notional < settings.MIN_TRADE_ALLOCATION_USD
+            or working_notional > settings.MAX_TRADE_ALLOCATION_USD
+        ):
+            raise SpotExecutionError("OPOCO working BUY notional is outside configured bounds.")
+
+        params, validated_metadata = await client.opoco._validate_request(
+            symbol=symbol,
+            quantity=quantity,
+            working_price=working_price,
+            take_profit_price=take_profit,
+            stop_price=stop_price,
+            stop_limit_price=stop_limit,
+            list_client_order_id=list_client_id,
+            working_client_order_id=working_client_id,
+            pending_above_client_order_id=above_client_id,
+            pending_below_client_order_id=below_client_id,
+        )
+        fee_preflight = await client._bnb_fee_readiness(
+            symbol=symbol,
+            buy_notional=working_notional,
+            sell_notional=quantity * max(take_profit, stop_limit),
+        )
+        evidence.record("opoco_pre_submit_validation", {
+            "exchange_capability": capability,
+            "working_order_template": params,
+            "symbol_info": validated_metadata,
+            "last_price": ticker,
+            "bnb_fee_preflight": fee_preflight,
+        })
+
+        initial_response = await client.opoco.place_buy_opoco(
+            symbol=symbol,
+            quantity=quantity,
+            working_price=working_price,
+            take_profit_price=take_profit,
+            stop_price=stop_price,
+            stop_limit_price=stop_limit,
+            list_client_order_id=list_client_id,
+            working_client_order_id=working_client_id,
+            pending_above_client_order_id=above_client_id,
+            pending_below_client_order_id=below_client_id,
+        )
+        evidence.record("opoco_submission_response", initial_response)
+
+        observed = await watch_opoco(
+            client,
+            symbol=symbol,
+            list_client_order_id=list_client_id,
+            timeout_seconds=args.buy_timeout_seconds,
+            poll_seconds=args.poll_seconds,
+            evidence=evidence,
+        )
+        state = client.opoco._state(observed)
+        proof = opoco_result(observed)
+        working_report = proof["working_order"]
+        working_status = str((working_report or {}).get("status", "")).upper()
+
+        if state == "WORKING":
+            observed = await client.opoco.cancel_order_list(
+                symbol=symbol,
+                list_client_order_id=list_client_id,
+            )
+            evidence.record("opoco_working_order_cancel_after_timeout", observed)
+            state = client.opoco._state(observed)
+            proof = opoco_result(observed)
+            working_report = proof["working_order"]
+            working_status = str((working_report or {}).get("status", "")).upper()
+        elif state == "PARTIAL_FILL_REVIEW" and working_status != "FILLED":
+            observed = await client.opoco.cancel_order_list(
+                symbol=symbol,
+                list_client_order_id=list_client_id,
+            )
+            evidence.record("opoco_partial_working_order_cancel", observed)
+            state = client.opoco._state(observed)
+            proof = opoco_result(observed)
+            working_report = proof["working_order"]
+            working_status = str((working_report or {}).get("status", "")).upper()
+
+        if state == "PROTECTION_ARMED":
+            observed = await watch_opoco(
+                client,
+                symbol=symbol,
+                list_client_order_id=list_client_id,
+                timeout_seconds=args.oco_timeout_seconds,
+                poll_seconds=args.poll_seconds,
+                evidence=evidence,
+            )
+            state = client.opoco._state(observed)
+            proof = opoco_result(observed)
+        evidence.record("opoco_final_exchange_state", observed)
+
+        await client.sync_trade_history()
+        proof = opoco_result(observed)
+        working_report = proof["working_order"]
+        protective_children = proof["protective_children"]
+        working_order_id = (
+            int(working_report["orderId"])
+            if working_report and str(working_report.get("orderId", "")).isdigit()
+            else None
+        )
+        buy_summary = (
+            store.order_fill_summary(symbol, working_order_id, base_asset=base_asset)
+            if working_order_id is not None else None
+        )
+        buy_fills = (
+            store.trade_fills_for_order(symbol, working_order_id)
+            if working_order_id is not None else []
+        )
+        buy_fee_mismatches = commission_asset_mismatches(buy_fills, settings.BNB_FEE_ASSET)
+        child_fills: dict[str, list[dict[str, Any]]] = {}
+        child_fee_mismatches: list[dict[str, str]] = []
+        for child in protective_children:
+            child_id = str(child.get("orderId", ""))
+            if child_id.isdigit():
+                fills = store.trade_fills_for_order(symbol, int(child_id))
+                child_fills[child_id] = fills
+                child_fee_mismatches.extend(
+                    commission_asset_mismatches(fills, settings.BNB_FEE_ASSET)
+                )
+        pnl = store.realized_pnl_report(settings.QUOTE_ASSET)
+        reconciliation = await client.reconcile()
+        fill_discrepancies = store.order_fill_quantity_discrepancies()
+        unmatched = store.unmatched_trade_order_ids()
+        fifo_open = Decimal(
+            str(pnl.get("symbols", {}).get(symbol, {}).get("open_quantity", "0"))
+        )
+        net_quantity = (
+            Decimal(buy_summary["net_base_quantity"])
+            if buy_summary is not None else Decimal("0")
+        )
+        filters = {
+            item.get("filterType"): item
+            for item in symbol_info.get("filters", [])
+            if isinstance(item, dict)
+        }
+        lot = filters.get("LOT_SIZE", {})
+        step = Decimal(str(lot.get("stepSize", "0")))
+        sellable_net = round_down_to_step(net_quantity, step) if net_quantity > 0 else Decimal("0")
+        child_quantities = [
+            Decimal(str(child.get("origQty", "0")))
+            for child in protective_children
+        ]
+        protected_quantity = min(child_quantities) if len(child_quantities) == 2 else Decimal("0")
+        unprotected_dust = net_quantity - protected_quantity
+        children_cover = (
+            len(child_quantities) == 2
+            and child_quantities[0] == child_quantities[1] == sellable_net
+            and protected_quantity <= net_quantity
+        )
+        all_fee_mismatches = buy_fee_mismatches + child_fee_mismatches
+        reconciliation_clean = (
+            not reconciliation["discrepancies"] and not reconciliation["halted"]
+        )
+        verified = (
+            proof["mutual_cancel_proven"]
+            and bool(pnl.get("complete"))
+            and fifo_open == 0
+            and unprotected_dust == net_quantity - sellable_net
+            and unprotected_dust == 0
+            and children_cover
+            and not all_fee_mismatches
+            and not fill_discrepancies
+            and not unmatched
+            and reconciliation_clean
+        )
+        summary.update({
+            "opoco_state": state,
+            "order_list_id": proof["orderListId"],
+            "working_order_id": str(working_order_id or ""),
+            "working_status": working_status,
+            "working_fill_summary": buy_summary,
+            "working_fee_asset_mismatches": buy_fee_mismatches,
+            "opoco_children": proof["children"],
+            "protective_child_fills": child_fills,
+            "protective_fee_asset_mismatches": child_fee_mismatches,
+            "mutual_cancel_proven": proof["mutual_cancel_proven"],
+            "net_base_quantity": str(net_quantity),
+            "protected_quantity": str(protected_quantity),
+            "sellable_net_quantity": str(sellable_net),
+            "unprotected_dust_quantity": str(unprotected_dust),
+            "opoco_children_cover_quantity": children_cover,
+            "fifo_complete": bool(pnl.get("complete")),
+            "fifo_open_inventory_quantity": str(fifo_open),
+            "fifo_realized_pnl": pnl,
+            "fill_discrepancies": fill_discrepancies,
+            "unmatched_trade_orders": unmatched,
+            "reconciliation_discrepancies": reconciliation["discrepancies"],
+            "reconciliation_clean": reconciliation_clean,
+            "all_fee_asset_mismatches": all_fee_mismatches,
+            "status": "TESTNET_OPOCO_CYCLE_VERIFIED" if verified else "TESTNET_OPOCO_CYCLE_INCOMPLETE",
+            "finished_at": utc_now(),
+        })
+        evidence.record("opoco_fifo_realized_pnl_report", pnl)
+        evidence.record("opoco_final_reconciliation", reconciliation)
+        return 0 if verified else 2
+    except Exception as exc:
+        store.halt("TESTNET_OPOCO_LIFECYCLE_INCOMPLETE")
+        summary.update({
+            "status": "TESTNET_OPOCO_LIFECYCLE_INCOMPLETE",
+            "error_type": type(exc).__name__,
+            "error": safe_error_message(exc, settings),
+            "finished_at": utc_now(),
+        })
+        evidence.record("opoco_run_error", {
+            "type": type(exc).__name__,
+            "message": safe_error_message(exc, settings),
+        })
+        return 2
+    finally:
+        evidence.summary(summary)
+        await client.close()
+        print(json.dumps({
+            "status": summary["status"],
+            "error": summary.get("error"),
+            "run_id": run_id,
+            "symbol": symbol,
+            "opoco_list_client_order_id": list_client_id,
+            "working_client_order_id": working_client_id,
+            "database": str(database),
+            "evidence_directory": str(directory),
+            "summary_file": str(evidence.summary_path),
+            "mainnet_used": False,
+            "secrets_written": False,
+        }, indent=2))
+
+
 async def inspect_market(args: argparse.Namespace) -> int:
     settings = Settings()
     require_testnet(settings)
