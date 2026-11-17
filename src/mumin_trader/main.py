@@ -4,6 +4,7 @@ import hmac
 from contextlib import asynccontextmanager
 import os
 import sqlite3
+from decimal import Decimal
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
