@@ -568,10 +568,20 @@ class SQLiteOrderStore:
             has_oco_table = db.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='spot_oco_order_lists'"
             ).fetchone() is not None
+            oco_columns = (
+                {row["name"] for row in db.execute("PRAGMA table_info(spot_oco_order_lists)").fetchall()}
+                if has_oco_table else set()
+            )
+            child_id_columns = [
+                name for name in ("working_order_id", "above_order_id", "below_order_id")
+                if name in oco_columns
+            ]
+            selected_oco_columns = [
+                "list_client_order_id", "symbol", "response_json", *child_id_columns
+            ]
             oco_rows = (
                 db.execute(
-                    """SELECT list_client_order_id,symbol,working_order_id,above_order_id,below_order_id,response_json
-                       FROM spot_oco_order_lists"""
+                    "SELECT " + ", ".join(selected_oco_columns) + " FROM spot_oco_order_lists"
                 ).fetchall()
                 if has_oco_table else []
             )
@@ -599,7 +609,7 @@ class SQLiteOrderStore:
                 discrepancies.append(f"OCO_RESPONSE_INVALID:{row['list_client_order_id']}")
                 continue
             reports = response.get("orderReports", [])
-            for child_id in (row["working_order_id"], row["above_order_id"], row["below_order_id"]):
+            for child_id in (row[name] for name in child_id_columns):
                 if child_id is None:
                     continue
                 report = next(
@@ -627,16 +637,25 @@ class SQLiteOrderStore:
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='spot_oco_order_lists'"
             ).fetchone() is not None
             if has_oco_table:
+                oco_columns = {
+                    row["name"] for row in db.execute(
+                        "PRAGMA table_info(spot_oco_order_lists)"
+                    ).fetchall()
+                }
+                match_columns = [
+                    name for name in ("working_order_id", "above_order_id", "below_order_id")
+                    if name in oco_columns
+                ]
+                match_expression = " OR ".join(
+                    "CAST(c." + name + " AS INTEGER)=f.order_id" for name in match_columns
+                ) or "1=0"
                 rows = db.execute(
                     """SELECT DISTINCT f.symbol || ':' || CAST(f.order_id AS TEXT) AS order_ref
                        FROM spot_trade_fills AS f
                        LEFT JOIN spot_order_intents AS o
                          ON o.symbol=f.symbol AND CAST(o.exchange_order_id AS INTEGER)=f.order_id
                        LEFT JOIN spot_oco_order_lists AS c
-                         ON c.symbol=f.symbol
-                         AND (CAST(c.working_order_id AS INTEGER)=f.order_id
-                               OR CAST(c.above_order_id AS INTEGER)=f.order_id
-                              OR CAST(c.below_order_id AS INTEGER)=f.order_id)
+                         ON c.symbol=f.symbol AND (""" + match_expression + """)
                        WHERE o.client_order_id IS NULL AND c.list_client_order_id IS NULL"""
                 ).fetchall()
             else:
