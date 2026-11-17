@@ -265,10 +265,10 @@ def submit_paper_order(
                 )
             daily_start = Decimal(account["daily_start_equity"])
             high_water = Decimal(account["high_watermark"])
-            if marked_equity <= daily_start * Decimal("0.98"):
-                raise CommandRejected("Daily loss limit reached; new Paper orders are blocked.")
-            if high_water > ZERO and marked_equity <= high_water * Decimal("0.95"):
-                raise CommandRejected("Maximum drawdown limit reached; new Paper orders are blocked.")
+            if side == "BUY" and marked_equity <= daily_start * Decimal("0.98"):
+                raise CommandRejected("Daily loss limit reached; new Paper entries are blocked.")
+            if side == "BUY" and high_water > ZERO and marked_equity <= high_water * Decimal("0.95"):
+                raise CommandRejected("Maximum drawdown limit reached; new Paper entries are blocked.")
 
             if side == "BUY":
                 open_count = int(db.execute("SELECT COUNT(*) FROM bot_positions").fetchone()[0])
