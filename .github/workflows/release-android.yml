@@ -6,7 +6,7 @@ on:
       version:
         description: "Release version, for example 1.2.0"
         required: true
-        default: "1.2.0"
+        default: "1.4.3"
   push:
     tags:
       - "v*"
@@ -32,6 +32,39 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
+
+      - name: Validate release version metadata
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          gradle = Path("android/app/build.gradle.kts").read_text(encoding="utf-8")
+          version_name = re.search(r'versionName\s*=\s*"([^"]+)"', gradle)
+          version_code = re.search(r'versionCode\s*=\s*(\d+)', gradle)
+          if not version_name or not version_code:
+              raise SystemExit("Android version metadata could not be read.")
+          expected = version_name.group(1)
+          code = int(version_code.group(1))
+          if os.environ["GITHUB_REF"].startswith("refs/tags/"):
+              requested = os.environ["REF_NAME"].removeprefix("v")
+          else:
+              requested = os.environ.get("INPUT_VERSION", "")
+          if requested != expected:
+              raise SystemExit(
+                  f"Release tag/input {requested!r} does not match APK versionName {expected!r}."
+              )
+          if code < 8:
+              raise SystemExit("Android versionCode must be greater than the previous 1.4.2 release.")
+          print(f"Release metadata verified: versionName={expected}, versionCode={code}.")
+          PY
 
       - name: Validate signing secrets
         shell: bash
