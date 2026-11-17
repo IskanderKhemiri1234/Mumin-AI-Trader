@@ -13,6 +13,7 @@ from scripts.binance_spot_testnet_lifecycle import (
 from mumin_trader.exchanges.binance.spot_testnet_oco import (
     SQLiteOCOOrderStore,
     SpotExecutionError,
+    validate_fixed_exit_risk,
     validate_oco_leg_notionals,
 )
 from mumin_trader.exchanges.binance.spot_testnet_opoco import BinanceSpotTestnetOPOCO
@@ -270,3 +271,14 @@ def test_opoco_result_does_not_claim_protection_for_partial_working_order():
         below_status="PENDING_NEW",
     )
     assert opoco_result(response)["mutual_cancel_proven"] is False
+
+
+def test_fixed_exit_risk_enforces_approved_stop_and_take_profit_percentages():
+    result = validate_fixed_exit_risk("50000", "50625", "49750")
+    assert Decimal(result["stop_loss_percent"]) == Decimal("0.50")
+    assert Decimal(result["take_profit_percent"]) == Decimal("1.25")
+
+
+def test_fixed_exit_risk_rejects_unapproved_exit_percentages():
+    with pytest.raises(SpotExecutionError):
+        validate_fixed_exit_risk("50000", "51000", "49750")
