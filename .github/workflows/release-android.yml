@@ -47,8 +47,8 @@ jobs:
           from pathlib import Path
 
           gradle = Path("android/app/build.gradle.kts").read_text(encoding="utf-8")
-          version_name = re.search(r'versionName\\s*=\\s*"([^"]+)"', gradle)
-          version_code = re.search(r'versionCode\\s*=\\s*(\\d+)', gradle)
+          version_name = re.search(r'versionName\s*=\s*"([^"]+)"', gradle)
+          version_code = re.search(r'versionCode\s*=\s*(\d+)', gradle)
           if not version_name or not version_code:
               raise SystemExit("Android version metadata could not be read.")
           expected = version_name.group(1)
