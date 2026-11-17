@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from config.config import get_settings
 from mumin_trader.exchanges.binance.market_stream_service import MarketStreamService, WATCH_SYMBOLS
 from mumin_trader.execution.paper_reconciliation import reconcile_paper_ledger
+from mumin_trader.operations_chat import router as operations_chat_router
 from mumin_trader.execution.command_plane import (
     CommandRejected,
     get_command,
@@ -51,6 +52,8 @@ app = FastAPI(
     description="Private, read-only trading operations dashboard and safety-first Spot research service.",
     lifespan=app_lifespan,
 )
+
+app.include_router(operations_chat_router)
 
 
 def _dashboard_database() -> Path:
