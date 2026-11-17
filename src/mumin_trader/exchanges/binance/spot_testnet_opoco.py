@@ -478,10 +478,26 @@ class BinanceSpotTestnetOPOCO:
         if working_status == "FILLED":
             above = await query_child(request["pendingAboveClientOrderId"])
             below = await query_child(request["pendingBelowClientOrderId"])
-            if above is None or below is None:
-                raise SpotOrderOutcomeUnknown(
-                    "Working BUY is filled but both pending OCO legs are not queryable."
-                )
+            if above is None:
+                above_parent = parent_orders[request["pendingAboveClientOrderId"]]
+                above = {
+                    **above_parent,
+                    "status": "UNKNOWN",
+                    "executedQty": "0",
+                    "origQty": "0",
+                    "type": "LIMIT_MAKER",
+                    "side": "SELL",
+                }
+            if below is None:
+                below_parent = parent_orders[request["pendingBelowClientOrderId"]]
+                below = {
+                    **below_parent,
+                    "status": "UNKNOWN",
+                    "executedQty": "0",
+                    "origQty": "0",
+                    "type": "STOP_LOSS_LIMIT",
+                    "side": "SELL",
+                }
             if (
                 str(above.get("clientOrderId", "")) != request["pendingAboveClientOrderId"]
                 or str(below.get("clientOrderId", "")) != request["pendingBelowClientOrderId"]
