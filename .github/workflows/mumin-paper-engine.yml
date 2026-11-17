@@ -173,6 +173,7 @@ jobs:
             mumin-paper-ledger/latest-report.html
             mumin-paper-ledger/latest-report.md
             mumin-paper-ledger/latest-state.json
+            mumin-paper-ledger/latest-accounting-audit.json
           if-no-files-found: error
           retention-days: 30
 
