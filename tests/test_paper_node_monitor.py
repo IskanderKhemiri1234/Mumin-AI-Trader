@@ -30,7 +30,7 @@ def test_paper_node_monitor_passes_healthy_read_only_state(tmp_path):
 
     result = inspect_node(database, now=now)
 
-    assert result["overall"] == "PASS"
+    assert result["overall"] == "PASS", result["checks"]
     assert result["execution_mode"] == "PAPER_ONLY"
     assert result["mainnet_authorized"] is False
     assert all(item["status"] in {"PASS", "WARN"} for item in result["checks"])
