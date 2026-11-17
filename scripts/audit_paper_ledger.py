@@ -189,16 +189,20 @@ def build_audit(database: str | Path) -> dict[str, Any]:
                     if closed else ZERO
                 ),
                 "gross_pnl_usdt": str(values["gross_pnl_usdt"]),
-                "entry_fees_usdt": str(values["entry_fees_usdt"]),
-                "exit_fees_usdt": str(values["exit_fees_usdt"]),
-                "total_fees_usdt": str(values["entry_fees_usdt"] + values["exit_fees_usdt"]),
+                "closed_round_trip_entry_fees_usdt": str(values["entry_fees_usdt"]),
+                "closed_round_trip_exit_fees_usdt": str(values["exit_fees_usdt"]),
+                "fill_buy_fees_usdt": str(fees_by_symbol[symbol]["BUY"]),
+                "fill_sell_fees_usdt": str(fees_by_symbol[symbol]["SELL"]),
+                "fill_total_fees_usdt": str(
+                    fees_by_symbol[symbol]["BUY"] + fees_by_symbol[symbol]["SELL"]
+                ),
                 "net_pnl_usdt": str(values["net_pnl_usdt"]),
                 "profit_factor_net": str(net_wins / net_losses) if net_losses > ZERO else None,
                 "buy_notional_usdt": str(values["buy_notional_usdt"]),
                 "sell_notional_usdt": str(values["sell_notional_usdt"]),
                 "entry_reason_counts": dict(values["entry_reasons"]),
                 "exit_signal_context_counts": dict(values["exit_signals"]),
-                "exit_trigger_reason_note": "Legacy fills do not persist whether CLOSE was caused by stop, target, or SELL signal.",
+                "exit_trigger_reason_note": "Exact exit trigger is read from exit_reason; NULL on legacy fills is reported as unknown.",
             }
 
         reconciliation = reconcile_paper_ledger(connection)
