@@ -32,14 +32,23 @@ class MarketStreamService:
         self._lock = asyncio.Lock()
         self._assets: dict[str, dict[str, Any]] = {}
         self._last_received_at: datetime | None = None
+        self._connection_state = "connecting"
+        self._reconnect_count = 0
+        self._last_error: str | None = None
+        self._stop_requested = False
 
     async def start(self) -> None:
-        if self._task is None or self._task.done():
-            self._task = asyncio.create_task(
-                self._consume(), name="mumin-binance-public-market-stream"
-            )
+        async with self._lock:
+            if self._task is None or self._task.done():
+                self._stop_requested = False
+                self._connection_state = "connecting"
+                self._task = asyncio.create_task(
+                    self._consume(), name="mumin-binance-public-market-stream"
+                )
 
     async def close(self) -> None:
+        self._stop_requested = True
+        self._connection_state = "stopped"
         self._client.stop()
         task = self._task
         self._task = None
@@ -58,7 +67,7 @@ class MarketStreamService:
             status = (
                 "live" if age is not None and age <= 30
                 else "stale" if self._assets
-                else "connecting"
+                else self._connection_state
             )
             assets = [dict(self._assets[symbol]) for symbol in WATCH_SYMBOLS if symbol in self._assets]
             return {
@@ -66,42 +75,63 @@ class MarketStreamService:
                 "source": "BINANCE_PUBLIC_SERVER_STREAM",
                 "updated_at": self._last_received_at.isoformat() if self._last_received_at else None,
                 "age_seconds": round(age, 3) if age is not None else None,
+                "connection_state": self._connection_state,
+                "reconnect_count": self._reconnect_count,
+                "last_error": self._last_error,
                 "assets": assets,
             }
 
     async def _consume(self) -> None:
-        try:
-            async for event in self._client.events():
-                payload = event.get("data") if isinstance(event, dict) else None
-                records = payload if isinstance(payload, list) else [event]
-                received = datetime.now(timezone.utc)
-                updates: dict[str, dict[str, Any]] = {}
-                for item in records:
-                    if not isinstance(item, dict):
-                        continue
-                    symbol = str(item.get("s", "")).upper()
-                    if symbol not in WATCH_SYMBOLS:
-                        continue
-                    try:
-                        price = float(item["c"])
-                        change = float(item["P"])
-                        event_time = int(item.get("E", 0))
-                    except (KeyError, TypeError, ValueError):
-                        continue
-                    if not math.isfinite(price) or price <= 0 or not math.isfinite(change):
-                        continue
-                    updates[symbol] = {
-                        "symbol": symbol,
-                        "price": price,
-                        "change": change,
-                        "event_time_ms": event_time,
-                        "received_at": received.isoformat(),
-                    }
-                if updates:
-                    async with self._lock:
-                        self._assets.update(updates)
-                        self._last_received_at = received
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("Server-side Binance market stream stopped unexpectedly")
+        delay = 1.0
+        while not self._stop_requested:
+            try:
+                self._connection_state = "connecting"
+                async for event in self._client.events():
+                    if self._stop_requested:
+                        return
+                    payload = event.get("data") if isinstance(event, dict) else None
+                    records = payload if isinstance(payload, list) else [event]
+                    received = datetime.now(timezone.utc)
+                    updates: dict[str, dict[str, Any]] = {}
+                    for item in records:
+                        if not isinstance(item, dict):
+                            continue
+                        symbol = str(item.get("s", "")).upper()
+                        if symbol not in WATCH_SYMBOLS:
+                            continue
+                        try:
+                            price = float(item["c"])
+                            change = float(item["P"])
+                            event_time = int(item.get("E", 0))
+                        except (KeyError, TypeError, ValueError):
+                            continue
+                        if not math.isfinite(price) or price <= 0 or not math.isfinite(change):
+                            continue
+                        updates[symbol] = {
+                            "symbol": symbol, "price": price, "change": change,
+                            "event_time_ms": event_time, "received_at": received.isoformat(),
+                        }
+                    if updates:
+                        async with self._lock:
+                            self._assets.update(updates)
+                            self._last_received_at = received
+                            self._connection_state = "connected"
+                            self._last_error = None
+                        delay = 1.0
+                if not self._stop_requested:
+                    self._connection_state = "disconnected"
+                    self._reconnect_count += 1
+                    self._last_error = "Market stream ended unexpectedly."
+                    await asyncio.sleep(delay)
+                    delay = min(delay * 2, 30.0)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if self._stop_requested:
+                    return
+                logger.exception("Server-side Binance market stream failed")
+                self._connection_state = "disconnected"
+                self._reconnect_count += 1
+                self._last_error = type(exc).__name__
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30.0)
