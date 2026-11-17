@@ -62,6 +62,8 @@ def classify_intent(message: str) -> str:
             "portfolio", "balance", "cash", "equity", "account", "funds",
         ),
     }
+    if any(term in value for term in ("ملخص", "حاله عامه", "summary", "overview", "dashboard")):
+        return "overview"
     for intent in ("alerts", "events", "engine", "positions", "pnl", "portfolio"):
         if any(term in value for term in groups[intent]):
             return intent
@@ -261,7 +263,7 @@ def read_operations_snapshot(database: Path) -> dict[str, Any]:
     try:
         from mumin_trader.execution.paper_reconciliation import reconcile_paper_ledger
         reconciliation = reconcile_paper_ledger(db)
-    except (sqlite3.Error, KeyError, ValueError, InvalidOperation):
+    except (sqlite3.Error, KeyError, ValueError, InvalidOperation, ZeroDivisionError, TypeError):
         reconciliation = {"status": "UNAVAILABLE", "issues": ["Ledger reconciliation could not be completed."]}
     if reconciliation.get("status") not in {"PASS", "INCOMPLETE"}:
         alerts.append({
