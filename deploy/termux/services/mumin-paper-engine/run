@@ -12,4 +12,4 @@ export ALLOW_MAINNET=false
 export LIVE_TRADING_ENABLED=false
 export TESTNET_ORDER_PREFLIGHT_ENABLED=false
 export TESTNET_SPOT_EXECUTION_ENABLED=false
-exec python scripts/paper_worker_supervisor.py --db data/mumin_public_paper.db --interval-seconds 30 --data-source BINANCE_PUBLIC_MARKET_DATA --restart-initial-seconds 2 --restart-max-seconds 60 >> "$LOG_DIR/paper-engine.log" 2>&1
+exec python scripts/paper_worker_supervisor.py --db data/mumin_public_paper.db --interval-seconds 60 --data-source BINANCE_PUBLIC_MARKET_DATA --restart-initial-seconds 2 --restart-max-seconds 60 >> "$LOG_DIR/paper-engine.log" 2>&1
