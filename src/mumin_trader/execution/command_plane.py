@@ -497,3 +497,91 @@ def get_command(database_path: str | Path, command_id: str) -> dict[str, Any] | 
         result = dict(row)
         result["result"] = json.loads(result["result_json"]) if result["result_json"] else None
         return result
+
+
+
+def latch_emergency_stop(
+    database_path: str | Path,
+    *,
+    idempotency_key: str,
+    confirmed: bool,
+    actor: str = "dashboard_authenticated",
+) -> dict[str, Any]:
+    """Latch the Paper entry halt without closing or misrepresenting open exposure."""
+    if not idempotency_key or len(idempotency_key) > 128:
+        raise CommandRejected("A valid Idempotency-Key header is required.", status_code=422)
+    if confirmed is not True:
+        raise CommandRejected("Explicit emergency-stop confirmation is required.", status_code=428)
+    payload_hash = hashlib.sha256(b'{"command":"PAPER_EMERGENCY_STOP"}').hexdigest()
+    command_id = str(uuid.uuid4())
+    now = _now()
+    with _connect(database_path) as db:
+        _ensure_schema(db)
+        db.execute("BEGIN IMMEDIATE")
+        existing = db.execute(
+            "SELECT * FROM bot_commands WHERE idempotency_key=?", (idempotency_key,)
+        ).fetchone()
+        if existing is not None:
+            if existing["payload_hash"] != payload_hash:
+                db.rollback()
+                raise CommandRejected(
+                    "Idempotency key was already used with a different payload."
+                )
+            db.commit()
+            return {
+                "command_id": existing["command_id"],
+                "status": existing["status"],
+                "duplicate": True,
+                "open_positions_closed": False,
+            }
+        account = db.execute("SELECT * FROM bot_account WHERE id=1").fetchone()
+        if account is None:
+            raise CommandRejected("Paper account is not initialized.")
+        db.execute(
+            """INSERT INTO bot_commands
+               (command_id,idempotency_key,payload_hash,command_type,status,actor,
+                created_at,updated_at)
+               VALUES (?,?,?,'EMERGENCY_STOP','RECEIVED',?,?,?)""",
+            (command_id, idempotency_key, payload_hash, actor[:120], now, now),
+        )
+        _event(db, command_id, "COMMAND_RECEIVED", "RECEIVED", "PAPER_EMERGENCY_STOP")
+        db.execute(
+            """UPDATE bot_account SET halted=1,halt_reason='MANUAL_EMERGENCY_STOP',
+               updated_at=? WHERE id=1""",
+            (now,),
+        )
+        db.execute(
+            """UPDATE bot_commands SET status='COMPLETED',result_json=?,updated_at=?
+               WHERE command_id=?""",
+            (json.dumps({
+                "halted": True,
+                "halt_reason": "MANUAL_EMERGENCY_STOP",
+                "open_positions_closed": False,
+                "open_positions": int(db.execute(
+                    "SELECT COUNT(*) FROM bot_positions"
+                ).fetchone()[0]),
+            }), now, command_id),
+        )
+        audit_table = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_runtime_audit'"
+        ).fetchone()
+        if audit_table is not None:
+            db.execute(
+                """INSERT INTO bot_runtime_audit
+                   (event_type,actor,desired_state,detail,created_at)
+                   VALUES ('EMERGENCY_STOP_LATCHED',?,'PAUSED',
+                           'New Paper entries blocked; existing positions unchanged.',?)""",
+                (actor[:120], now),
+            )
+        _event(
+            db, command_id, "EMERGENCY_STOP_LATCHED", "COMPLETED",
+            "New entries blocked; existing positions remain open until separately exited.",
+        )
+        db.commit()
+        return {
+            "command_id": command_id,
+            "status": "COMPLETED",
+            "duplicate": False,
+            "halted": True,
+            "open_positions_closed": False,
+        }
