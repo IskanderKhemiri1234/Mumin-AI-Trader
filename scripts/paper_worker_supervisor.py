@@ -242,11 +242,11 @@ def main() -> None:
     with paper_process_lock(args.db, "supervisor"):
         PaperWorkerSupervisor(
             database=args.db,
-        interval_seconds=args.interval_seconds,
-        data_source=args.data_source,
-        restart_initial_seconds=args.restart_initial_seconds,
-        restart_max_seconds=args.restart_max_seconds,
-        cycles=args.cycles,
+            interval_seconds=args.interval_seconds,
+            data_source=args.data_source,
+            restart_initial_seconds=args.restart_initial_seconds,
+            restart_max_seconds=args.restart_max_seconds,
+            cycles=args.cycles,
             run_for_seconds=args.run_for_seconds,
         ).run()
 
