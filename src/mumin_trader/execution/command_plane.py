@@ -216,8 +216,8 @@ def submit_paper_order(
             account = db.execute("SELECT * FROM bot_account WHERE id=1").fetchone()
             if account is None:
                 raise CommandRejected("Paper account is not initialized.")
-            if bool(account["halted"]):
-                raise CommandRejected(f"Paper risk halt is active: {account['halt_reason'] or 'unknown'}.")
+            if side == "BUY" and bool(account["halted"]):
+                raise CommandRejected(f"Paper risk halt blocks new entries: {account['halt_reason'] or 'unknown'}.")
             if side == "BUY":
                 if quantity is not None or quote_amount is None:
                     raise CommandRejected("BUY requires quote_amount only.", status_code=422)
