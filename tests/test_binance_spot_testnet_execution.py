@@ -1198,3 +1198,117 @@ async def test_emergency_stop_cancels_buy_entries_but_preserves_sell_protection(
         assert deletes[0].url.params.get("origClientOrderId") == "mumin-test-1001"
     finally:
         await client.close()
+
+
+def opoco_symbol_info() -> dict[str, object]:
+    payload = symbol_info()
+    symbol = payload["symbols"][0]
+    symbol["otoAllowed"] = True
+    symbol["opoAllowed"] = True
+    symbol["ocoAllowed"] = True
+    return payload
+
+
+@pytest.mark.asyncio
+async def test_opoco_submission_uses_single_server_side_order_list_and_three_child_ids(tmp_path) -> None:
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/exchangeInfo":
+            return httpx.Response(200, json=opoco_symbol_info())
+        if request.url.path == "/api/v3/account":
+            account = account_info()
+            account["balances"].append({"asset": "BNB", "free": "0.01", "locked": "0"})
+            return httpx.Response(200, json=account)
+        if request.url.path == "/api/v3/openOrders":
+            return httpx.Response(200, json=[])
+        if request.url.path == "/api/v3/myTrades":
+            return httpx.Response(200, json=[])
+        if request.url.path == "/api/v3/ticker/price":
+            symbol = request.url.params.get("symbol", "")
+            price = "50100.00" if symbol == "BTCUSDT" else "600.00"
+            return httpx.Response(200, json={"symbol": symbol, "price": price})
+        if request.url.path == "/api/v3/account/commission":
+            return httpx.Response(200, json=bnb_commission_response())
+        if request.url.path == "/api/v3/orderList/opoco" and request.method == "POST":
+            params = request.url.params
+            return httpx.Response(200, json={
+                "orderListId": 8801,
+                "contingencyType": "OPOCO",
+                "listStatusType": "EXEC_STARTED",
+                "listOrderStatus": "EXECUTING",
+                "listClientOrderId": params["listClientOrderId"],
+                "orders": [
+                    {"symbol": "BTCUSDT", "orderId": 8802, "clientOrderId": params["workingClientOrderId"]},
+                    {"symbol": "BTCUSDT", "orderId": 8803, "clientOrderId": params["pendingAboveClientOrderId"]},
+                    {"symbol": "BTCUSDT", "orderId": 8804, "clientOrderId": params["pendingBelowClientOrderId"]},
+                ],
+                "orderReports": [
+                    {
+                        "symbol": "BTCUSDT", "orderId": 8802,
+                        "clientOrderId": params["workingClientOrderId"],
+                        "type": "LIMIT", "side": "BUY", "status": "NEW",
+                        "executedQty": "0", "origQty": "0.00010",
+                    },
+                    {
+                        "symbol": "BTCUSDT", "orderId": 8803,
+                        "clientOrderId": params["pendingAboveClientOrderId"],
+                        "type": "LIMIT_MAKER", "side": "SELL", "status": "PENDING_NEW",
+                        "executedQty": "0", "origQty": "0",
+                    },
+                    {
+                        "symbol": "BTCUSDT", "orderId": 8804,
+                        "clientOrderId": params["pendingBelowClientOrderId"],
+                        "type": "STOP_LOSS_LIMIT", "side": "SELL", "status": "PENDING_NEW",
+                        "executedQty": "0", "origQty": "0",
+                    },
+                ],
+            })
+        return httpx.Response(404, json={"code": -2013, "msg": "Not found."})
+
+    configured = settings(
+        ENABLE_BNB_FEE_DISCOUNT=True,
+        REQUIRE_BNB_BALANCE_FOR_DISCOUNT=True,
+    )
+    store = SQLiteOrderStore(str(tmp_path / "opoco-ledger.db"))
+    client = BinanceSpotTestnetExecution(
+        configured, store, transport=httpx.MockTransport(handler),
+    )
+    try:
+        initial = await client.reconcile()
+        assert initial["discrepancies"] == []
+        response = await client.opoco.place_buy_opoco(
+            symbol="BTCUSDT",
+            quantity="0.00010",
+            working_price="50000.00",
+            take_profit_price="51000.00",
+            stop_price="50050.00",
+            stop_limit_price="50000.00",
+            list_client_order_id="mumin-opoco-list",
+            working_client_order_id="mumin-opoco-working",
+            pending_above_client_order_id="mumin-opoco-above",
+            pending_below_client_order_id="mumin-opoco-below",
+        )
+
+        assert response["orderListId"] == 8801
+        assert response["fee_preflight"]["discount_enabled_for_account"] == "true"
+        assert client.opoco._state(response) == "WORKING"
+        posted = [request for request in seen if request.method == "POST"]
+        assert len(posted) == 1
+        assert posted[0].url.path == "/api/v3/orderList/opoco"
+        assert posted[0].url.params["workingSide"] == "BUY"
+        assert posted[0].url.params["pendingSide"] == "SELL"
+        assert posted[0].url.params["pendingAboveType"] == "LIMIT_MAKER"
+        assert posted[0].url.params["pendingBelowType"] == "STOP_LOSS_LIMIT"
+        assert "quantity" not in posted[0].url.params
+        assert "pendingAboveQuantity" not in posted[0].url.params
+        assert "pendingBelowQuantity" not in posted[0].url.params
+        saved = client.oco.store.get("mumin-opoco-list")
+        assert saved["working_order_id"] == "8802"
+        assert saved["above_order_id"] == "8803"
+        assert saved["below_order_id"] == "8804"
+    finally:
+        await client.close()
