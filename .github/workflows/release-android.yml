@@ -38,7 +38,7 @@ jobs:
         env:
           INPUT_VERSION: ${{ inputs.version }}
           REF_NAME: ${{ github.ref_name }}
-          GITHUB_REF: ${{ github.ref }}
+          WORKFLOW_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -53,7 +53,7 @@ jobs:
               raise SystemExit("Android version metadata could not be read.")
           expected = version_name.group(1)
           code = int(version_code.group(1))
-          if os.environ["GITHUB_REF"].startswith("refs/tags/"):
+          if os.environ["WORKFLOW_REF"].startswith("refs/tags/"):
               requested = os.environ["REF_NAME"].removeprefix("v")
           else:
               requested = os.environ.get("INPUT_VERSION", "")
