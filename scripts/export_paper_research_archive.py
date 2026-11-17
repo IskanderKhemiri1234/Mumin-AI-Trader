@@ -162,9 +162,11 @@ def export_archive(database: str | Path, archive_path: str | Path, manifest_path
         "price", "bid", "ask", "candle_open", "candle_high",
         "candle_low", "candle_volume", "bid_depth_qty", "ask_depth_qty",
     )
+    received_values_by_tick: dict[int, list[int]] = defaultdict(list)
+    for row in ticks:
+        received_values_by_tick[int(row["tick"])].append(int(row.get("received_at_ms") or 0))
     received_by_tick = {
-        tick: max(int(row.get("received_at_ms") or 0) for row in symbols.values())
-        for tick, symbols in tick_symbols.items()
+        tick: max(values) for tick, values in received_values_by_tick.items()
     }
     for row in ticks:
         closes = json.loads(row.get("macro_hourly_closes_json") or "[]")
