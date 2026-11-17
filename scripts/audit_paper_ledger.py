@@ -113,8 +113,6 @@ def build_audit(database: str | Path) -> dict[str, Any]:
             sell_gross_pnl = ZERO
             allocated_entry_fee = ZERO
             allocated_exit_fee = ZERO
-            entry_notional = ZERO
-            entry_qty = ZERO
             entry_records = []
             while remaining > ZERO and lots[symbol]:
                 lot = lots[symbol][0]
@@ -127,8 +125,6 @@ def build_audit(database: str | Path) -> dict[str, Any]:
                 sell_gross_pnl += exit_proceeds - entry_cost
                 allocated_entry_fee += entry_fee_part
                 allocated_exit_fee += exit_fee_part
-                entry_notional += entry_cost
-                entry_qty += take
                 matched += take
                 entry_records.append({
                     "buy_fill_id": lot["fill_id"], "buy_tick": lot["tick"],
