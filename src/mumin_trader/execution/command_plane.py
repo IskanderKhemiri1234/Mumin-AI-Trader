@@ -216,6 +216,18 @@ def submit_paper_order(
             account = db.execute("SELECT * FROM bot_account WHERE id=1").fetchone()
             if account is None:
                 raise CommandRejected("Paper account is not initialized.")
+            if side == "BUY":
+                runtime_table = db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_runtime_control'"
+                ).fetchone()
+                if runtime_table is not None:
+                    runtime = db.execute(
+                        "SELECT desired_state FROM bot_runtime_control WHERE id=1"
+                    ).fetchone()
+                    if runtime is not None and runtime["desired_state"] != "RUNNING":
+                        raise CommandRejected(
+                            "Paper engine is paused; new manual BUY entries are blocked."
+                        )
             if side == "BUY" and bool(account["halted"]):
                 raise CommandRejected(f"Paper risk halt blocks new entries: {account['halt_reason'] or 'unknown'}.")
             if side == "BUY":
