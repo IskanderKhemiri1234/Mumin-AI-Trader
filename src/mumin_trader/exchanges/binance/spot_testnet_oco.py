@@ -131,6 +131,7 @@ class SQLiteOCOOrderStore:
         allowed = {
             "SUBMITTING", "UNKNOWN", "EXECUTING", "ALL_DONE", "CANCEL_PENDING",
             "CANCELED", "REJECT", "PREPARED", "PARTIAL_FILL_REVIEW",
+            "WORKING", "PROTECTION_ARMED", "COMPLETE",
         }
         if state not in allowed:
             raise SpotExecutionError(f"Unsupported OCO list state: {state}")
