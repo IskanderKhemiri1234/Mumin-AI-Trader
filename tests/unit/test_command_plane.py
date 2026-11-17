@@ -129,3 +129,17 @@ def test_emergency_stop_latches_entries_without_closing_positions(tmp_path):
         quantity=bought["result"]["quantity"], confirmed=True,
     )
     assert sold["status"] == "COMPLETED"
+
+
+
+def test_manual_buy_is_blocked_when_paper_engine_is_paused(tmp_path):
+    database, bot = _ledger(tmp_path)
+    with bot._connect() as db:
+        db.execute(
+            "UPDATE bot_runtime_control SET desired_state='PAUSED' WHERE id=1"
+        )
+    with pytest.raises(CommandRejected, match="engine is paused"):
+        submit_paper_order(
+            database, idempotency_key="paused-buy", side="BUY",
+            symbol="BTCUSDT", quote_amount="5", confirmed=True,
+        )
