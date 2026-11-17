@@ -677,10 +677,13 @@ class BinanceSpotTestnetExecution:
             balances_map = self._balance_map(account)
             quote_asset = self.settings.QUOTE_ASSET.upper()
             quote_free, quote_locked = balances_map.get(quote_asset, (Decimal("0"), Decimal("0")))
+            bnb_asset = self.settings.BNB_FEE_ASSET.upper()
             known_assets = {
                 watch_symbol.removesuffix(quote_asset)
                 for watch_symbol in self.settings.watchlist_symbols
             }
+            if bnb_asset != quote_asset:
+                known_assets.add(bnb_asset)
             marked_assets = Decimal("0")
             for asset, (free, locked) in balances_map.items():
                 if asset != quote_asset and free + locked > 0 and asset not in known_assets:
@@ -692,6 +695,15 @@ class BinanceSpotTestnetExecution:
                 free, locked = balances_map.get(base, (Decimal("0"), Decimal("0")))
                 if free + locked > 0:
                     marked_assets += (free + locked) * await self._ticker_price(watch_symbol)
+            if bnb_asset != quote_asset:
+                bnb_free, bnb_locked = balances_map.get(
+                    bnb_asset, (Decimal("0"), Decimal("0"))
+                )
+                if bnb_free + bnb_locked > 0:
+                    marked_assets += (
+                        (bnb_free + bnb_locked)
+                        * await self._ticker_price(f"{bnb_asset}{quote_asset}")
+                    )
             account_equity = quote_free + quote_locked + marked_assets
             risk_reason = self.store.update_risk_state(
                 equity=str(account_equity),
