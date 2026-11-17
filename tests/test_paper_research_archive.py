@@ -83,3 +83,60 @@ def test_archive_does_not_modify_source_database(tmp_path):
     export_archive(database, tmp_path / "observations.jsonl.gz", tmp_path / "manifest.json")
 
     assert database.read_bytes() == before
+
+
+def _add_cycle(db_path, tick, candle_close, received_at, id_start):
+    db = sqlite3.connect(db_path)
+    closes = json.dumps(["100"] * 21)
+    close_times = json.dumps([candle_close - 21 * 3_600_000 + i * 3_600_000 for i in range(21)])
+    for offset, symbol in enumerate(EXPECTED_SYMBOLS):
+        db.execute(
+            "INSERT INTO bot_market_ticks VALUES (?,?,?,?,?,?,?,?)",
+            (id_start + offset, tick, symbol, candle_close,
+             "BINANCE_PUBLIC_MARKET_DATA", received_at, closes, close_times),
+        )
+    db.commit()
+    db.close()
+
+
+def test_archive_deduplicates_repeated_same_minute_cycles(tmp_path):
+    database = tmp_path / "paper.db"
+    archive = tmp_path / "observations.jsonl.gz"
+    manifest_path = tmp_path / "manifest.json"
+    _ledger(database)
+    _add_cycle(database, 2, 1_800_000_000_000, 1_800_000_000_200, 100)
+    _add_cycle(database, 3, 1_800_000_060_000, 1_800_000_060_200, 200)
+
+    manifest = export_archive(database, archive, manifest_path)
+    with gzip.open(archive, "rt", encoding="utf-8") as stream:
+        records = [json.loads(line) for line in stream]
+    market = [item["record"] for item in records if item["record_type"] == "market_snapshot"]
+
+    assert manifest["selection"]["source_tick_count"] == 3
+    assert manifest["selection"]["selected_source_ticks"] == [2, 3]
+    assert manifest["selection"]["source_duplicate_or_excluded_snapshot_rows"] == 8
+    assert manifest["record_counts"]["market_snapshots"] == 16
+    assert {row["tick"] for row in market} == {2, 3}
+    assert manifest["quality"]["duplicate_candle_snapshots"] == 0
+
+
+def test_archive_uses_only_latest_gap_free_suffix_and_discloses_older_gap(tmp_path):
+    database = tmp_path / "paper.db"
+    archive = tmp_path / "observations.jsonl.gz"
+    manifest_path = tmp_path / "manifest.json"
+    _ledger(database)
+    _add_cycle(database, 2, 1_800_000_060_000, 1_800_000_060_200, 100)
+    _add_cycle(database, 3, 1_800_000_180_000, 1_800_000_180_200, 200)
+
+    manifest = export_archive(database, archive, manifest_path)
+    with gzip.open(archive, "rt", encoding="utf-8") as stream:
+        records = [json.loads(line) for line in stream]
+    market = [item["record"] for item in records if item["record_type"] == "market_snapshot"]
+
+    assert manifest["selection"]["source_gap_count"] == 1
+    assert manifest["selection"]["excluded_preceding_contiguous_segment_candles"] == 2
+    assert manifest["selection"]["selected_source_ticks"] == [3]
+    assert len(market) == 8
+    assert {row["tick"] for row in market} == {3}
+    assert manifest["quality"]["estimated_missing_one_minute_slots"] == 0
+    assert manifest["quality"]["replay_ready"] is False
