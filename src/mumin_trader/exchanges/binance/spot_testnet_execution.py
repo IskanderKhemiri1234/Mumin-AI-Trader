@@ -561,28 +561,108 @@ class BinanceSpotTestnetExecution:
     async def emergency_stop(self, reason: str = "MANUAL_EMERGENCY_STOP") -> dict[str, Any]:
         self._assert_safety_gate(self.settings)
         self.store.halt(reason)
+        cancelled: list[dict[str, Any]] = []
+        preserved_protective_orders: list[dict[str, Any]] = []
+        failures: list[str] = []
+        manual_review_required = False
         try:
             open_orders = await self._request("GET", "/api/v3/openOrders", signed=True)
-            cancelled: list[dict[str, Any]] = []
-            failures: list[str] = []
+            if not isinstance(open_orders, list):
+                raise SpotExecutionError("Emergency-stop open-order response is malformed.")
             for order in open_orders:
-                symbol = str(order.get("symbol", ""))
+                symbol = str(order.get("symbol", "")).upper()
                 client_id = str(order.get("clientOrderId", ""))
+                side = str(order.get("side", "")).upper()
+                if side == "SELL":
+                    preserved_protective_orders.append({
+                        "symbol": symbol,
+                        "clientOrderId": client_id,
+                        "reason": "Protective SELL order preserved; emergency stop does not remove exit protection.",
+                    })
+                    continue
+                if side != "BUY":
+                    failures.append(f"{symbol}:{client_id}:UNKNOWN_ORDER_SIDE")
+                    continue
                 try:
+                    order_list = (
+                        self.oco.store.get_by_child_client_id(client_id)
+                        if client_id else None
+                    )
+                    if (
+                        order_list
+                        and order_list.get("working_client_order_id") == client_id
+                    ):
+                        observed = await self.opoco.get_order_list(
+                            symbol=symbol,
+                            list_client_order_id=order_list["list_client_order_id"],
+                        )
+                        if observed is None:
+                            raise SpotOrderOutcomeUnknown(
+                                "OPOCO working order is not queryable; no replacement request was sent."
+                            )
+                        working = next(
+                            (
+                                item for item in observed.get("orderReports", [])
+                                if item.get("clientOrderId") == client_id
+                            ),
+                            {},
+                        )
+                        if str(working.get("status", "")).upper() == "FILLED":
+                            preserved_protective_orders.append({
+                                "symbol": symbol,
+                                "clientOrderId": client_id,
+                                "listClientOrderId": order_list["list_client_order_id"],
+                                "reason": "OPOCO BUY is filled; protective SELL legs must remain active.",
+                            })
+                            continue
+                        cancelled_list = await self.opoco.cancel_order_list(
+                            symbol=symbol,
+                            list_client_order_id=order_list["list_client_order_id"],
+                        )
+                        cancelled.append({
+                            "type": "OPOCO_LIST",
+                            "symbol": symbol,
+                            "listClientOrderId": order_list["list_client_order_id"],
+                            "result": cancelled_list,
+                        })
+                        if self.opoco._state(cancelled_list) == "PARTIAL_FILL_REVIEW":
+                            manual_review_required = True
+                            failures.append(
+                                f"{symbol}:{client_id}:PARTIAL_BUY_CANCELED_WITH_UNPROTECTED_INVENTORY_REVIEW_REQUIRED"
+                            )
+                        continue
+
                     result = await self._request(
-                        "DELETE", "/api/v3/order",
+                        "DELETE",
+                        "/api/v3/order",
                         {"symbol": symbol, "origClientOrderId": client_id},
                         signed=True,
                     )
                     cancelled.append(result)
-                    if client_id:
-                        self.store.update_order(client_id, state=self._status(result), response=result)
+                    if client_id and self.store.get_order(client_id) is not None:
+                        self.store.update_order(
+                            client_id, state=self._status(result), response=result
+                        )
                     await self._sync_fills_if_needed(result)
                 except Exception as exc:
                     failures.append(f"{symbol}:{client_id}:{type(exc).__name__}")
-            return {"halted": True, "cancelled": cancelled, "failures": failures}
+            return {
+                "halted": True,
+                "cancelled": cancelled,
+                "preserved_protective_orders": preserved_protective_orders,
+                "failures": failures,
+                "manual_review_required": manual_review_required,
+                "exposure_closed": False,
+            }
         except Exception as exc:
-            return {"halted": True, "cancelled": [], "failures": [type(exc).__name__]}
+            return {
+                "halted": True,
+                "cancelled": cancelled,
+                "preserved_protective_orders": preserved_protective_orders,
+                "failures": failures + [type(exc).__name__],
+                "manual_review_required": manual_review_required,
+                "exposure_closed": False,
+            }
 
     async def reconcile(self) -> dict[str, Any]:
         try:
