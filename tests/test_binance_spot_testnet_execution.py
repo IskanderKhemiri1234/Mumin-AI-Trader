@@ -17,6 +17,7 @@ from mumin_trader.exchanges.binance.spot_testnet_execution import (
     SpotOrderOutcomeUnknown,
 )
 from mumin_trader.exchanges.binance.testnet_order_preflight import TESTNET_REST_BASE_URL
+from scripts.binance_spot_testnet_lifecycle import opoco_exit_risk_metrics
 
 
 def settings(**overrides: object) -> Settings:
@@ -1452,3 +1453,37 @@ def test_fixed_exit_risk_rejects_unapproved_exit_prices(
 def test_fixed_exit_risk_rejects_invalid_price_relationship() -> None:
     with pytest.raises(SpotExecutionError, match="0 < stop < entry < take-profit"):
         validate_fixed_exit_risk("50000", "49000", "51000")
+
+
+def test_opoco_exit_risk_uses_exchange_reported_prices_and_actual_average_fill() -> None:
+    result = opoco_exit_risk_metrics(
+        Decimal("50000"),
+        [
+            {"type": "LIMIT_MAKER", "price": "50625", "stopPrice": "0"},
+            {"type": "STOP_LOSS_LIMIT", "price": "49700", "stopPrice": "49750"},
+        ],
+    )
+    assert result["exit_risk_policy_match"] is True
+    assert result["exchange_exit_prices_verified"] is True
+    assert Decimal(result["exchange_take_profit_price"]) == Decimal("50625")
+    assert Decimal(result["exchange_stop_price"]) == Decimal("49750")
+
+
+def test_opoco_exit_risk_rejects_fill_price_slippage_outside_policy() -> None:
+    result = opoco_exit_risk_metrics(
+        Decimal("50100"),
+        [
+            {"type": "LIMIT_MAKER", "price": "50625", "stopPrice": "0"},
+            {"type": "STOP_LOSS_LIMIT", "price": "49700", "stopPrice": "49750"},
+        ],
+    )
+    assert result["exit_risk_policy_match"] is False
+
+
+def test_opoco_exit_risk_rejects_missing_exchange_exit_prices() -> None:
+    result = opoco_exit_risk_metrics(
+        Decimal("50000"),
+        [{"type": "LIMIT_MAKER", "price": "50625"}],
+    )
+    assert result["exit_risk_policy_match"] is False
+    assert result["exchange_exit_prices_verified"] is False
