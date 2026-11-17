@@ -374,3 +374,40 @@ def test_paper_command_api_requires_idempotency_and_confirmation(monkeypatch, tm
         },
     )
     assert response.status_code == 428
+
+
+
+def test_emergency_stop_api_latches_without_closing_positions(monkeypatch, tmp_path):
+    database = tmp_path / "paper.sqlite3"
+    bot = ContinuousPaperBot(str(database))
+    import time
+    with bot._connect() as db:
+        db.execute(
+            """INSERT INTO bot_market_ticks
+               (tick,symbol,price,bid,ask,data_source,received_at_ms)
+               VALUES (0,'BTCUSDT','60000','59999','60001','MOCK_SYNTHETIC',?)""",
+            (int(time.time() * 1000),),
+        )
+    from mumin_trader.execution.command_plane import submit_paper_order
+    submit_paper_order(
+        database, idempotency_key="api-before-stop", side="BUY",
+        symbol="BTCUSDT", quote_amount="5", confirmed=True,
+    )
+    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
+    monkeypatch.setenv("TRADING_MODE", "PAPER")
+    monkeypatch.setenv("TRADING_ENV", "TESTNET")
+    monkeypatch.setenv("ALLOW_MAINNET", "false")
+    monkeypatch.setenv("LIVE_TRADING_ENABLED", "false")
+    response = TestClient(app).post(
+        "/api/emergency-stop",
+        json={"confirmed": True},
+        headers={
+            "X-Dashboard-Token": "server-only-token",
+            "Idempotency-Key": "api-emergency-stop",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["open_positions_closed"] is False
+    with bot._connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM bot_positions").fetchone()[0] == 1
