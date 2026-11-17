@@ -216,9 +216,9 @@ def reconcile_paper_ledger(connection: sqlite3.Connection) -> dict[str, Any]:
     )
     equity_reconciled = (
         _close(expected_equity, equity_identity)
-        if equity_identity is not None else False
+        if equity_identity is not None else None
     )
-    if not equity_reconciled and marks_complete:
+    if equity_reconciled is False and marks_complete:
         issues.append(
             f"Equity identity mismatch: cash + marked positions is {expected_equity}; "
             f"initial + FIFO realized + unrealized is {equity_identity}."
@@ -233,11 +233,15 @@ def reconcile_paper_ledger(connection: sqlite3.Connection) -> dict[str, Any]:
         "equity_identity_matches": equity_reconciled,
         "all_open_positions_have_marks": marks_complete,
     }
-    status = "PASS" if all(checks.values()) else (
-        "INCOMPLETE" if not marks_complete and all(
-            value for key, value in checks.items() if key != "all_open_positions_have_marks"
-        ) else "FAIL"
-    )
+    if all(value is True for value in checks.values()):
+        status = "PASS"
+    elif not marks_complete and all(
+        value is True for key, value in checks.items()
+        if key not in {"all_open_positions_have_marks", "equity_identity_matches"}
+    ):
+        status = "INCOMPLETE"
+    else:
+        status = "FAIL"
     return {
         "status": status,
         "checks": checks,
