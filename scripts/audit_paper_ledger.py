@@ -176,10 +176,6 @@ def build_audit(database: str | Path) -> dict[str, Any]:
 
         summary = {}
         for symbol, values in sorted(per_symbol.items()):
-            gross_wins = sum(
-                (dec(item["gross_pnl_usdt"]) for item in round_trips
-                 if item["symbol"] == symbol and dec(item["gross_pnl_usdt"]) > ZERO), ZERO
-            )
             net_wins = sum(
                 (dec(item["net_pnl_usdt"]) for item in round_trips
                  if item["symbol"] == symbol and dec(item["net_pnl_usdt"]) > ZERO), ZERO
