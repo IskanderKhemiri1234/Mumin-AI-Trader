@@ -35,6 +35,17 @@ tail -f ~/.mumin-ai-trader/logs/paper-engine.log
 
 SQLite remains at `data/mumin_public_paper.db`. Back it up before replacing/reinstalling Termux. Never delete `data/` during updates.
 
+## Read-only node health check
+
+Run this from Termux whenever you want to verify the local Paper node:
+
+```sh
+cd ~/Mumin-AI-Trader
+python scripts/monitor_paper_node.py --db data/mumin_public_paper.db
+```
+
+The command checks SQLite integrity, the fixed 70 USDT Paper capital, supervisor heartbeat, desired RUNNING state, freshness and completeness of the latest eight-symbol public market cycle, and FIFO accounting reconciliation. It is read-only and exits nonzero if a required operational check fails. It does not start or restart services.
+
 ## Update
 ```sh
 cd ~/Mumin-AI-Trader
