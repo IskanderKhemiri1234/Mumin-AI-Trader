@@ -1154,3 +1154,47 @@ async def test_bnb_fee_readiness_rejects_disabled_account_discount_before_any_or
             )
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_emergency_stop_cancels_buy_entries_but_preserves_sell_protection(tmp_path) -> None:
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/api/v3/time":
+            return httpx.Response(200, json={"serverTime": 1_700_000_000_000})
+        if request.url.path == "/api/v3/openOrders":
+            buy = order_response("NEW")
+            sell = {
+                **order_response("NEW"),
+                "orderId": 22334,
+                "clientOrderId": "mumin-protective-sell",
+                "side": "SELL",
+                "type": "STOP_LOSS_LIMIT",
+            }
+            return httpx.Response(200, json=[buy, sell])
+        if request.url.path == "/api/v3/order" and request.method == "DELETE":
+            return httpx.Response(200, json=order_response("CANCELED"))
+        return httpx.Response(404, json={"code": -2013, "msg": "Order does not exist."})
+
+    store = SQLiteOrderStore(str(tmp_path / "orders.db"))
+    store.register_intent({
+        "symbol": "BTCUSDT", "side": "BUY", "type": "LIMIT", "timeInForce": "GTC",
+        "quantity": "0.00010", "price": "50000.00", "newClientOrderId": "mumin-test-1001",
+    })
+    store.update_order("mumin-test-1001", state="NEW", response=order_response())
+    client = BinanceSpotTestnetExecution(
+        settings(), store, transport=httpx.MockTransport(handler),
+    )
+    try:
+        result = await client.emergency_stop("TEST_PRESERVE_EXITS")
+        assert result["halted"] is True
+        assert result["exposure_closed"] is False
+        assert len(result["cancelled"]) == 1
+        assert len(result["preserved_protective_orders"]) == 1
+        deletes = [request for request in seen if request.method == "DELETE"]
+        assert len(deletes) == 1
+        assert deletes[0].url.params.get("origClientOrderId") == "mumin-test-1001"
+    finally:
+        await client.close()
