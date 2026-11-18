@@ -873,7 +873,7 @@ async def _run_bot_unlocked(
     database: str,
     interval_seconds: float,
     cycles: int | None,
-    data_source: str = SYNTHETIC_SOURCE,
+    data_source: str = PUBLIC_SOURCE,
 ) -> None:
     bot = ContinuousPaperBot(database)
     feed = PublicMarketData() if data_source == PUBLIC_SOURCE else None
@@ -1018,7 +1018,7 @@ async def run_bot(
     database: str,
     interval_seconds: float,
     cycles: int | None,
-    data_source: str = SYNTHETIC_SOURCE,
+    data_source: str = PUBLIC_SOURCE,
 ) -> None:
     with paper_process_lock(database, "worker"):
         await _run_bot_unlocked(database, interval_seconds, cycles, data_source)
