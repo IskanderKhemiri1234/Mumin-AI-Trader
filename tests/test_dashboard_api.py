@@ -56,7 +56,7 @@ def test_dashboard_api_reads_paper_ledger_without_mutating_it(monkeypatch, tmp_p
     payload = response.json()
     assert payload["status"] == "ready"
     assert payload["mode"] == "PAPER"
-    assert payload["environment"] == "TESTNET"
+    assert payload["environment"] == "PAPER_ISOLATED"
     assert payload["account"]["tick"] == before
     assert payload["account"]["equity"] > 0
     assert isinstance(payload["positions"], list)
