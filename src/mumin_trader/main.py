@@ -85,7 +85,12 @@ def _dashboard_password(x_dashboard_password: str | None) -> str:
     if not password:
         raise HTTPException(
             status_code=503,
-            detail="Dashboard access is not configured. Set DASHBOARD_PASSWORD on the server.",
+            detail="Dashboard password is not configured. Set DASHBOARD_PASSWORD on the server.",
+        )
+    if len(password) < 12:
+        raise HTTPException(
+            status_code=503,
+            detail="DASHBOARD_PASSWORD must contain at least 12 characters.",
         )
     if not x_dashboard_password or not hmac.compare_digest(x_dashboard_password, password):
         raise HTTPException(status_code=401, detail="Dashboard password is invalid.")
