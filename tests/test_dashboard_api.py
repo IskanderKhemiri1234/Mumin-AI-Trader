@@ -15,19 +15,19 @@ def test_root_reports_public_market_paper_only_without_account_link():
     assert response.json()["account_link"] == "NONE"
 
 
-def test_dashboard_api_requires_server_token(monkeypatch, tmp_path):
-    monkeypatch.delenv("DASHBOARD_ACCESS_TOKEN", raising=False)
+def test_dashboard_api_requires_server_password(monkeypatch, tmp_path):
+    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
     monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(tmp_path / "ledger.sqlite3"))
     response = TestClient(app).get("/api/dashboard")
     assert response.status_code == 503
-    assert "DASHBOARD_ACCESS_TOKEN" in response.json()["detail"]
+    assert "DASHBOARD_PASSWORD" in response.json()["detail"]
 
 
-def test_dashboard_api_rejects_wrong_token(monkeypatch, tmp_path):
-    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+def test_dashboard_api_rejects_wrong_password(monkeypatch, tmp_path):
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "server-only-password")
     monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(tmp_path / "ledger.sqlite3"))
     response = TestClient(app).get(
-        "/api/dashboard", headers={"X-Dashboard-Token": "wrong-token"}
+        "/api/dashboard", headers={"X-Dashboard-Password": "wrong-password"}
     )
     assert response.status_code == 401
 
@@ -36,10 +36,10 @@ def test_dashboard_api_returns_waiting_state_without_creating_database(
     monkeypatch, tmp_path
 ):
     database = tmp_path / "not-created.sqlite3"
-    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "server-only-password")
     monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
     response = TestClient(app).get(
-        "/api/dashboard", headers={"X-Dashboard-Token": "server-only-token"}
+        "/api/dashboard", headers={"X-Dashboard-Password": "server-only-password"}
     )
     assert response.status_code == 200
     payload = response.json()
@@ -56,10 +56,10 @@ def test_dashboard_api_reads_paper_ledger_without_mutating_it(monkeypatch, tmp_p
     bot.step()
     before = bot.report()["tick"]
 
-    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "server-only-password")
     monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
     response = TestClient(app).get(
-        "/api/dashboard", headers={"X-Dashboard-Token": "server-only-token"}
+        "/api/dashboard", headers={"X-Dashboard-Password": "server-only-password"}
     )
 
     assert response.status_code == 200
@@ -94,10 +94,10 @@ def test_dashboard_page_exposes_readiness_gate_center():
 
 
 def test_dashboard_api_exposes_read_only_control_plane(monkeypatch, tmp_path):
-    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "server-only-password")
     monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(tmp_path / "ledger.sqlite3"))
     response = TestClient(app).get(
-        "/api/dashboard", headers={"X-Dashboard-Token": "server-only-token"}
+        "/api/dashboard", headers={"X-Dashboard-Password": "server-only-password"}
     )
     assert response.status_code == 200
     control = response.json()["control_plane"]
@@ -128,14 +128,14 @@ def test_paper_worker_pause_and_resume_require_live_heartbeat(monkeypatch, tmp_p
     database = tmp_path / "paper.sqlite3"
     bot = ContinuousPaperBot(str(database))
     bot.heartbeat("test-paper-worker")
-    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "server-only-password")
     monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
     monkeypatch.setenv("TRADING_MODE", "PAPER")
     monkeypatch.setenv("TRADING_ENV", "TESTNET")
     monkeypatch.setenv("ALLOW_MAINNET", "false")
     monkeypatch.setenv("LIVE_TRADING_ENABLED", "false")
     client = TestClient(app)
-    headers = {"X-Dashboard-Token": "server-only-token"}
+    headers = {"X-Dashboard-Password": "server-only-password"}
 
     paused = client.post("/api/paper-control", json={"action": "pause"}, headers=headers)
     assert paused.status_code == 200
@@ -152,12 +152,12 @@ def test_paper_worker_pause_and_resume_require_live_heartbeat(monkeypatch, tmp_p
 def test_paper_worker_controls_reject_stale_or_missing_heartbeat(monkeypatch, tmp_path):
     database = tmp_path / "paper.sqlite3"
     ContinuousPaperBot(str(database))
-    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "server-only-password")
     monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
     response = TestClient(app).post(
         "/api/paper-control",
         json={"action": "pause"},
-        headers={"X-Dashboard-Token": "server-only-token"},
+        headers={"X-Dashboard-Password": "server-only-password"},
     )
     assert response.status_code == 409
     assert "heartbeat is stale" in response.json()["detail"]
@@ -167,13 +167,13 @@ def test_paper_worker_controls_reject_live_or_mainnet_configuration(monkeypatch,
     database = tmp_path / "paper.sqlite3"
     bot = ContinuousPaperBot(str(database))
     bot.heartbeat("test-paper-worker")
-    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "server-only-password")
     monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
     monkeypatch.setenv("TRADING_MODE", "LIVE")
     response = TestClient(app).post(
         "/api/paper-control",
         json={"action": "pause"},
-        headers={"X-Dashboard-Token": "server-only-token"},
+        headers={"X-Dashboard-Password": "server-only-password"},
     )
     assert response.status_code == 409
     assert "TRADING_MODE=PAPER" in response.json()["detail"]
@@ -183,10 +183,10 @@ def test_paper_worker_snapshot_reports_desired_state(monkeypatch, tmp_path):
     database = tmp_path / "paper.sqlite3"
     bot = ContinuousPaperBot(str(database))
     bot.heartbeat("test-paper-worker")
-    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "server-only-password")
     monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
     response = TestClient(app).get(
-        "/api/dashboard", headers={"X-Dashboard-Token": "server-only-token"}
+        "/api/dashboard", headers={"X-Dashboard-Password": "server-only-password"}
     )
     assert response.status_code == 200
     assert response.json()["paper_worker"]["status"] == "online"
@@ -195,13 +195,13 @@ def test_paper_worker_snapshot_reports_desired_state(monkeypatch, tmp_path):
 
 
 def test_market_api_requires_dashboard_token(monkeypatch):
-    monkeypatch.delenv("DASHBOARD_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
     response = TestClient(app).get("/api/market")
     assert response.status_code == 503
 
 
 def test_market_api_returns_shared_server_stream(monkeypatch):
-    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "server-only-password")
     started = []
 
     async def fake_start():
@@ -221,7 +221,7 @@ def test_market_api_returns_shared_server_stream(monkeypatch):
     monkeypatch.setattr(main_module._market_stream, "start", fake_start)
     monkeypatch.setattr(main_module._market_stream, "snapshot", fake_snapshot)
     response = TestClient(app).get(
-        "/api/market", headers={"X-Dashboard-Token": "server-only-token"}
+        "/api/market", headers={"X-Dashboard-Password": "server-only-password"}
     )
 
     assert response.status_code == 200
@@ -236,7 +236,7 @@ def test_live_supervisor_allows_resume_without_worker_and_records_audit(
     database = tmp_path / "paper.sqlite3"
     bot = ContinuousPaperBot(str(database))
     bot.supervisor_heartbeat("test-supervisor", None)
-    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "server-only-password")
     monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
     monkeypatch.setenv("TRADING_MODE", "PAPER")
     monkeypatch.setenv("TRADING_ENV", "TESTNET")
@@ -246,7 +246,7 @@ def test_live_supervisor_allows_resume_without_worker_and_records_audit(
     response = TestClient(app).post(
         "/api/paper-control",
         json={"action": "resume"},
-        headers={"X-Dashboard-Token": "server-only-token"},
+        headers={"X-Dashboard-Password": "server-only-password"},
     )
 
     assert response.status_code == 200
@@ -269,11 +269,11 @@ def test_dashboard_reports_supervisor_and_worker_audit(monkeypatch, tmp_path):
         desired_state="RUNNING",
         detail="pid=12345",
     )
-    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "server-only-password")
     monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
 
     response = TestClient(app).get(
-        "/api/dashboard", headers={"X-Dashboard-Token": "server-only-token"}
+        "/api/dashboard", headers={"X-Dashboard-Password": "server-only-password"}
     )
 
     assert response.status_code == 200
@@ -284,10 +284,10 @@ def test_dashboard_reports_supervisor_and_worker_audit(monkeypatch, tmp_path):
 
 
 def test_dashboard_exposes_locked_strategy_and_risk_settings(monkeypatch, tmp_path):
-    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "server-only-password")
     monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(tmp_path / "ledger.sqlite3"))
     response = TestClient(app).get(
-        "/api/dashboard", headers={"X-Dashboard-Token": "server-only-token"}
+        "/api/dashboard", headers={"X-Dashboard-Password": "server-only-password"}
     )
 
     assert response.status_code == 200
@@ -319,7 +319,7 @@ def test_paper_command_api_executes_and_lists_fifo_order(monkeypatch, tmp_path):
                VALUES (0,'BTCUSDT','60000','59999','60001','MOCK_SYNTHETIC',?)""",
             (int(time.time() * 1000),),
         )
-    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "server-only-password")
     monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
     monkeypatch.setenv("TRADING_MODE", "PAPER")
     monkeypatch.setenv("TRADING_ENV", "TESTNET")
@@ -327,7 +327,7 @@ def test_paper_command_api_executes_and_lists_fifo_order(monkeypatch, tmp_path):
     monkeypatch.setenv("LIVE_TRADING_ENABLED", "false")
     client = TestClient(app)
     headers = {
-        "X-Dashboard-Token": "server-only-token",
+        "X-Dashboard-Password": "server-only-password",
         "Idempotency-Key": "api-paper-buy-001",
     }
     response = client.post(
@@ -339,17 +339,17 @@ def test_paper_command_api_executes_and_lists_fifo_order(monkeypatch, tmp_path):
     assert response.json()["status"] == "COMPLETED"
     assert response.json()["result"]["fifo_status"] == "PASS"
     listed = client.get(
-        "/api/commands", headers={"X-Dashboard-Token": "server-only-token"}
+        "/api/commands", headers={"X-Dashboard-Password": "server-only-password"}
     )
     assert listed.status_code == 200
     assert listed.json()["commands"][0]["status"] == "COMPLETED"
 
 
 def test_testnet_order_api_is_locked(monkeypatch):
-    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "server-only-password")
     response = TestClient(app).post(
         "/api/testnet/orders",
-        headers={"X-Dashboard-Token": "server-only-token"},
+        headers={"X-Dashboard-Password": "server-only-password"},
     )
     assert response.status_code == 423
     assert "explicit operational approval" in response.json()["detail"]
@@ -366,20 +366,20 @@ def test_paper_command_api_requires_idempotency_and_confirmation(monkeypatch, tm
                VALUES (0,'BTCUSDT','60000','59999','60001','MOCK_SYNTHETIC',?)""",
             (int(time.time() * 1000),),
         )
-    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "server-only-password")
     monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
     client = TestClient(app)
     response = client.post(
         "/api/commands",
         json={"side": "BUY", "symbol": "BTCUSDT", "quote_amount": "5"},
-        headers={"X-Dashboard-Token": "server-only-token"},
+        headers={"X-Dashboard-Password": "server-only-password"},
     )
     assert response.status_code == 422
     response = client.post(
         "/api/commands",
         json={"side": "BUY", "symbol": "BTCUSDT", "quote_amount": "5", "confirmed": False},
         headers={
-            "X-Dashboard-Token": "server-only-token",
+            "X-Dashboard-Password": "server-only-password",
             "Idempotency-Key": "missing-confirmation",
         },
     )
@@ -403,7 +403,7 @@ def test_emergency_stop_api_latches_without_closing_positions(monkeypatch, tmp_p
         database, idempotency_key="api-before-stop", side="BUY",
         symbol="BTCUSDT", quote_amount="5", confirmed=True,
     )
-    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "server-only-token")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "server-only-password")
     monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
     monkeypatch.setenv("TRADING_MODE", "PAPER")
     monkeypatch.setenv("TRADING_ENV", "TESTNET")
@@ -413,7 +413,7 @@ def test_emergency_stop_api_latches_without_closing_positions(monkeypatch, tmp_p
         "/api/emergency-stop",
         json={"confirmed": True},
         headers={
-            "X-Dashboard-Token": "server-only-token",
+            "X-Dashboard-Password": "server-only-password",
             "Idempotency-Key": "api-emergency-stop",
         },
     )
