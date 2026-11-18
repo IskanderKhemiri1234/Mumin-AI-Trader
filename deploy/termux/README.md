@@ -16,9 +16,9 @@ cd ~/Mumin-AI-Trader
 bash deploy/termux/install.sh
 ```
 
-The installer installs Python dependencies, creates a private `.env` only if absent, generates a random dashboard token, installs the API, Paper engine, and six-hour verified local backup runit services, and registers a Termux:Boot startup script. It refuses unsafe trading configuration.
+The installer installs Python dependencies, creates a private `.env` only if absent, prompts you to choose a private dashboard password (minimum 12 characters), removes the legacy token setting, installs the API, Paper engine, and six-hour verified local backup runit services, and registers a Termux:Boot startup script. It refuses unsafe trading configuration.
 
-Dashboard: `http://127.0.0.1:8000/dashboard`
+Dashboard: `http://127.0.0.1:8000/dashboard`\n\nThe dashboard accepts only `DASHBOARD_PASSWORD` from the private `.env` file. The former `DASHBOARD_ACCESS_TOKEN` setting and `X-Dashboard-Token` header are no longer accepted. Never put your password in GitHub or send it in chat. Passwords must be at least 12 characters.
 Health: `http://127.0.0.1:8000/health`
 
 ## Service controls
@@ -101,3 +101,21 @@ sv restart mumin-paper-engine
 - No failover is configured.
 - This deployment is PAPER only. It does not submit Binance orders. Testnet order gates and Mainnet stay disabled.
 - A ChatGPT-like LLM requires a separately selected model provider and possibly paid API usage; this installer does not invent or enable one.
+
+
+## Change the dashboard password
+
+Edit the private environment file on the phone:
+
+```sh
+cd ~/Mumin-AI-Trader
+nano .env
+```
+
+Set `DASHBOARD_PASSWORD='your-own-password-at-least-12-characters'` and remove any `DASHBOARD_ACCESS_TOKEN` line. Save the file, then restart only the API so the new password takes effect:
+
+```sh
+sv restart mumin-api
+```
+
+The dashboard password is not a Binance credential. The API remains bound to localhost and Paper-only; changing this password does not restart or alter the Paper engine or its SQLite ledger.
