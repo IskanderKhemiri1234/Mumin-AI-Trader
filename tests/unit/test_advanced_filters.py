@@ -93,8 +93,8 @@ def test_anti_chase_rejects_extended_price():
 
 def test_market_regime_rejects_flat_market():
     closes = [D("100")] * 30
-    highs = [D("100.01")] * 30
-    lows = [D("99.99")] * 30
+    highs = [D("100.1")] * 30
+    lows = [D("99.9")] * 30
     result = evaluate_market_regime(highs=highs, lows=lows, closes=closes)
     assert not result.passed
     assert result.reason == "REGIME_DIRECTIONAL_EFFICIENCY_TOO_LOW"
