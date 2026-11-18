@@ -453,7 +453,10 @@ async def health() -> dict[str, str]:
 async def root() -> dict[str, str]:
     return {
         "service": "Mumin AI Trader",
-        "status": "foundation",
+        "status": "paper_only",
+        "market_data": "BINANCE_PUBLIC_SPOT",
+        "execution": "SIMULATED_PAPER_ONLY",
+        "account_link": "NONE",
         "dashboard": "/dashboard",
         "api": "/api/dashboard",
     }
