@@ -1031,13 +1031,13 @@ def main() -> None:
     parser.add_argument("--cycles", type=int, default=None, help="Finite smoke run; omit for continuous operation.")
     parser.add_argument(
         "--data-source", choices=(SYNTHETIC_SOURCE, PUBLIC_SOURCE),
-        default=os.getenv("MUMIN_MARKET_DATA_SOURCE", SYNTHETIC_SOURCE),
+        default=os.getenv("MUMIN_MARKET_DATA_SOURCE", PUBLIC_SOURCE),
     )
     args = parser.parse_args()
     if args.interval_seconds <= 0 or (args.cycles is not None and args.cycles <= 0):
         parser.error("interval-seconds and cycles must be positive.")
     database = args.db or (
-        "data/mumin_binance_public_paper.db"
+        "data/mumin_public_paper.db"
         if args.data_source == PUBLIC_SOURCE
         else "data/mumin_continuous_paper.db"
     )
