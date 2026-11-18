@@ -454,3 +454,28 @@ async def test_incomplete_public_snapshot_skips_entire_finite_cycle_without_fall
         market_rows = db.execute("SELECT COUNT(*) FROM bot_market_ticks").fetchone()[0]
     assert ticks == 0
     assert market_rows == 0
+
+def test_cli_defaults_to_public_binance_market_data_and_shared_paper_ledger(
+    tmp_path, monkeypatch,
+):
+    import sys
+    import scripts.run_continuous_paper as paper_module
+
+    captured = {}
+
+    async def capture_run_bot(database, interval_seconds, cycles, data_source):
+        return None
+
+    def capture_asyncio_run(coroutine):
+        captured.update(coroutine.cr_frame.f_locals)
+        coroutine.close()
+
+    monkeypatch.setattr(paper_module, "run_bot", capture_run_bot)
+    monkeypatch.setattr(paper_module.asyncio, "run", capture_asyncio_run)
+    monkeypatch.setattr(sys, "argv", ["run_continuous_paper.py", "--cycles", "1"])
+    monkeypatch.delenv("MUMIN_MARKET_DATA_SOURCE", raising=False)
+
+    paper_module.main()
+
+    assert captured["data_source"] == PUBLIC_SOURCE
+    assert captured["database"] == "data/mumin_public_paper.db"
