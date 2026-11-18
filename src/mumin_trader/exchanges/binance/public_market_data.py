@@ -120,9 +120,24 @@ class PublicMarketData:
             macro_hourly_close_times_ms=tuple(int(row[6]) for row in closed_hourly[-21:]),
         )
 
+    async def _snapshot_with_retry(
+        self, symbol: str, attempts: int = 3
+    ) -> PublicMarketSnapshot:
+        """Retry transient public-feed failures without substituting synthetic data."""
+        last_error: Exception | None = None
+        for attempt in range(attempts):
+            try:
+                return await self.snapshot(symbol)
+            except Exception as exc:
+                last_error = exc
+                if attempt + 1 < attempts:
+                    await asyncio.sleep(0.5 * (2 ** attempt))
+        assert last_error is not None
+        raise last_error
+
     async def snapshots(self, symbols: tuple[str, ...] = tuple(sorted(ALLOWED_SYMBOLS))) -> tuple[dict[str, PublicMarketSnapshot], dict[str, str]]:
         results = await asyncio.gather(
-            *(self.snapshot(symbol) for symbol in symbols),
+            *(self._snapshot_with_retry(symbol) for symbol in symbols),
             return_exceptions=True,
         )
         good: dict[str, PublicMarketSnapshot] = {}
