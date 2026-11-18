@@ -80,16 +80,21 @@ class EmergencyStopRequest(BaseModel):
     confirmed: bool = False
 
 
-def _dashboard_access_token(x_dashboard_token: str | None) -> str:
-    access_token = os.getenv("DASHBOARD_ACCESS_TOKEN", "")
-    if not access_token:
+def _require_dashboard_password(x_require_dashboard_password: str | None) -> str:
+    password = os.getenv("DASHBOARD_PASSWORD", "")
+    if not password:
         raise HTTPException(
             status_code=503,
-            detail="Dashboard access is not configured. Set DASHBOARD_ACCESS_TOKEN on the server.",
+            detail="Dashboard password is not configured. Set DASHBOARD_PASSWORD on the server.",
         )
-    if not x_dashboard_token or not hmac.compare_digest(x_dashboard_token, access_token):
-        raise HTTPException(status_code=401, detail="Dashboard access token is invalid.")
-    return access_token
+    if len(password) < 12:
+        raise HTTPException(
+            status_code=503,
+            detail="DASHBOARD_PASSWORD must contain at least 12 characters.",
+        )
+    if not x_require_dashboard_password or not hmac.compare_digest(x_require_dashboard_password, password):
+        raise HTTPException(status_code=401, detail="Dashboard password is invalid.")
+    return password
 
 
 def _paper_worker_snapshot() -> dict[str, Any]:
@@ -479,18 +484,18 @@ async def operations_chat_script() -> FileResponse:
 
 @app.get("/api/market")
 async def market_snapshot(
-    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
 ) -> dict[str, Any]:
-    _dashboard_access_token(x_dashboard_token)
+    _require_dashboard_password(x_require_dashboard_password)
     await _market_stream.start()
     return await _market_stream.snapshot()
 
 
 @app.get("/api/dashboard")
 async def dashboard_snapshot(
-    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
 ) -> dict[str, Any]:
-    _dashboard_access_token(x_dashboard_token)
+    _require_dashboard_password(x_require_dashboard_password)
     snapshot = _read_dashboard_snapshot()
     worker = _paper_worker_snapshot()
     snapshot["paper_worker"] = worker
@@ -528,9 +533,9 @@ async def dashboard_snapshot(
 async def create_paper_command(
     request: PaperOrderCommand,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
 ) -> dict[str, Any]:
-    _dashboard_access_token(x_dashboard_token)
+    _require_dashboard_password(x_require_dashboard_password)
     if os.getenv("TRADING_MODE", "PAPER").upper() != "PAPER":
         raise HTTPException(status_code=409, detail="Order commands require TRADING_MODE=PAPER.")
     if os.getenv("TRADING_ENV", "TESTNET").upper() != "TESTNET":
@@ -559,9 +564,9 @@ async def create_paper_command(
 async def paper_emergency_stop(
     request: EmergencyStopRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
 ) -> dict[str, Any]:
-    _dashboard_access_token(x_dashboard_token)
+    _require_dashboard_password(x_require_dashboard_password)
     if os.getenv("TRADING_MODE", "PAPER").upper() != "PAPER":
         raise HTTPException(status_code=409, detail="Emergency stop endpoint is Paper-only.")
     if os.getenv("TRADING_ENV", "TESTNET").upper() != "TESTNET":
@@ -585,9 +590,9 @@ async def paper_emergency_stop(
 @app.get("/api/commands")
 async def read_paper_commands(
     limit: int = 50,
-    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
 ) -> dict[str, Any]:
-    _dashboard_access_token(x_dashboard_token)
+    _require_dashboard_password(x_require_dashboard_password)
     database = _dashboard_database()
     return {"commands": list_commands(database, limit) if database.is_file() else []}
 
@@ -595,9 +600,9 @@ async def read_paper_commands(
 @app.get("/api/commands/{command_id}")
 async def read_paper_command(
     command_id: str,
-    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
 ) -> dict[str, Any]:
-    _dashboard_access_token(x_dashboard_token)
+    _require_dashboard_password(x_require_dashboard_password)
     database = _dashboard_database()
     command = get_command(database, command_id) if database.is_file() else None
     if command is None:
@@ -608,9 +613,9 @@ async def read_paper_command(
 @app.get("/api/commands/{command_id}/events")
 async def read_paper_command_events(
     command_id: str,
-    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
 ) -> dict[str, Any]:
-    _dashboard_access_token(x_dashboard_token)
+    _require_dashboard_password(x_require_dashboard_password)
     database = _dashboard_database()
     if not database.is_file():
         raise HTTPException(status_code=404, detail="Command not found.")
@@ -622,9 +627,9 @@ async def read_paper_command_events(
 
 @app.post("/api/testnet/orders")
 async def blocked_testnet_order(
-    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
 ) -> dict[str, Any]:
-    _dashboard_access_token(x_dashboard_token)
+    _require_dashboard_password(x_require_dashboard_password)
     raise HTTPException(
         status_code=423,
         detail="Binance Testnet order submission is locked pending a separate explicit operational approval.",
@@ -634,9 +639,9 @@ async def blocked_testnet_order(
 @app.post("/api/paper-control")
 async def control_paper_worker(
     request: PaperControlRequest,
-    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
 ) -> dict[str, Any]:
-    _dashboard_access_token(x_dashboard_token)
+    _require_dashboard_password(x_require_dashboard_password)
     if os.getenv("TRADING_MODE", "PAPER").upper() != "PAPER":
         raise HTTPException(status_code=409, detail="Paper controls require TRADING_MODE=PAPER.")
     if os.getenv("TRADING_ENV", "TESTNET").upper() != "TESTNET":

@@ -82,11 +82,11 @@ def test_fifo_reconciliation_detects_fee_double_count_or_missing_fee(tmp_path):
 def test_dashboard_reports_fifo_audit_entry_fee_and_real_worker_state(monkeypatch, tmp_path):
     database = tmp_path / "dashboard-fifo.sqlite3"
     _seed_partial_fifo_ledger(database)
-    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "test-dashboard-token")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "test-dashboard-password")
     monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(database))
     response = TestClient(app).get(
         "/api/dashboard",
-        headers={"X-Dashboard-Token": "test-dashboard-token"},
+        headers={"X-Dashboard-Password": "test-dashboard-password"},
     )
 
     assert response.status_code == 200

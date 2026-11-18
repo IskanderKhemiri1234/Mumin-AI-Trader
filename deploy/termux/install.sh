@@ -15,11 +15,31 @@ cd "$ROOT"
 python -m pip install -e .
 if [ ! -f "$ROOT/.env" ]; then
   cp .env.example .env
-  TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
-  python -c 'from pathlib import Path; import sys; p=Path(".env"); s=p.read_text(); p.write_text(s.replace("DASHBOARD_ACCESS_TOKEN=", "DASHBOARD_ACCESS_TOKEN=" + sys.argv[1], 1))' "$TOKEN"
-  chmod 600 .env
-  printf "Created private .env and generated a dashboard token. Keep it secret.\n"
 fi
+
+if ! grep -Eq '^DASHBOARD_PASSWORD=.+$' "$ROOT/.env"; then
+  printf "\nChoose your private dashboard password (minimum 12 characters).\n"
+  while true; do
+    IFS= read -r -s -p "New dashboard password: " DASHBOARD_PASSWORD
+    printf "\n"
+    IFS= read -r -s -p "Confirm dashboard password: " DASHBOARD_PASSWORD_CONFIRM
+    printf "\n"
+    if [ "${#DASHBOARD_PASSWORD}" -lt 12 ]; then
+      printf "Password must contain at least 12 characters.\n" >&2
+    elif [ "$DASHBOARD_PASSWORD" != "$DASHBOARD_PASSWORD_CONFIRM" ]; then
+      printf "Passwords do not match. Try again.\n" >&2
+    else
+      break
+    fi
+  done
+  printf '%s' "$DASHBOARD_PASSWORD" | python -c 'from pathlib import Path; import shlex,sys; p=Path(".env"); lines=[line for line in p.read_text().splitlines() if not line.startswith(("DASHBOARD_ACCESS_TOKEN=", "DASHBOARD_PASSWORD="))]; lines.append("DASHBOARD_PASSWORD="+shlex.quote(sys.stdin.read())); p.write_text("\n".join(lines)+"\n")'
+  unset DASHBOARD_PASSWORD DASHBOARD_PASSWORD_CONFIRM
+else
+  python -c 'from pathlib import Path; p=Path(".env"); lines=[line for line in p.read_text().splitlines() if not line.startswith("DASHBOARD_ACCESS_TOKEN=")]; p.write_text("\n".join(lines)+"\n")'
+fi
+chmod 600 "$ROOT/.env"
+printf "Private dashboard password configured. The legacy dashboard token is disabled.\n"
+
 python scripts/validate_termux_runtime.py
 mkdir -p "$SERVICE_ROOT" "$HOME/.mumin-ai-trader/logs" "$BOOT_DIR"
 for service in mumin-api mumin-paper-engine mumin-paper-backup mumin-paper-watchdog; do
