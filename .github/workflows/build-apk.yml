@@ -17,6 +17,11 @@ on:
     branches: [main, 'feat/**']
     paths:
       - "android/**"
+      - "src/**"
+      - "dashboard/**"
+      - "config/**"
+      - "scripts/**"
+      - "pyproject.toml"
       - ".github/workflows/build-apk.yml"
   workflow_dispatch:
 
