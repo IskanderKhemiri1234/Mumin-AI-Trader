@@ -207,7 +207,7 @@ $('paperOrderForm').addEventListener('submit',async e=>{e.preventDefault();const
 document.addEventListener('click',e=>{const chartChip=e.target.closest('[data-chart-symbol]');if(chartChip){marketState.chartSymbol=chartChip.dataset.chartSymbol;renderMarketOverview();return;}const chip=e.target.closest('[data-symbol]');if(chip){const s=chip.dataset.symbol;if(marketState.selected.has(s))marketState.selected.delete(s);else marketState.selected.add(s);renderMarket();}});
 $('marketReconnect').addEventListener('click',()=>connectMarketFeed(true));$('marketShowAll').addEventListener('click',()=>{marketState.selected=new Set(watchSymbols);renderMarket();});
 $('langBtn').addEventListener('click',()=>setLanguage(language==='ar'?'en':'ar'));$('refreshBtn').addEventListener('click',()=>{refresh();toast(t('refreshing'))});window.addEventListener('resize',()=>{if(snapshot)drawChart(snapshot.equity_history||[]);renderMarketOverview()});
-setLanguage('ar');renderMarket();renderMarketOverview();connectMarketFeed();const existing=sessionStorage.getItem('mumin_dashboard_password');if(existing){$('accessPassword').value=existing;refresh()}refreshTimer=setInterval(refresh,20000);
+setLanguage('ar');renderMarket();renderMarketOverview();connectMarketFeed();sessionStorage.removeItem('mumin_dashboard_token');const existing=sessionStorage.getItem('mumin_dashboard_password');if(existing){$('accessPassword').value=existing;refresh()}refreshTimer=setInterval(refresh,20000);
 </script>
 <script src="/operations-chat.js" defer></script>
 </body></html>
