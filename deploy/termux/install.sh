@@ -1,7 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
 set -euo pipefail
 ROOT="$HOME/Mumin-AI-Trader"
-PREFIX="\${PREFIX:-/data/data/com.termux/files/usr}"
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 SERVICE_ROOT="$PREFIX/var/service"
 BOOT_DIR="$HOME/.termux/boot"
 if [ ! -d "$ROOT/.git" ]; then
@@ -24,7 +24,7 @@ if ! grep -Eq '^DASHBOARD_PASSWORD=.+$' "$ROOT/.env"; then
     printf "\n"
     IFS= read -r -s -p "Confirm dashboard password: " DASHBOARD_PASSWORD_CONFIRM
     printf "\n"
-    if [ "\${#DASHBOARD_PASSWORD}" -lt 12 ]; then
+    if [ "${#DASHBOARD_PASSWORD}" -lt 12 ]; then
       printf "Password must contain at least 12 characters.\n" >&2
     elif [ "$DASHBOARD_PASSWORD" != "$DASHBOARD_PASSWORD_CONFIRM" ]; then
       printf "Passwords do not match. Try again.\n" >&2
