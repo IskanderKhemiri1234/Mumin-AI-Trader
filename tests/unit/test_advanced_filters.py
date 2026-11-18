@@ -91,6 +91,19 @@ def test_anti_chase_rejects_extended_price():
     assert result.reason == "ANTI_CHASE_PRICE_TOO_EXTENDED"
 
 
+
+def test_false_breakout_wick_without_close_reclaim_is_rejected():
+    closes = [D("100")] * 21 + [D("100.05")]
+    highs = [D("100.10")] * 21 + [D("100.30")]
+    lows = [D("99.90")] * 22
+    volumes = [D("100")] * 22
+    result = evaluate_anti_chase_and_breakout(
+        closes=closes, highs=highs, lows=lows, volumes=volumes
+    )
+    assert not result.passed
+    assert result.reason == "FALSE_BREAKOUT_CLOSE_FAILED"
+
+
 def test_market_regime_rejects_flat_market():
     closes = [D("100")] * 30
     highs = [D("100.1")] * 30
