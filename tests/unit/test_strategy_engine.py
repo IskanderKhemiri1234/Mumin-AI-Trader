@@ -61,3 +61,13 @@ def test_strategy_rejects_missing_or_bearish_timeframe():
 def test_take_profit_is_bounded_to_user_range():
     with pytest.raises(ValueError, match="between 1.25% and 1.50%"):
         StrategyEngine(take_profit_percent=Decimal("1.60"))
+
+
+def test_strategy_engine_fails_closed_when_advanced_filter_rejects():
+    inputs = valid_inputs()
+    inputs["advanced_filter_reasons"] = ("REGIME_DIRECTIONAL_EFFICIENCY_TOO_LOW",)
+    decision = StrategyEngine().evaluate(**inputs)
+    assert not decision.approved
+    assert "REGIME_DIRECTIONAL_EFFICIENCY_TOO_LOW" in decision.reason
+    assert decision.stop_loss_price is None
+    assert decision.take_profit_price is None

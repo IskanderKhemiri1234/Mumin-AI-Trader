@@ -66,6 +66,7 @@ class StrategyEngine:
         rsi: Decimal | None,
         momentum_bps: Decimal,
         timeframe_trends: dict[str, bool],
+        advanced_filter_reasons: tuple[str, ...] = (),
     ) -> StrategyDecision:
         symbol = symbol.upper()
         entry = Decimal(entry_price)
@@ -94,6 +95,10 @@ class StrategyEngine:
             return reject("MTF gate rejected: one or more timeframes are missing.")
         if not all(timeframe_trends[frame] for frame in required_frames):
             return reject("MTF gate rejected: trend alignment is not bullish.")
+        if advanced_filter_reasons:
+            return reject(
+                "Advanced filter stack rejected: " + ",".join(advanced_filter_reasons)
+            )
 
         score = 30
         score += 20 if momentum >= Decimal("30") else 12 if momentum >= Decimal("15") else 8
@@ -111,7 +116,7 @@ class StrategyEngine:
             True,
             symbol,
             score,
-            "Approved: Score, liquidity Shield, MTF, RSI and momentum gates passed.",
+            "Approved: legacy score and all advanced filter gates passed.",
             stop,
             target,
         )
