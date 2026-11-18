@@ -143,6 +143,9 @@ def test_dashboard_page_exposes_live_control_center():
     response = TestClient(app).get("/dashboard")
     assert response.status_code == 200
     page = response.text
+    assert "X-Dashboard-Password" in page
+    assert "mumin_dashboard_password" in page
+    assert "sessionStorage.removeItem('mumin_dashboard_token')" in page
     assert 'id="control"' in page
     assert 'id="marketRows"' in page
     assert 'id="marketReconnect"' in page
