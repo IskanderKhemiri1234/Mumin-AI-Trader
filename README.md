@@ -28,7 +28,7 @@ The API reads `MUMIN_PAPER_DB_PATH`, defaulting to `data/mumin_public_paper.db`.
 
 ## Android companion app
 
-The Android companion in `android/` is a WebView client for either the same-device Termux API or a remote HTTPS API. Configure the server base URL in the app connection panel (for example `https://your-service.onrender.com`); local Termux remains available at `http://127.0.0.1:8000`. The app opens `/dashboard` on that server. The dashboard then reads the actual SQLite Paper ledger and loads Mumin Operations Chat from the API. The user enters the exact `DASHBOARD_PASSWORD` configured on the selected server in the dashboard login; the password is not embedded in the APK. The app contains no Binance credentials and cannot enable exchange execution. The password used for dashboard login is not the Binance API key or secret.
+The Android companion in `android/` is a WebView client for the always-on Termux node on the same Samsung phone. It connects to `http://127.0.0.1:8000/dashboard`; the `mumin-api` and `mumin-paper-engine` services run under `termux-services`, with Termux:Boot configured by `deploy/termux/install.sh`. No phone Termux node or external hosting is part of this architecture. The dashboard then reads the actual SQLite Paper ledger and loads Mumin Operations Chat from the API. The user enters the exact `DASHBOARD_PASSWORD` configured on the selected server in the dashboard login; the password is not embedded in the APK. The app contains no Binance credentials and cannot enable exchange execution. The password used for dashboard login is not the Binance API key or secret.
 
 - GitHub Actions workflow: `.github/workflows/build-apk.yml`.
 - Trigger: changes to `android/**`, workflow dispatch, or pull requests that touch the Android app.
@@ -36,7 +36,7 @@ The Android companion in `android/` is a WebView client for either the same-devi
 - The CI artifact is a debug-signed installable APK for supervised device testing; it is not a Play Store release or a privately release-signed production package.
 - The app permits HTTP only to loopback hosts `127.0.0.1` and `localhost`; all remote server connections must use HTTPS.
 - The dashboard includes Paper-only controls. Backend execution gates remain authoritative; this Android client does not enable Testnet or Mainnet execution.
-- If using the local Termux URL and Termux is stopped, the dashboard cannot load. A remote HTTPS URL does not require Termux on the phone, but the remote service and its data storage must be available. The optional embedded demo is synthetic and must not be confused with live account or Paper ledger data.
+- If Termux services are stopped, the dashboard cannot load. The phone is the server; Termux:Boot and the service supervisor keep the API and Paper engine running after restart. The optional embedded demo is synthetic and must not be confused with live account or Paper ledger data.
 
 ## Run locally
 
