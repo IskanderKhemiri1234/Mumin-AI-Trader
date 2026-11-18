@@ -48,7 +48,7 @@ def test_mtf_fails_closed_when_a_timeframe_is_missing():
 def test_momentum_requires_price_rsi_and_volume_confirmation():
     closes = rising_prices()
     volumes = [D("100")] * 20 + [D("160")]
-    result = evaluate_momentum(closes, volumes)
+    result = evaluate_momentum(closes, volumes, lookback=10)
     assert result.passed
     assert result.reason == "MOMENTUM_CONFIRMED"
     assert dict(result.metrics)["volume_ratio"] == D("1.6")
