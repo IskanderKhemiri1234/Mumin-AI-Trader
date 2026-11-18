@@ -368,13 +368,15 @@ def _reply(intent: str, language: str, snapshot: dict[str, Any]) -> str:
 @router.post("/api/operations-chat")
 async def operations_chat(
     request: OperationsChatRequest,
-    x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
+    x_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
 ) -> dict[str, Any]:
-    access_token = os.getenv("DASHBOARD_ACCESS_TOKEN", "")
-    if not access_token:
-        raise HTTPException(status_code=503, detail="Dashboard access is not configured.")
-    if not x_dashboard_token or not hmac.compare_digest(x_dashboard_token, access_token):
-        raise HTTPException(status_code=401, detail="Dashboard access token is invalid.")
+    dashboard_password = os.getenv("DASHBOARD_PASSWORD", "")
+    if not dashboard_password:
+        raise HTTPException(status_code=503, detail="Dashboard password is not configured.")
+    if len(dashboard_password) < 12:
+        raise HTTPException(status_code=503, detail="DASHBOARD_PASSWORD must contain at least 12 characters.")
+    if not x_dashboard_password or not hmac.compare_digest(x_dashboard_password, dashboard_password):
+        raise HTTPException(status_code=401, detail="Dashboard password is invalid.")
 
     database_value = os.getenv("MUMIN_PAPER_DB_PATH", str(DEFAULT_DATABASE))
     database = Path(database_value)
