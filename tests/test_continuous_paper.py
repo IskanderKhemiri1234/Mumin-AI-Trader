@@ -455,6 +455,14 @@ async def test_incomplete_public_snapshot_skips_entire_finite_cycle_without_fall
     assert ticks == 0
     assert market_rows == 0
 
+def test_operational_runner_functions_default_to_public_market_data():
+    import inspect
+    import scripts.run_continuous_paper as paper_module
+
+    assert inspect.signature(paper_module.run_bot).parameters["data_source"].default == PUBLIC_SOURCE
+    assert inspect.signature(paper_module._run_bot_unlocked).parameters["data_source"].default == PUBLIC_SOURCE
+
+
 def test_cli_defaults_to_public_binance_market_data_and_shared_paper_ledger(
     tmp_path, monkeypatch,
 ):
