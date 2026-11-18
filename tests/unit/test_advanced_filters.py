@@ -57,7 +57,9 @@ def test_momentum_requires_price_rsi_and_volume_confirmation():
 def test_momentum_rejects_weak_volume():
     closes = rising_prices()
     volumes = [D("100")] * 21
-    result = evaluate_momentum(closes, volumes)
+    result = evaluate_momentum(
+        closes, volumes, minimum_return_bps=D("0")
+    )
     assert not result.passed
     assert result.reason == "MOMENTUM_VOLUME_CONFIRMATION_FAILED"
 
