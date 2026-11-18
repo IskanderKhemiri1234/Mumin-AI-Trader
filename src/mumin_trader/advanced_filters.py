@@ -197,11 +197,11 @@ def evaluate_anti_chase_and_breakout(
         return FilterDecision(False, "PRICE_ACTION_WARMUP_INSUFFICIENT_DATA", 0)
     c = [_d(value) for value in closes]
     h = [_d(value) for value in highs]
-    l = [_d(value) for value in lows]
+    low_values = [_d(value) for value in lows]
     v = [_d(value) for value in volumes]
-    if not all(_valid_positive(values) for values in (c, h, l, v)):
+    if not all(_valid_positive(values) for values in (c, h, low_values, v)):
         return FilterDecision(False, "PRICE_ACTION_INVALID_OHLCV", 0)
-    if any(low > high for low, high in zip(l, h)):
+    if any(low > high for low, high in zip(low_values, h)):
         return FilterDecision(False, "PRICE_ACTION_INVALID_CANDLE_RANGE", 0)
     ema20 = _ema(c, 20)
     extension = (c[-1] / ema20 - ONE) * BPS
@@ -214,7 +214,7 @@ def evaluate_anti_chase_and_breakout(
                               (("previous_high", previous_high), ("close", c[-1])))
     if c[-1] > previous_high:
         candle_range = h[-1] - l[-1]
-        close_location = (c[-1] - l[-1]) / candle_range if candle_range > ZERO else ZERO
+        close_location = (c[-1] - low_values[-1]) / candle_range if candle_range > ZERO else ZERO
         baseline = sum(v[-9:-1], ZERO) / Decimal(8)
         volume_ratio = v[-1] / baseline if baseline > ZERO else ZERO
         if close_location < Decimal("0.65") or volume_ratio < _d(breakout_volume_ratio):
@@ -239,16 +239,16 @@ def evaluate_market_regime(
     """Avoid dead and disorderly markets using ATR% and directional efficiency."""
     if min(len(highs), len(lows), len(closes)) < 16:
         return FilterDecision(False, "REGIME_WARMUP_INSUFFICIENT_DATA", 0)
-    h, l, c = ([_d(value) for value in values] for values in (highs, lows, closes))
-    if not all(_valid_positive(values) for values in (h, l, c)):
+    h, low_values, c = ([_d(value) for value in values] for values in (highs, lows, closes))
+    if not all(_valid_positive(values) for values in (h, low_values, c)):
         return FilterDecision(False, "REGIME_INVALID_OHLC", 0)
-    if any(low > high for low, high in zip(l, h)):
+    if any(low > high for low, high in zip(low_values, h)):
         return FilterDecision(False, "REGIME_INVALID_CANDLE_RANGE", 0)
     true_ranges = []
     for index in range(len(c) - 14, len(c)):
         previous = c[index - 1]
-        true_ranges.append(max(h[index] - l[index], abs(h[index] - previous),
-                               abs(l[index] - previous)))
+        true_ranges.append(max(h[index] - low_values[index], abs(h[index] - previous),
+                               abs(low_values[index] - previous)))
     atr_pct = sum(true_ranges, ZERO) / Decimal(len(true_ranges)) / c[-1] * HUNDRED
     changes = [abs(c[i] - c[i - 1]) for i in range(len(c) - 14, len(c))]
     path = sum(changes, ZERO)
