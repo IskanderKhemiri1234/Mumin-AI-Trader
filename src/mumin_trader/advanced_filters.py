@@ -213,7 +213,7 @@ def evaluate_anti_chase_and_breakout(
         return FilterDecision(False, "FALSE_BREAKOUT_CLOSE_FAILED", 0,
                               (("previous_high", previous_high), ("close", c[-1])))
     if c[-1] > previous_high:
-        candle_range = h[-1] - l[-1]
+        candle_range = h[-1] - low_values[-1]
         close_location = (c[-1] - low_values[-1]) / candle_range if candle_range > ZERO else ZERO
         baseline = sum(v[-9:-1], ZERO) / Decimal(8)
         volume_ratio = v[-1] / baseline if baseline > ZERO else ZERO
