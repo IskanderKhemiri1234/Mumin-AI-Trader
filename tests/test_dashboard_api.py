@@ -32,6 +32,35 @@ def test_dashboard_api_rejects_wrong_password(monkeypatch, tmp_path):
     assert response.status_code == 401
 
 
+
+def test_legacy_dashboard_token_is_revoked_and_not_accepted(monkeypatch):
+    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "old-token-that-must-stop-working")
+    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+    client = TestClient(app)
+
+    legacy_environment_only = client.get(
+        "/api/dashboard",
+        headers={"X-Dashboard-Token": "old-token-that-must-stop-working"},
+    )
+    assert legacy_environment_only.status_code == 503
+
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "new-owner-password-123")
+    legacy_header = client.get(
+        "/api/dashboard",
+        headers={"X-Dashboard-Token": "old-token-that-must-stop-working"},
+    )
+    assert legacy_header.status_code == 401
+
+
+def test_dashboard_password_must_be_at_least_twelve_characters(monkeypatch):
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "too-short")
+    response = TestClient(app).get(
+        "/api/dashboard",
+        headers={"X-Dashboard-Password": "too-short"},
+    )
+    assert response.status_code == 503
+    assert "at least 12 characters" in response.json()["detail"]
+
 def test_dashboard_api_returns_waiting_state_without_creating_database(
     monkeypatch, tmp_path
 ):
