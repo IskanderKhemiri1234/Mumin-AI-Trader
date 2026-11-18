@@ -1,0 +1,159 @@
+{
+  "all_expected_symbols_present": true,
+  "archive_bytes": 4453,
+  "archive_sha256": "5fdc18a3d148c4a5d6c7b2ec9bc9ccade817e7dd7bbdcb40467927864121c783",
+  "complete_eight_symbol_cycles": 3,
+  "expected_symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "SOLUSDT",
+    "XRPUSDT",
+    "ADAUSDT",
+    "AVAXUSDT",
+    "LINKUSDT"
+  ],
+  "generated_at_utc": "2026-11-18T01:38:03.430514+00:00",
+  "incomplete_cycle_count": 0,
+  "limitations": [
+    "Only public-market observations are included; synthetic rows are excluded.",
+    "For each minute, the latest complete eight-symbol snapshot is selected; earlier same-minute snapshots are excluded.",
+    "Only the latest contiguous one-minute suffix is retained. All preceding gaps are disclosed in the selection metadata and no missing data is reconstructed.",
+    "Order-book depth is available only at captured snapshot times and is not historical exchange depth for skipped intervals.",
+    "Replay readiness additionally requires positive finite executable-side prices, valid bid/ask ordering, finite OHLCV and depth inputs, fresh minute candles, and finite raw hourly closes.",
+    "Replay readiness requires at least 30 complete cycles, 21 causally aligned hourly closes per row, minute timestamp alignment, and no gaps or duplicates within the selected suffix.",
+    "This archive is not a sealed Holdout and must not be used to claim out-of-sample profitability."
+  ],
+  "observed_cycle_count": 3,
+  "per_symbol": {
+    "ADAUSDT": {
+      "duplicate_candle_snapshots": 0,
+      "estimated_missing_one_minute_slots": 0,
+      "first_candle_close_ms": 1794964439999,
+      "largest_observed_gap_ms": 60000,
+      "last_candle_close_ms": 1794964559999,
+      "market_snapshot_rows": 3,
+      "unique_closed_candles": 3
+    },
+    "AVAXUSDT": {
+      "duplicate_candle_snapshots": 0,
+      "estimated_missing_one_minute_slots": 0,
+      "first_candle_close_ms": 1794964439999,
+      "largest_observed_gap_ms": 60000,
+      "last_candle_close_ms": 1794964559999,
+      "market_snapshot_rows": 3,
+      "unique_closed_candles": 3
+    },
+    "BNBUSDT": {
+      "duplicate_candle_snapshots": 0,
+      "estimated_missing_one_minute_slots": 0,
+      "first_candle_close_ms": 1794964439999,
+      "largest_observed_gap_ms": 60000,
+      "last_candle_close_ms": 1794964559999,
+      "market_snapshot_rows": 3,
+      "unique_closed_candles": 3
+    },
+    "BTCUSDT": {
+      "duplicate_candle_snapshots": 0,
+      "estimated_missing_one_minute_slots": 0,
+      "first_candle_close_ms": 1794964439999,
+      "largest_observed_gap_ms": 60000,
+      "last_candle_close_ms": 1794964559999,
+      "market_snapshot_rows": 3,
+      "unique_closed_candles": 3
+    },
+    "ETHUSDT": {
+      "duplicate_candle_snapshots": 0,
+      "estimated_missing_one_minute_slots": 0,
+      "first_candle_close_ms": 1794964439999,
+      "largest_observed_gap_ms": 60000,
+      "last_candle_close_ms": 1794964559999,
+      "market_snapshot_rows": 3,
+      "unique_closed_candles": 3
+    },
+    "LINKUSDT": {
+      "duplicate_candle_snapshots": 0,
+      "estimated_missing_one_minute_slots": 0,
+      "first_candle_close_ms": 1794964439999,
+      "largest_observed_gap_ms": 60000,
+      "last_candle_close_ms": 1794964559999,
+      "market_snapshot_rows": 3,
+      "unique_closed_candles": 3
+    },
+    "SOLUSDT": {
+      "duplicate_candle_snapshots": 0,
+      "estimated_missing_one_minute_slots": 0,
+      "first_candle_close_ms": 1794964439999,
+      "largest_observed_gap_ms": 60000,
+      "last_candle_close_ms": 1794964559999,
+      "market_snapshot_rows": 3,
+      "unique_closed_candles": 3
+    },
+    "XRPUSDT": {
+      "duplicate_candle_snapshots": 0,
+      "estimated_missing_one_minute_slots": 0,
+      "first_candle_close_ms": 1794964439999,
+      "largest_observed_gap_ms": 60000,
+      "last_candle_close_ms": 1794964559999,
+      "market_snapshot_rows": 3,
+      "unique_closed_candles": 3
+    }
+  },
+  "quality": {
+    "duplicate_candle_snapshots": 0,
+    "estimated_missing_one_minute_slots": 0,
+    "first_candle_close_ms": 1794964439999,
+    "historical_depth_available_only_at_recorded_snapshots": true,
+    "holdout_eligible": false,
+    "largest_observed_gap_ms": 60000,
+    "last_candle_close_ms": 1794964559999,
+    "macro_complete_rows": 24,
+    "macro_timestamp_aligned_rows": 24,
+    "minute_timestamp_aligned_rows": 24,
+    "one_minute_close_timestamp_alignment_passed": true,
+    "raw_21_hourly_close_timestamp_alignment_passed": true,
+    "raw_21_hourly_closes_persisted": true,
+    "replay_macro_numeric_rows": 24,
+    "replay_numeric_quote_rows": 24,
+    "replay_ready": false,
+    "status": "OBSERVATION_ARCHIVE_ONLY",
+    "synthetic_rows_excluded": true
+  },
+  "record_counts": {
+    "agent_decisions": 24,
+    "market_snapshots": 24,
+    "paper_fills": 0
+  },
+  "schema_version": 2,
+  "selection": {
+    "excluded_preceding_contiguous_segment_candles": 302,
+    "policy": "For each closed one-minute candle, select the latest complete eight-symbol source tick; retain only the latest contiguous suffix after the most recent missing-minute gap. No missing candles are synthesized.",
+    "selected_contiguous_candle_count": 3,
+    "selected_end_candle_close_ms": 1794964559999,
+    "selected_source_ticks": [
+      403,
+      404,
+      405
+    ],
+    "selected_start_candle_close_ms": 1794964439999,
+    "source_complete_candle_count": 305,
+    "source_duplicate_or_excluded_snapshot_rows": 2726,
+    "source_gap_count": 98,
+    "source_incomplete_tick_count": 98,
+    "source_market_snapshot_rows": 2750,
+    "source_mismatched_close_tick_count": 2,
+    "source_tick_count": 405
+  },
+  "source": "BINANCE_PUBLIC_MARKET_DATA",
+  "source_database": "/home/runner/work/Mumin-AI-Trader/Mumin-AI-Trader/mumin-paper-ledger/mumin_public_paper.db",
+  "symbols_present": [
+    "ADAUSDT",
+    "AVAXUSDT",
+    "BNBUSDT",
+    "BTCUSDT",
+    "ETHUSDT",
+    "LINKUSDT",
+    "SOLUSDT",
+    "XRPUSDT"
+  ]
+}
