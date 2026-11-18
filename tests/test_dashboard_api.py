@@ -223,7 +223,7 @@ def test_paper_worker_snapshot_reports_desired_state(monkeypatch, tmp_path):
 
 
 
-def test_market_api_requires_dashboard_token(monkeypatch):
+def test_market_api_requires_dashboard_password(monkeypatch):
     monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
     response = TestClient(app).get("/api/market")
     assert response.status_code == 503
