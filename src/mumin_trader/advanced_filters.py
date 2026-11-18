@@ -209,6 +209,9 @@ def evaluate_anti_chase_and_breakout(
         return FilterDecision(False, "ANTI_CHASE_PRICE_TOO_EXTENDED", 0,
                               (("extension_bps", extension),))
     previous_high = max(h[-21:-1])
+    if h[-1] > previous_high and c[-1] <= previous_high:
+        return FilterDecision(False, "FALSE_BREAKOUT_CLOSE_FAILED", 0,
+                              (("previous_high", previous_high), ("close", c[-1])))
     if c[-1] > previous_high:
         candle_range = h[-1] - l[-1]
         close_location = (c[-1] - l[-1]) / candle_range if candle_range > ZERO else ZERO
