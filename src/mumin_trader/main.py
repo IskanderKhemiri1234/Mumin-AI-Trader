@@ -251,7 +251,7 @@ def _read_dashboard_snapshot() -> dict[str, Any]:
             "message": "Paper ledger database has not been created yet.",
             "updated_at": None,
             "mode": "PAPER",
-            "environment": "TESTNET",
+            "environment": "PAPER_ISOLATED",
             "market_data_source": None,
             "account": None,
             "positions": [],
@@ -277,7 +277,7 @@ def _read_dashboard_snapshot() -> dict[str, Any]:
                 "message": "The selected database is not a Mumin Paper ledger.",
                 "updated_at": None,
                 "mode": "PAPER",
-                "environment": "TESTNET",
+                "environment": "PAPER_ISOLATED",
                 "market_data_source": None,
                 "account": None,
                 "positions": [],
@@ -294,7 +294,7 @@ def _read_dashboard_snapshot() -> dict[str, Any]:
                 "message": "Paper ledger has no account snapshot yet.",
                 "updated_at": None,
                 "mode": "PAPER",
-                "environment": "TESTNET",
+                "environment": "PAPER_ISOLATED",
                 "market_data_source": None,
                 "account": None,
                 "positions": [],
@@ -393,7 +393,7 @@ def _read_dashboard_snapshot() -> dict[str, Any]:
             "message": "Read-only Paper ledger snapshot.",
             "updated_at": account["updated_at"],
             "mode": "PAPER",
-            "environment": "TESTNET",
+            "environment": "PAPER_ISOLATED",
             "market_data_source": source_row["data_source"] if source_row else None,
             "account": {
                 "tick": int(account["tick_count"]),
@@ -453,7 +453,10 @@ async def health() -> dict[str, str]:
 async def root() -> dict[str, str]:
     return {
         "service": "Mumin AI Trader",
-        "status": "foundation",
+        "status": "paper_only",
+        "market_data": "BINANCE_PUBLIC_SPOT",
+        "execution": "SIMULATED_PAPER_ONLY",
+        "account_link": "NONE",
         "dashboard": "/dashboard",
         "api": "/api/dashboard",
     }

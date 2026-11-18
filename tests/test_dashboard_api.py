@@ -5,6 +5,16 @@ from mumin_trader.main import app
 from scripts.run_continuous_paper import ContinuousPaperBot
 
 
+def test_root_reports_public_market_paper_only_without_account_link():
+    response = TestClient(app).get("/")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "paper_only"
+    assert response.json()["market_data"] == "BINANCE_PUBLIC_SPOT"
+    assert response.json()["execution"] == "SIMULATED_PAPER_ONLY"
+    assert response.json()["account_link"] == "NONE"
+
+
 def test_dashboard_api_requires_server_token(monkeypatch, tmp_path):
     monkeypatch.delenv("DASHBOARD_ACCESS_TOKEN", raising=False)
     monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(tmp_path / "ledger.sqlite3"))
@@ -56,7 +66,7 @@ def test_dashboard_api_reads_paper_ledger_without_mutating_it(monkeypatch, tmp_p
     payload = response.json()
     assert payload["status"] == "ready"
     assert payload["mode"] == "PAPER"
-    assert payload["environment"] == "TESTNET"
+    assert payload["environment"] == "PAPER_ISOLATED"
     assert payload["account"]["tick"] == before
     assert payload["account"]["equity"] > 0
     assert isinstance(payload["positions"], list)
