@@ -127,3 +127,25 @@ async def test_mainnet_worker_refuses_strategy_exit_levels_outside_execution_pol
     finally:
         await worker.market.close()
         await worker._market_http.aclose()
+
+
+def test_unknown_submission_outcome_is_durable_and_never_reclaimed(tmp_path) -> None:
+    ledger = MainnetSignalLedger(tmp_path / "unknown-outcome.sqlite3")
+    candidate = SimpleNamespace(
+        symbol="BTCUSDT", signal="BUY_CANDIDATE", strategy_score=90,
+        last_price="50000", stop_loss_price="49750", take_profit_price="50625",
+        filter_reasons=(),
+    )
+    bucket = "2026-11-19T10:00:00+00:00"
+    assert ledger.record_candidate(candidate, bucket, "SHADOW_PROPOSAL")
+    assert ledger.claim_submission("BTCUSDT", bucket, "munknown-order-id")
+    ledger.finish_submission("BTCUSDT", bucket, "OUTCOME_UNKNOWN", "mock timeout after submit")
+    assert not ledger.claim_submission("BTCUSDT", bucket, "mretry-order-id")
+    with ledger._connect() as db:
+        row = db.execute(
+            "SELECT disposition,order_list_client_id,detail FROM mainnet_signal_events WHERE symbol='BTCUSDT' AND candle_bucket=?",
+            (bucket,),
+        ).fetchone()
+    assert row["disposition"] == "OUTCOME_UNKNOWN"
+    assert row["order_list_client_id"] == "munknown-order-id"
+    assert row["detail"] == "mock timeout after submit"
