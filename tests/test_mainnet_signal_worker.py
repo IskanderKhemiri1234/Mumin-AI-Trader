@@ -178,6 +178,55 @@ async def test_worker_scans_all_eight_configured_spot_symbols_and_prioritizes_be
         await worker._market_http.aclose()
 
 
+@pytest.mark.asyncio
+async def test_shadow_scan_records_signals_for_all_eight_symbols(tmp_path) -> None:
+    symbols = (
+        "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
+        "XRPUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT",
+    )
+    worker = MainnetSignalWorker(
+        Settings(_env_file=None),
+        ledger_path=tmp_path / "all-eight-scan.sqlite3",
+        autonomous=False,
+    )
+    interval_ms = worker._interval_milliseconds()
+    candle_open_ms = int(datetime.now(timezone.utc).timestamp() * 1000) - interval_ms
+    candidates = [
+        SimpleNamespace(
+            symbol=symbol,
+            signal="BUY_CANDIDATE",
+            strategy_score=80 + index,
+            last_price=Decimal("50000"),
+            bid=Decimal("49999"),
+            stop_loss_price=Decimal("49750"),
+            take_profit_price=Decimal("50625"),
+            signal_candle_open_time_ms=candle_open_ms,
+            filter_reasons=(),
+        )
+        for index, symbol in enumerate(symbols)
+    ]
+
+    class FakeScanner:
+        async def scan(self, _market):
+            return candidates
+
+    worker.scanner = FakeScanner()
+    try:
+        result = await worker.run_once()
+        assert result["candidates"] == 8
+        assert result["approved"] == 8
+        assert result["new_records"] == 8
+        assert result["orders_submitted"] == 0
+        with worker.ledger._connect() as db:
+            rows = db.execute(
+                "SELECT symbol FROM mainnet_signal_events ORDER BY symbol"
+            ).fetchall()
+        assert {row["symbol"] for row in rows} == set(symbols)
+    finally:
+        await worker.market.close()
+        await worker._market_http.aclose()
+
+
 def test_worker_rejects_a_restricted_watchlist_instead_of_silently_scanning_one_coin(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("WATCHLIST", "BTCUSDT")
     with pytest.raises(ValueError, match="complete eight-symbol Spot watchlist"):
