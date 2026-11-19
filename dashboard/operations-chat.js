@@ -16,7 +16,38 @@ function openPage(){document.querySelectorAll(".page").forEach(x=>x.classList.to
 navButton.addEventListener("click",openPage);$("langBtn").addEventListener("click",()=>setTimeout(setLanguage,0));
 function addMessage(value,who){const el=document.createElement("div");el.className="ops-chat-message "+who;el.textContent=value;$("opsChatFeed").appendChild(el);$("opsChatFeed").scrollTop=$("opsChatFeed").scrollHeight}
 function renderList(id,items,empty,type){const root=$(id);root.replaceChildren();if(!items||!items.length){const e=document.createElement("div");e.className="ops-chat-empty";e.textContent=empty;root.appendChild(e);return}items.forEach(item=>{const card=document.createElement("div"),head=document.createElement("strong"),body=document.createElement("span");card.className="ops-chat-item";head.textContent=type==="alert"?(item.severity||"INFO")+" · "+(item.code||""):(item.event_type||item.command_type||"EVENT");body.textContent=type==="alert"?(item.message||""):[item.created_at,item.detail,item.status].filter(Boolean).join(" · ");card.append(head,body);root.appendChild(card)})}
-async function ask(message,echo){if(busy||!message)return;const dashboardPassword=sessionStorage.getItem("mumin_dashboard_password");if(!dashboardPassword){$("access").style.display="grid";return}busy=true;$("opsChatSend").disabled=true;if(echo)addMessage(message,"user");try{const response=await fetch("/api/operations-chat",{method:"POST",headers:{"Content-Type":"application/json","X-Dashboard-Password":dashboardPassword},body:JSON.stringify({message}),cache:"no-store"});const payload=await response.json();if(!response.ok)throw new Error(payload.detail||("HTTP "+response.status));addMessage(payload.answer,"bot");const snap=payload.snapshot||{};renderList("opsChatAlerts",snap.alerts||[],tr("لا توجد تنبيهات مكتشفة.","No alerts detected."),"alert");renderList("opsChatEvents",snap.events||[],tr("لا توجد أحداث مسجلة.","No recorded events."),"event");$("opsDbState").textContent=snap.database_status==="ready"?tr("دفتر متصل","Ledger ready"):tr("الدفتر غير جاهز","Ledger unavailable");loaded=true}catch(error){addMessage(tr("تعذر قراءة البيانات: ","Unable to read operations data: ")+error.message,"bot")}finally{busy=false;$("opsChatSend").disabled=false}}
+function addProposal(proposal){
+ const card=document.createElement("div");card.className="ops-chat-message bot";
+ const title=document.createElement("strong");title.textContent=tr("مقترح أمر — لم يُرسل بعد","Order proposal — not submitted");
+ const details=document.createElement("div");
+ const lines=proposal.type==="protected_buy"
+  ?["BUY "+proposal.quantity+" "+proposal.symbol,"LIMIT "+proposal.working_price,"TP "+proposal.take_profit_price,"STOP "+proposal.stop_price,"STOP LIMIT "+proposal.stop_limit_price]
+  :["SELL "+proposal.quantity+" "+proposal.symbol,"LIMIT "+proposal.price];
+ details.textContent=lines.join("\n");
+ const confirmButton=document.createElement("button");confirmButton.type="button";confirmButton.className="btn gold";confirmButton.textContent=tr("تأكيد وإرسال الأمر الحقيقي","Confirm and submit live order");
+ confirmButton.addEventListener("click",async()=>{
+  const summary=lines.join("\n")+"\n\n"+tr("سيُرسل هذا الأمر إلى حساب Binance الحقيقي. هل تؤكد؟","This order will be sent to your real Binance account. Confirm?");
+  if(!window.confirm(summary))return;
+  confirmButton.disabled=true;
+  try{
+   const dashboardPassword=sessionStorage.getItem("mumin_dashboard_password");
+   const isBuy=proposal.type==="protected_buy";
+   const endpoint=isBuy?"/api/mainnet/entries/protected":"/api/mainnet/orders";
+   const body=isBuy?{...proposal,confirmed:true}:{side:"SELL",symbol:proposal.symbol,quantity:proposal.quantity,price:proposal.price,client_order_id:proposal.client_order_id,confirmed:true};
+   const id=isBuy?proposal.list_client_order_id:proposal.client_order_id;
+   const response=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json","X-Dashboard-Password":dashboardPassword,"Idempotency-Key":id},body:JSON.stringify(body),cache:"no-store"});
+   const result=await response.json();
+   if(!response.ok)throw new Error(result.detail||("HTTP "+response.status));
+   addMessage(tr("أُرسل الطلب. راجع حالة التنفيذ في لوحة Binance. لا تعاود الإرسال.","Order submitted. Check execution status in the Binance dashboard; do not resubmit."),"bot");
+   confirmButton.textContent=tr("تم إرسال الطلب","Submitted");
+  }catch(error){
+   addMessage(tr("لم أعد إرسال الطلب تلقائياً. افحص المصالحة أولاً: ","No automatic retry was attempted. Reconcile before taking action: ")+error.message,"bot");
+   confirmButton.disabled=false;
+  }
+ });
+ card.append(title,details,confirmButton);$("opsChatFeed").appendChild(card);$("opsChatFeed").scrollTop=$("opsChatFeed").scrollHeight;
+}
+async function ask(message,echo){if(busy||!message)return;const dashboardPassword=sessionStorage.getItem("mumin_dashboard_password");if(!dashboardPassword){$("access").style.display="grid";return}busy=true;$("opsChatSend").disabled=true;if(echo)addMessage(message,"user");try{const response=await fetch("/api/operations-chat",{method:"POST",headers:{"Content-Type":"application/json","X-Dashboard-Password":dashboardPassword},body:JSON.stringify({message}),cache:"no-store"});const payload=await response.json();if(!response.ok)throw new Error(payload.detail||("HTTP "+response.status));addMessage(payload.answer,"bot");if(payload.proposal)addProposal(payload.proposal);const snap=payload.snapshot||{};renderList("opsChatAlerts",snap.alerts||[],tr("لا توجد تنبيهات مكتشفة.","No alerts detected."),"alert");renderList("opsChatEvents",snap.events||[],tr("لا توجد أحداث مسجلة.","No recorded events."),"event");$("opsDbState").textContent=snap.database_status==="ready"?tr("دفتر متصل","Ledger ready"):tr("الدفتر غير جاهز","Ledger unavailable");loaded=true}catch(error){addMessage(tr("تعذر قراءة البيانات: ","Unable to read operations data: ")+error.message,"bot")}finally{busy=false;$("opsChatSend").disabled=false}}
 $("opsChatForm").addEventListener("submit",event=>{event.preventDefault();const input=$("opsChatInput"),value=input.value.trim();if(!value)return;input.value="";ask(value,true)});
 document.addEventListener("click",event=>{const button=event.target.closest("#opsChatPrompts [data-question]");if(button)ask(button.dataset.question,true)});
 setLanguage();
