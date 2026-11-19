@@ -154,7 +154,6 @@ def test_unknown_submission_outcome_is_durable_and_never_reclaimed(tmp_path) -> 
 @pytest.mark.asyncio
 async def test_worker_scans_all_eight_configured_spot_symbols_and_prioritizes_best_signal(tmp_path, monkeypatch) -> None:
     symbols = "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,AVAXUSDT,LINKUSDT"
-    monkeypatch.setenv("MAINNET_SIGNAL_SYMBOLS", symbols)
     worker = MainnetSignalWorker(
         Settings(_env_file=None),
         ledger_path=tmp_path / "eight-symbols.sqlite3",
@@ -177,3 +176,13 @@ async def test_worker_scans_all_eight_configured_spot_symbols_and_prioritizes_be
     finally:
         await worker.market.close()
         await worker._market_http.aclose()
+
+
+def test_worker_rejects_a_restricted_watchlist_instead_of_silently_scanning_one_coin(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("WATCHLIST", "BTCUSDT")
+    with pytest.raises(ValueError, match="complete eight-symbol Spot watchlist"):
+        MainnetSignalWorker(
+            Settings(_env_file=None),
+            ledger_path=tmp_path / "restricted-watchlist.sqlite3",
+            autonomous=False,
+        )
