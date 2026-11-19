@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import sqlite3
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
