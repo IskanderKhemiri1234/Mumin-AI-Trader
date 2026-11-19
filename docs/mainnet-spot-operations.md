@@ -36,7 +36,7 @@ Default configuration:
 - `MAINNET_AUTONOMOUS_EXECUTION_ENABLED=false`
 - `MAINNET_AUTONOMOUS_CONFIRMATION=` (empty)
 - `MAINNET_AUTONOMOUS_BOOT_RESUME_ENABLED=false`
-- `MAINNET_SIGNAL_SYMBOLS=BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,AVAXUSDT,LINKUSDT`
+- `WATCHLIST=BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,AVAXUSDT,LINKUSDT` (the Mainnet worker refuses to start if any of the eight configured Spot symbols are missing)
 - `MAINNET_SIGNAL_INTERVAL=15m` (entry/indicator timeframe; the 5m frame remains a fast-trend confirmation)
 - `MAINNET_SIGNAL_INTERVAL_SECONDS=60` (poll cadence, not candle timeframe)
 - `MAINNET_SIGNAL_DATABASE_URL=sqlite:///./data/mumin_mainnet_signals.db`
