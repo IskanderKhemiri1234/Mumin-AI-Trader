@@ -70,7 +70,7 @@ navButton.addEventListener("click",openPage);
 async function load(){if(busy)return;busy=true;$("mainnetRefresh").disabled=true;try{
  const status=await api("/api/mainnet/status");enabled=!!status.execution_enabled;
  const signalWorker=await api("/api/mainnet/signal-worker/status");
- $("mainnetSignalDetails").innerHTML=kv("Worker mode",signalWorker.mode||"—")+kv("Desired state",signalWorker.desired_state||"—")+kv("Recent signal records",(signalWorker.signals||[]).length)+kv("Latest worker event",signalWorker.events?.[0]?.event_type||"—");
+ $("mainnetSignalDetails").innerHTML=kv("Worker mode",signalWorker.mode||"—")+kv("Supervisor",signalWorker.supervisor_status||"offline")+kv("Worker",signalWorker.worker_status||"offline")+kv("Desired state",signalWorker.desired_state||"—")+kv("Worker heartbeat age (s)",signalWorker.worker_heartbeat_age_seconds??"—")+kv("Recent signal records",(signalWorker.signals||[]).length)+kv("Latest worker event",signalWorker.events?.[0]?.event_type||"—");
  $("mainnetSignalStart").disabled=signalWorker.desired_state==="RUNNING";$("mainnetSignalStop").disabled=signalWorker.desired_state==="STOPPED";
  $("mainnetState").textContent=status.status||"UNKNOWN";$("mainnetState").className="mainnet-status "+(enabled&&status.can_submit?"ok":"bad");
  $("mainnetStatusDetails").innerHTML=kv("Environment",status.environment||"—")+kv("Mode",status.mode||"—")+kv("Host",status.host||"—")+kv("Unresolved orders",status.unresolved_orders??"—")+kv("Halt reason",status.halt_reason||"—");
