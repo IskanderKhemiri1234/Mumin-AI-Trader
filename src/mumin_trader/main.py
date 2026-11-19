@@ -67,6 +67,14 @@ def _get_mainnet_service() -> tuple[BinanceSpotMainnetExecution, SQLiteOrderStor
 
 @asynccontextmanager
 async def app_lifespan(_app: FastAPI):
+    settings = get_settings()
+    if settings.MAINNET_SPOT_EXECUTION_ENABLED:
+        try:
+            executor, store = _get_mainnet_service()
+            await executor.reconcile()
+        except Exception:
+            if _mainnet_store is not None:
+                _mainnet_store.halt("STARTUP_RECONCILIATION_FAILED")
     try:
         yield
     finally:
@@ -685,7 +693,11 @@ async def health() -> dict[str, str]:
         "status": "ok",
         "environment": settings.TRADING_ENV.value,
         "mode": settings.TRADING_MODE.value,
-        "execution": "PAPER_ONLY; TESTNET_DISABLED; MAINNET_BLOCKED",
+        "execution": (
+            "SPOT_MAINNET_LIMIT_ENABLED; PAPER_SEPARATE; TESTNET_SEPARATE"
+            if settings.MAINNET_SPOT_EXECUTION_ENABLED
+            else "PAPER_ONLY; TESTNET_DISABLED; MAINNET_BLOCKED"
+        ),
     }
 
 
@@ -693,10 +705,10 @@ async def health() -> dict[str, str]:
 async def root() -> dict[str, str]:
     return {
         "service": "Mumin AI Trader",
-        "status": "paper_only",
+        "status": "mainnet_spot_enabled" if get_settings().MAINNET_SPOT_EXECUTION_ENABLED else "paper_only",
         "market_data": "BINANCE_PUBLIC_SPOT",
-        "execution": "SIMULATED_PAPER_ONLY",
-        "account_link": "NONE",
+        "execution": "BINANCE_SPOT_MAINNET_LIMIT" if get_settings().MAINNET_SPOT_EXECUTION_ENABLED else "SIMULATED_PAPER_ONLY",
+        "account_link": "BINANCE_SPOT_MAINNET" if get_settings().MAINNET_SPOT_EXECUTION_ENABLED else "NONE",
         "dashboard": "/dashboard",
         "api": "/api/dashboard",
     }
@@ -750,16 +762,29 @@ async def dashboard_snapshot(
         list_commands(_dashboard_database(), limit=20)
         if _dashboard_database().is_file() else []
     )
+    mainnet_enabled = get_settings().MAINNET_SPOT_EXECUTION_ENABLED
+    mainnet_status = {"status": "LOCKED", "execution_enabled": False}
+    if mainnet_enabled:
+        _, mainnet_store = _get_mainnet_service()
+        halted, halt_reason = mainnet_store.is_halted()
+        mainnet_status = {
+            "status": "HALTED" if halted else "ENABLED",
+            "execution_enabled": True,
+            "halted": halted,
+            "halt_reason": halt_reason,
+            "unresolved_orders": len(mainnet_store.unresolved_orders()),
+        }
+    snapshot["mainnet"] = mainnet_status
     snapshot["control_plane"] = {
         "read_only": False,
         "paper_order_submission": "CONFIRMED_PAPER_ONLY",
         "paper_engine_control": "AUTHENTICATED_PAUSE_RESUME_ONLY",
         "testnet_order_submission": "DISABLED_PENDING_EXPLICIT_OPERATIONAL_APPROVAL",
-        "mainnet_order_submission": "BLOCKED",
+        "mainnet_order_submission": "CONFIRMED_LIMIT_ONLY" if mainnet_enabled else "BLOCKED",
         "execution_authorized": False,
         "available_actions": [
             "PAPER_BUY", "PAPER_SELL", "PAPER_PAUSE", "PAPER_RESUME"
-        ],
+        ] + (["MAINNET_LIMIT_ORDER", "MAINNET_CANCEL", "MAINNET_EMERGENCY_STOP"] if mainnet_enabled else []),
     }
     return snapshot
 
