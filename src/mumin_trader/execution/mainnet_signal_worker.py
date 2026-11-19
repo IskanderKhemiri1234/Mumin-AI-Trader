@@ -260,7 +260,7 @@ class MainnetSignalWorker:
         self.actor = f"mainnet-signal-worker-{os.getpid()}"
         requested_symbols = {
             item.strip().upper()
-            for item in os.getenv("MAINNET_SIGNAL_SYMBOLS", "BTCUSDT").split(",")
+            for item in os.getenv("MAINNET_SIGNAL_SYMBOLS", "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,AVAXUSDT,LINKUSDT").split(",")
             if item.strip()
         }
         allowed_symbols = requested_symbols.intersection(settings.watchlist_symbols).intersection(CORE_SYMBOLS)
