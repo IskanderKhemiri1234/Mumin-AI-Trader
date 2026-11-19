@@ -86,8 +86,10 @@ async def test_mainnet_signal_worker_defaults_to_public_data_shadow_only(tmp_pat
         assert worker.order_store is None
         assert worker.scanner.allowed_symbols == {"BTCUSDT"}
         assert worker.scanner.interval == "15m"
-        assert worker._bucket(datetime(2026, 11, 19, 10, 14, tzinfo=timezone.utc)) == "2026-11-19T10:00:00+00:00"
-        assert worker._bucket(datetime(2026, 11, 19, 10, 15, tzinfo=timezone.utc)) == "2026-11-19T10:15:00+00:00"
+        candle_open = int(datetime(2026, 11, 19, 10, 0, tzinfo=timezone.utc).timestamp() * 1000)
+        next_candle_open = int(datetime(2026, 11, 19, 10, 15, tzinfo=timezone.utc).timestamp() * 1000)
+        assert worker._bucket(candle_open) == "2026-11-19T10:00:00+00:00"
+        assert worker._bucket(next_candle_open) == "2026-11-19T10:15:00+00:00"
         assert str(worker._market_http.base_url) == "https://api.binance.com"
         assert "X-MBX-APIKEY" not in worker._market_http.headers
     finally:
