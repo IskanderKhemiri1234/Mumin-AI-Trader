@@ -114,10 +114,20 @@ class MainnetSignalLedger:
     def record_candidate(self, candidate: Any, bucket: str, disposition: str, detail: str = "") -> bool:
         with self._connect() as db:
             cursor = db.execute(
-                """INSERT OR IGNORE INTO mainnet_signal_events
+                """INSERT INTO mainnet_signal_events
                    (symbol,candle_bucket,signal,score,entry_price,stop_loss_price,
                     take_profit_price,filter_reasons_json,disposition,detail,created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(symbol,candle_bucket) DO UPDATE SET
+                     signal=excluded.signal,
+                     score=excluded.score,
+                     entry_price=excluded.entry_price,
+                     stop_loss_price=excluded.stop_loss_price,
+                     take_profit_price=excluded.take_profit_price,
+                     filter_reasons_json=excluded.filter_reasons_json,
+                     disposition=excluded.disposition,
+                     detail=excluded.detail
+                   WHERE mainnet_signal_events.order_list_client_id IS NULL""",
                 (
                     candidate.symbol,
                     bucket,
