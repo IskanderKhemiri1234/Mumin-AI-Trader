@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from config.config import get_settings
 from mumin_trader.exchanges.binance.realized_pnl import build_realized_pnl_report
+from mumin_trader.execution.mainnet_approval_audit import prepare_mainnet_approval
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATABASE = PROJECT_ROOT / "data" / "mumin_public_paper.db"
@@ -596,6 +597,7 @@ async def operations_chat(
     if intent == "mainnet_order":
         proposal = parse_mainnet_order_proposal(message, snapshot["mainnet"])
         if proposal:
+            proposal["approval_id"] = prepare_mainnet_approval(get_settings(), proposal)
             answer = (
                 "تم تجهيز أمر دون إرساله. راجع الرمز والكمية والسعر ومخارج الحماية ثم اضغط تأكيد التنفيذ مرة واحدة."
                 if language == "ar"
