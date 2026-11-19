@@ -617,7 +617,17 @@ async def mainnet_orders(
                     (max(1, min(limit, 200)),),
                 ).fetchall()
             ]
-        return {"orders": [dict(row) for row in rows], "order_lists": order_lists}
+        latest = database.execute(
+            "SELECT open_orders_json,created_at,discrepancies_json FROM spot_reconciliation_snapshots ORDER BY snapshot_id DESC LIMIT 1"
+        ).fetchone()
+        exchange_open_orders = json.loads(latest["open_orders_json"]) if latest else []
+        return {
+            "orders": [dict(row) for row in rows],
+            "order_lists": order_lists,
+            "exchange_open_orders": exchange_open_orders,
+            "last_reconciliation": latest["created_at"] if latest else None,
+            "discrepancies": json.loads(latest["discrepancies_json"]) if latest else [],
+        }
     finally:
         database.close()
 
