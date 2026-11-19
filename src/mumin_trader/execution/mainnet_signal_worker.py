@@ -278,6 +278,14 @@ class MainnetSignalWorker:
     def request_stop(self, _signum: int, _frame: object) -> None:
         self.stop_requested = True
 
+    def _interval_milliseconds(self) -> int:
+        interval = self.scanner.interval
+        if interval.endswith("m"):
+            return int(interval[:-1]) * 60_000
+        if interval.endswith("h"):
+            return int(interval[:-1]) * 3_600_000
+        raise ValueError("Unsupported Mainnet signal candle interval.")
+
     @staticmethod
     def _bucket(signal_candle_open_time_ms: int) -> str:
         if signal_candle_open_time_ms <= 0:
@@ -399,14 +407,25 @@ class MainnetSignalWorker:
         buckets: dict[str, str] = {}
         orders = 0
         recorded = 0
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        interval_ms = self._interval_milliseconds()
         for candidate in candidates:
-            if candidate.signal_candle_open_time_ms <= 0:
+            candle_open_ms = candidate.signal_candle_open_time_ms
+            if candle_open_ms <= 0:
                 self.ledger.audit(
                     "SIGNAL_REJECTED_MISSING_CANDLE_TIME", self.actor,
                     {"symbol": candidate.symbol, "interval": self.scanner.interval},
                 )
                 continue
-            bucket = self._bucket(candidate.signal_candle_open_time_ms)
+            candle_age_ms = now_ms - candle_open_ms
+            if candle_age_ms < interval_ms - 60_000 or candle_age_ms > (2 * interval_ms) + 60_000:
+                self.ledger.audit(
+                    "SIGNAL_REJECTED_STALE_CANDLE", self.actor,
+                    {"symbol": candidate.symbol, "candle_open_time_ms": candle_open_ms,
+                     "candle_age_ms": candle_age_ms, "interval": self.scanner.interval},
+                )
+                continue
+            bucket = self._bucket(candle_open_ms)
             buckets[candidate.symbol] = bucket
             disposition = "SHADOW_PROPOSAL" if candidate.signal == "BUY_CANDIDATE" else "FILTERED"
             inserted = self.ledger.record_candidate(candidate, bucket, disposition)
