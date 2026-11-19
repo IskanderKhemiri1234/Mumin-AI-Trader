@@ -35,7 +35,16 @@ def test_mainnet_signal_ledger_persists_and_deduplicates_candle_bucket(tmp_path)
 
     reopened = MainnetSignalLedger(path)
     assert reopened.desired_state() == "RUNNING"
+    reopened.supervisor_heartbeat(123, 456)
+    reopened.worker_heartbeat(456)
+    reopened.set_desired_state("STOPPED", "test")
+    assert reopened.desired_state() == "STOPPED"
     with reopened._connect() as db:
+        runtime = db.execute("SELECT supervisor_pid,worker_pid,supervisor_heartbeat_at,worker_heartbeat_at FROM mainnet_worker_runtime WHERE id=1").fetchone()
+        assert runtime["supervisor_pid"] == 123
+        assert runtime["worker_pid"] == 456
+        assert runtime["supervisor_heartbeat_at"] is not None
+        assert runtime["worker_heartbeat_at"] is not None
         assert db.execute("SELECT COUNT(*) FROM mainnet_signal_events").fetchone()[0] == 1
 
 
