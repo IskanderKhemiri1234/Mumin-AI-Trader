@@ -81,6 +81,7 @@ class MainnetWorkerSupervisor:
         code = child.returncode
         self.child = None
         self.child_started_at = None
+        self.ledger.supervisor_heartbeat(os.getpid(), None)
         self._record("MAINNET_SIGNAL_PROCESS_STOPPED", {"reason": reason, "exit_code": code})
         print(f"Mainnet signal worker stopped; reason={reason}, exit={code}.", flush=True)
 
@@ -108,6 +109,7 @@ class MainnetWorkerSupervisor:
                  "autonomous": autonomous, "boot_resume_enabled": boot_resume},
             )
             started_at = time.monotonic()
+            last_heartbeat = 0.0
             try:
                 while not self.stop_requested:
                     if self.run_for_seconds is not None and time.monotonic() - started_at >= self.run_for_seconds:
@@ -129,6 +131,11 @@ class MainnetWorkerSupervisor:
                         self.restart_at = 0
                     elif self.child is None and time.monotonic() >= self.restart_at:
                         self._start_child()
+                    now = time.monotonic()
+                    if now - last_heartbeat >= 10.0:
+                        live_pid = self.child.pid if self.child is not None and self.child.poll() is None else None
+                        self.ledger.supervisor_heartbeat(os.getpid(), live_pid)
+                        last_heartbeat = now
                     time.sleep(2)
             finally:
                 self._stop_child("supervisor_shutdown")
