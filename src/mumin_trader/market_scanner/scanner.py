@@ -38,6 +38,7 @@ class MarketCandidate:
     change_percent: Decimal
     last_price: Decimal = ZERO
     signal: str = "HOLD"
+    signal_candle_open_time_ms: int = 0
     rsi: Decimal | None = None
     ema_fast: Decimal | None = None
     ema_slow: Decimal | None = None
@@ -55,11 +56,13 @@ class _ClosedOHLCV:
     highs: list[Decimal]
     lows: list[Decimal]
     volumes: list[Decimal]
+    last_closed_open_time_ms: int = 0
 
 
 def _closed_ohlcv(candles: Sequence[Sequence[Any]]) -> _ClosedOHLCV:
     """Parse Binance klines and deliberately exclude the still-forming last candle."""
     parsed: list[tuple[Decimal, Decimal, Decimal, Decimal]] = []
+    last_closed_open_time_ms = 0
     for candle in candles[:-1]:
         if len(candle) <= 5:
             continue
@@ -70,11 +73,17 @@ def _closed_ohlcv(candles: Sequence[Sequence[Any]]) -> _ClosedOHLCV:
         if low > high or not low <= close <= high:
             continue
         parsed.append((high, low, close, volume))
+        if len(candle) > 6:
+            try:
+                last_closed_open_time_ms = int(candle[0])
+            except (TypeError, ValueError):
+                last_closed_open_time_ms = 0
     return _ClosedOHLCV(
         closes=[item[2] for item in parsed],
         highs=[item[0] for item in parsed],
         lows=[item[1] for item in parsed],
         volumes=[item[3] * item[2] for item in parsed],
+        last_closed_open_time_ms=last_closed_open_time_ms,
     )
 
 
@@ -298,6 +307,7 @@ class MarketScanner:
                     change_percent=change,
                     last_price=last,
                     signal="BUY_CANDIDATE" if decision.approved and not filter_reasons else "HOLD",
+                    signal_candle_open_time_ms=base.last_closed_open_time_ms,
                     rsi=rsi,
                     ema_fast=fast,
                     ema_slow=slow,
