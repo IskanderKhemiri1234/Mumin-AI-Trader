@@ -149,3 +149,31 @@ def test_unknown_submission_outcome_is_durable_and_never_reclaimed(tmp_path) -> 
     assert row["disposition"] == "OUTCOME_UNKNOWN"
     assert row["order_list_client_id"] == "munknown-order-id"
     assert row["detail"] == "mock timeout after submit"
+
+
+def test_worker_scans_all_eight_configured_spot_symbols_and_prioritizes_best_signal(tmp_path, monkeypatch) -> None:
+    symbols = "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,AVAXUSDT,LINKUSDT"
+    monkeypatch.setenv("MAINNET_SIGNAL_SYMBOLS", symbols)
+    worker = MainnetSignalWorker(
+        Settings(_env_file=None),
+        ledger_path=tmp_path / "eight-symbols.sqlite3",
+        autonomous=False,
+    )
+    try:
+        expected = set(symbols.split(","))
+        assert worker.scanner.allowed_symbols == expected
+        assert worker.scanner.max_symbols == 8
+        candidates = [
+            SimpleNamespace(symbol=symbol, strategy_score=score)
+            for symbol, score in [
+                ("BTCUSDT", 80), ("ETHUSDT", 82), ("BNBUSDT", 79), ("SOLUSDT", 91),
+                ("XRPUSDT", 78), ("ADAUSDT", 83), ("AVAXUSDT", 85), ("LINKUSDT", 84),
+            ]
+        ]
+        selected = worker._select_entry_candidate(candidates)
+        assert selected.symbol == "SOLUSDT"
+        assert selected.strategy_score == 91
+    finally:
+        import asyncio
+        asyncio.run(worker.market.close())
+        asyncio.run(worker._market_http.aclose())
