@@ -197,7 +197,7 @@ class UnifiedDashboardActivity : Activity() {
         remoteScheme = Uri.parse(normalized).scheme
         remotePort = Uri.parse(normalized).port.takeIf { it > 0 }
             ?: if (remoteScheme == "https") 443 else 8000
-        loadUnifiedDashboard(normalized)
+        verifyServerHealthThenLoad(normalized)
     }
 
     private fun normalizeServerUrl(value: String): String? {
@@ -237,6 +237,47 @@ class UnifiedDashboardActivity : Activity() {
             )
         }.onFailure {
             connectionStatus.text = "تعذر تحميل لوحة العرض المحلية المضمّنة."
+        }
+    }
+
+    private fun verifyServerHealthThenLoad(baseUrl: String) {
+        webView.visibility = View.INVISIBLE
+        connectionStatus.text = "جارٍ التحقق من صحة خادم S21 وبيئة Paper قبل فتح اللوحة…"
+        io.execute {
+            val result = runCatching {
+                val connection = URL("$baseUrl/health").openConnection() as HttpURLConnection
+                try {
+                    connection.requestMethod = "GET"
+                    connection.connectTimeout = 5000
+                    connection.readTimeout = 5000
+                    connection.useCaches = false
+                    val code = connection.responseCode
+                    if (code != HttpURLConnection.HTTP_OK) {
+                        error("Health endpoint returned HTTP $code")
+                    }
+                    val payload = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    val health = JSONObject(payload)
+                    val status = health.optString("status")
+                    val execution = health.optString("execution")
+                    if (status != "ok" ||
+                        execution != "PAPER_ONLY; TESTNET_DISABLED; MAINNET_BLOCKED"
+                    ) {
+                        error("Server safety mode is not the expected Paper-only configuration.")
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+            }
+            runOnUiThread {
+                result.onSuccess {
+                    connectionStatus.text = "خادم S21 سليم · Paper فقط · Testnet وMainnet مغلقان."
+                    loadUnifiedDashboard(baseUrl)
+                }.onFailure { error ->
+                    webView.visibility = View.INVISIBLE
+                    connectionStatus.text =
+                        "تعذر التحقق من خادم S21 أو إعدادات الأمان: ${error.message ?: "اتصال غير متاح"}. لن تُعرض بيانات تجريبية."
+                }
+            }
         }
     }
 
