@@ -145,6 +145,8 @@ class MarketScanner:
         self.max_spread_bps = Decimal(max_spread_bps)
         requested = {s.upper() for s in allowed_symbols} if allowed_symbols else set(CORE_SYMBOLS)
         self.allowed_symbols = requested.intersection(CORE_SYMBOLS)
+        if interval not in TIMEFRAMES:
+            raise ValueError(f"Unsupported strategy entry timeframe: {interval}")
         self.interval = interval
         self.candle_limit = max(60, min(int(candle_limit), 500))
         self.max_symbols = max(1, min(int(max_symbols), len(CORE_SYMBOLS)))
@@ -227,7 +229,8 @@ class MarketScanner:
                 raw = await client.klines(symbol, interval=timeframe, limit=self.candle_limit)
                 frame_data[timeframe] = _closed_ohlcv(raw)
 
-            base = frame_data["5m"]
+            base = frame_data[self.interval]
+            fast_frame = frame_data["5m"]
             if min(len(base.closes), len(base.highs), len(base.lows), len(base.volumes)) < 30:
                 continue
 
@@ -260,8 +263,8 @@ class MarketScanner:
             advanced_gates = (trend, momentum, liquidity, price_action, regime, net_edge)
             filter_reasons = tuple(gate.reason for gate in advanced_gates if not gate.passed)
 
-            fast = _ema(base.closes, 9)
-            slow = _ema(base.closes, 21)
+            fast = _ema(fast_frame.closes, 9)
+            slow = _ema(fast_frame.closes, 21)
             rsi = _rsi(base.closes, 14)
             momentum_bps = (
                 (base.closes[-1] / base.closes[-11] - Decimal(1)) * BPS
