@@ -210,4 +210,5 @@ $('langBtn').addEventListener('click',()=>setLanguage(language==='ar'?'en':'ar')
 setLanguage('ar');renderMarket();renderMarketOverview();connectMarketFeed();sessionStorage.removeItem('mumin_dashboard_token');const existing=sessionStorage.getItem('mumin_dashboard_password');if(existing){$('accessPassword').value=existing;refresh()}refreshTimer=setInterval(refresh,20000);
 </script>
 <script src="/operations-chat.js" defer></script>
+<script src="/mainnet-operations.js" defer></script>
 </body></html>
