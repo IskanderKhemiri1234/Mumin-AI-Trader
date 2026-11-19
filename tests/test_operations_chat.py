@@ -70,6 +70,8 @@ def test_classifies_arabic_and_english_questions() -> None:
     assert classify_intent("portfolio balance") == "portfolio"
     assert classify_intent("ملخص الحالة") == "overview"
     assert classify_intent("Status summary") == "overview"
+    assert classify_intent("رصيد Binance الحقيقي") == "mainnet"
+    assert classify_intent("Show Binance Mainnet orders") == "mainnet"
 
 
 def test_reads_real_ledger_and_audit_events_read_only(paper_ledger: Path) -> None:
@@ -123,9 +125,13 @@ def test_chat_api_requires_shared_dashboard_password(monkeypatch: pytest.MonkeyP
     assert payload["external_services_used"] is False
     assert payload["intent"] == "engine"
     assert "Paper" in payload["answer"]
+    assert payload["snapshot"]["mainnet"]["status"] == "LOCKED"
     asset = client.get("/operations-chat.js")
     assert asset.status_code == 200
     assert "api/operations-chat" in asset.text
     assert "X-Dashboard-Password" in asset.text
     assert "mumin_dashboard_password" in asset.text
     assert "X-Dashboard-Token" not in asset.text
+    mainnet_asset = client.get("/mainnet-operations.js")
+    assert mainnet_asset.status_code == 200
+    assert "/api/mainnet/entries/protected" in mainnet_asset.text
