@@ -120,7 +120,6 @@ async def test_mainnet_preflight_is_pinned_and_only_calls_non_executing_order_te
     assert [request.url.path for request in requests] == [
         "/api/v3/exchangeInfo",
         "/api/v3/time",
-        "/api/v3/time",
         "/api/v3/order/test",
     ]
     assert not any(request.url.path == "/api/v3/order" for request in requests)
