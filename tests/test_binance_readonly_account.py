@@ -4,6 +4,7 @@ from urllib.parse import parse_qs
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 
 import mumin_trader.main as main_module
 from mumin_trader.exchanges.binance.account_readonly import (
@@ -67,15 +68,11 @@ async def test_binance_readonly_account_rejects_non_spot_account():
 
 def test_binance_readonly_endpoint_requires_dashboard_password(monkeypatch):
     monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
-    response = __import__("fastapi").testclient.TestClient(app).get(
-        "/api/binance/account/read-only"
-    )
+    response = TestClient(app).get("/api/binance/account/read-only")
     assert response.status_code == 503
 
 
 def test_binance_readonly_endpoint_requires_server_side_credentials(monkeypatch):
-    from fastapi.testclient import TestClient
-
     monkeypatch.setenv("DASHBOARD_PASSWORD", "server-only-password")
     monkeypatch.delenv("BINANCE_ACCOUNT_READONLY_API_KEY", raising=False)
     monkeypatch.delenv("BINANCE_ACCOUNT_READONLY_API_SECRET", raising=False)
