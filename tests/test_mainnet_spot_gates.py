@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 import httpx
 import pytest
 
@@ -73,7 +71,8 @@ def test_mainnet_execution_cannot_be_enabled_without_preflight() -> None:
 
 
 def test_mainnet_adapter_rejects_incomplete_confirmation() -> None:
-    settings = mainnet_settings(MAINNET_CONFIRMATION="wrong")
+    settings = mainnet_settings()
+    settings.MAINNET_CONFIRMATION = "wrong"
     with pytest.raises(SpotExecutionError, match="confirmation phrase"):
         BinanceSpotMainnetExecution._assert_safety_gate(settings)
 
