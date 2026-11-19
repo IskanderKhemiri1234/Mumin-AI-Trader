@@ -729,6 +729,14 @@ async def operations_chat_script() -> FileResponse:
     return FileResponse(script, media_type="application/javascript")
 
 
+@app.get("/mainnet-operations.js", include_in_schema=False)
+async def mainnet_operations_script() -> FileResponse:
+    script = PROJECT_ROOT / "dashboard" / "mainnet-operations.js"
+    if not script.is_file():
+        raise HTTPException(status_code=503, detail="Mainnet dashboard asset is missing.")
+    return FileResponse(script, media_type="application/javascript")
+
+
 @app.get("/api/market")
 async def market_snapshot(
     x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
