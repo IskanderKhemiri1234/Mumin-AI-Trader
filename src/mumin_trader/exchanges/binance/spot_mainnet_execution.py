@@ -859,6 +859,10 @@ class BinanceSpotMainnetExecution:
                 elif recovered_state == "PARTIAL_FILL_REVIEW":
                     discrepancies.append(f"OPOCO_PARTIAL_FILL_REVIEW:{list_client_id}")
 
+            # Recovery above may have filled the child IDs that were absent before the
+            # first exchange query; include them before checking for orphaned open orders.
+            local_ids.update(self.opoco.store.child_client_order_ids())
+
             for local in local_unresolved:
                 client_id = str(local["client_order_id"])
                 observed = await self._query_by_client_id(str(local["symbol"]), client_id)
