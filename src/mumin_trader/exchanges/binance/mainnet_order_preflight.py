@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-from config.config import Settings, TradingEnvironment, TradingMode
+from config.config import MAINNET_CONFIRMATION_PHRASE, Settings, TradingEnvironment, TradingMode
 
 
 MAINNET_REST_BASE_URL = "https://api.binance.com"
@@ -54,7 +54,7 @@ class BinanceSpotMainnetOrderPreflight:
             raise MainnetPreflightError("Both independent Mainnet/live gates must be enabled.")
         if not settings.MAINNET_LEGAL_ELIGIBILITY_CONFIRMED:
             raise MainnetPreflightError("Legal-eligibility confirmation is required.")
-        if settings.MAINNET_CONFIRMATION != "I_ACKNOWLEDGE_REAL_MONEY_SPOT_TRADING":
+        if settings.MAINNET_CONFIRMATION != MAINNET_CONFIRMATION_PHRASE:
             raise MainnetPreflightError("The exact Mainnet real-money confirmation phrase is required.")
         if settings.TESTNET_ORDER_PREFLIGHT_ENABLED or settings.TESTNET_SPOT_EXECUTION_ENABLED:
             raise MainnetPreflightError("Mainnet and Testnet execution gates cannot be enabled together.")
