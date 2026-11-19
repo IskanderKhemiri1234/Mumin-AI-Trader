@@ -40,6 +40,21 @@ def test_mainnet_api_is_locked_by_default_and_never_falls_back_to_paper(monkeypa
     assert order.status_code == 423
     assert "locked" in order.json()["detail"].lower()
 
+    unprotected_buy = client.post(
+        "/api/mainnet/orders",
+        headers={**headers, "Idempotency-Key": "mumin-live-buy-0001"},
+        json={
+            "side": "BUY",
+            "symbol": "BTCUSDT",
+            "quantity": "0.001",
+            "price": "50000",
+            "client_order_id": "mumin-live-buy-0001",
+            "confirmed": True,
+        },
+    )
+    assert unprotected_buy.status_code == 409
+    assert "OPOCO" in unprotected_buy.json()["detail"]
+
     protected_entry = client.post(
         "/api/mainnet/entries/protected",
         headers={**headers, "Idempotency-Key": "mumin-live-test-0002"},
