@@ -31,6 +31,7 @@ page.innerHTML=`
 <div class="mainnet-warning">التداول الحقيقي يستخدم أموال الحساب الفعلية. هذه الصفحة لا تفتح Mainnet من تلقاء نفسها؛ إذا كانت بوابات الخادم مغلقة فستبقى جميع أوامر التنفيذ مقفلة. لا تستخدم مفاتيح السحب أو الهامش أو العقود الآجلة.</div>
 <div class="mainnet-actions"><button class="btn" id="mainnetRefresh">تحديث الحساب</button><button class="btn" id="mainnetReconcile">مصالحة كاملة</button><button class="btn" id="mainnetStop">إيقاف طوارئ</button></div>
 <div id="mainnetMessage" class="page-intro" aria-live="polite"></div>
+<section class="mainnet-panel"><h3>عامل إشارات Mainnet المستقل</h3><div id="mainnetSignalDetails"></div><div class="mainnet-actions"><button class="btn" id="mainnetSignalStart">تشغيل العامل</button><button class="btn" id="mainnetSignalStop">إيقاف العامل</button></div></section>
 <div class="mainnet-grid">
 <section class="mainnet-panel"><h3>حالة التنفيذ</h3><div id="mainnetStatusDetails"></div></section>
 <section class="mainnet-panel"><h3>حساب Binance Spot</h3><div id="mainnetAccountDetails"></div></section>
@@ -68,6 +69,9 @@ function openPage(){document.querySelectorAll(".page").forEach(x=>x.classList.to
 navButton.addEventListener("click",openPage);
 async function load(){if(busy)return;busy=true;$("mainnetRefresh").disabled=true;try{
  const status=await api("/api/mainnet/status");enabled=!!status.execution_enabled;
+ const signalWorker=await api("/api/mainnet/signal-worker/status");
+ $("mainnetSignalDetails").innerHTML=kv("Worker mode",signalWorker.mode||"—")+kv("Desired state",signalWorker.desired_state||"—")+kv("Recent signal records",(signalWorker.signals||[]).length)+kv("Latest worker event",signalWorker.events?.[0]?.event_type||"—");
+ $("mainnetSignalStart").disabled=signalWorker.desired_state==="RUNNING";$("mainnetSignalStop").disabled=signalWorker.desired_state==="STOPPED";
  $("mainnetState").textContent=status.status||"UNKNOWN";$("mainnetState").className="mainnet-status "+(enabled&&status.can_submit?"ok":"bad");
  $("mainnetStatusDetails").innerHTML=kv("Environment",status.environment||"—")+kv("Mode",status.mode||"—")+kv("Host",status.host||"—")+kv("Unresolved orders",status.unresolved_orders??"—")+kv("Halt reason",status.halt_reason||"—");
  $("mainnetSubmit").disabled=!enabled||!status.can_submit;
@@ -84,6 +88,19 @@ async function load(){if(busy)return;busy=true;$("mainnetRefresh").disabled=true
  $("mainnetApprovals").innerHTML=table(["Approval ID","Type","State","Created","Error"],(approvals.approvals||[]).map(x=>'<tr><td>'+escapeHtml(String(x.approval_id||"").slice(0,12))+'</td><td>'+escapeHtml(x.proposal_type)+'</td><td>'+escapeHtml(x.state)+'</td><td>'+escapeHtml(x.created_at)+'</td><td>'+escapeHtml(x.last_error||"—")+'</td></tr>'));
  setMessage("تم تحديث بيانات حساب Binance Mainnet من الخادم.");
  }catch(error){setMessage(error.message,true);$("mainnetState").textContent="ERROR";$("mainnetState").className="mainnet-status bad"}finally{busy=false;$("mainnetRefresh").disabled=false}}
+async function setSignalWorkerState(desiredState){
+ try{
+  const current=await api("/api/mainnet/signal-worker/status");
+  if(desiredState==="RUNNING"&&current.mode==="AUTONOMOUS_PROTECTED_OPOCO"&&!window.confirm("تحذير: هذا سيبدأ عاملاً آلياً يرسل أوامر OPOCO إلى حساب Binance الحقيقي ويستخدم أموالاً فعلية. هل تؤكد تشغيل التداول الآلي؟"))return;
+  if(desiredState==="RUNNING"&&current.mode==="SHADOW_ONLY"&&!window.confirm("تشغيل عامل الإشارات في وضع Shadow فقط؛ سيقرأ بيانات السوق ويسجل الإشارات دون إرسال أوامر. متابعة؟"))return;
+  if(desiredState==="STOPPED"&&!window.confirm("إيقاف عامل إشارات Mainnet؟ لن تُلغى أوامر الحماية المفتوحة تلقائياً."))return;
+  await api("/api/mainnet/signal-worker/control",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({desired_state:desiredState})});
+  setMessage("تم حفظ الحالة المطلوبة للعامل: "+desiredState);
+  await load();
+ }catch(error){setMessage(error.message,true)}
+}
+$("mainnetSignalStart").addEventListener("click",()=>setSignalWorkerState("RUNNING"));
+$("mainnetSignalStop").addEventListener("click",()=>setSignalWorkerState("STOPPED"));
 $("mainnetRefresh").addEventListener("click",load);
 $("mainnetReconcile").addEventListener("click",async()=>{if(!window.confirm("تنفيذ مصالحة كاملة للأرصدة والطلبات والصفقات؟"))return;try{const result=await api("/api/mainnet/reconcile",{method:"POST"});setMessage("اكتملت المصالحة. الاختلافات: "+(result.discrepancies||[]).length);await load()}catch(error){setMessage(error.message,true)}});
 $("mainnetStop").addEventListener("click",async()=>{if(!window.confirm("تأكيد إيقاف Mainnet؟ سيوقف الإدخالات ويلغي أوامر BUY المفتوحة ويحافظ على أوامر SELL الوقائية."))return;try{const result=await api("/api/mainnet/emergency-stop",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirmed:true})});setMessage("تم تفعيل قفل الطوارئ. فشل الإلغاء: "+(result.failures||[]).length);await load()}catch(error){setMessage(error.message,true)}});
