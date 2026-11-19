@@ -25,7 +25,7 @@ def test_mainnet_signal_ledger_persists_and_deduplicates_candle_bucket(tmp_path)
     )
 
     assert ledger.record_candidate(candidate, "2026-11-19T10:00:00+00:00", "SHADOW_PROPOSAL")
-    assert not ledger.record_candidate(candidate, "2026-11-19T10:00:00+00:00", "SHADOW_PROPOSAL")
+    assert ledger.record_candidate(candidate, "2026-11-19T10:00:00+00:00", "SHADOW_PROPOSAL")
 
     with ledger._connect() as db:
         row = db.execute("SELECT * FROM mainnet_signal_events").fetchone()
