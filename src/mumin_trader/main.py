@@ -133,7 +133,7 @@ class EmergencyStopRequest(BaseModel):
 
 
 class MainnetLimitOrderCommand(BaseModel):
-    approval_id: str
+    approval_id: str = ""
     side: Literal["BUY", "SELL"]
     symbol: str
     quantity: str
@@ -148,7 +148,7 @@ class MainnetCancelOrderRequest(BaseModel):
 
 
 class MainnetProtectedEntryCommand(BaseModel):
-    approval_id: str
+    approval_id: str = ""
     symbol: str
     quantity: str
     working_price: str
