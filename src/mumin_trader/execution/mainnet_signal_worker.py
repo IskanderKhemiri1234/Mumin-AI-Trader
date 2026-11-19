@@ -111,6 +111,16 @@ class MainnetSignalLedger:
             ).fetchone()
         return str(row["desired_state"]) if row else "STOPPED"
 
+    def set_desired_state(self, desired_state: str, actor: str) -> None:
+        if desired_state not in {"RUNNING", "STOPPED"}:
+            raise ValueError("Mainnet signal worker desired state must be RUNNING or STOPPED.")
+        with self._connect() as db:
+            db.execute(
+                "UPDATE mainnet_worker_control SET desired_state=?,updated_at=? WHERE id=1",
+                (desired_state, self._now()),
+            )
+        self.audit("MAINNET_SIGNAL_DESIRED_STATE_CHANGED", actor, {"desired_state": desired_state})
+
     def record_candidate(self, candidate: Any, bucket: str, disposition: str, detail: str = "") -> bool:
         with self._connect() as db:
             cursor = db.execute(
