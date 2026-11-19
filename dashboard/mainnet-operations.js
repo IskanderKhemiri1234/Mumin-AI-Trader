@@ -89,7 +89,35 @@ $("mainnetReconcile").addEventListener("click",async()=>{if(!window.confirm("ت�
 $("mainnetStop").addEventListener("click",async()=>{if(!window.confirm("تأكيد إيقاف Mainnet؟ سيوقف الإدخالات ويلغي أوامر BUY المفتوحة ويحافظ على أوامر SELL الوقائية."))return;try{const result=await api("/api/mainnet/emergency-stop",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirmed:true})});setMessage("تم تفعيل قفل الطوارئ. فشل الإلغاء: "+(result.failures||[]).length);await load()}catch(error){setMessage(error.message,true)}});
 $("mainnetSide").addEventListener("change",()=>{const buy=$("mainnetSide").value==="BUY";$("mainnetTakeProfitWrap").hidden=!buy;$("mainnetStopWrap").hidden=!buy;$("mainnetStopLimitWrap").hidden=!buy;$("mainnetTakeProfit").required=buy;$("mainnetStop").required=buy;$("mainnetStopLimit").required=buy;});
 $("mainnetSide").dispatchEvent(new Event("change"));
-$("mainnetOrderForm").addEventListener("submit",async event=>{event.preventDefault();if(!enabled)return;const side=$("mainnetSide").value,symbol=$("mainnetSymbol").value,quantity=$("mainnetQuantity").value,price=$("mainnetPrice").value;const isBuy=side==="BUY";const summary=isBuy?("إدخال BUY محمي OPOCO: "+quantity+" "+symbol+" بسعر "+price+"، TP "+$("mainnetTakeProfit").value+"، SL "+$("mainnetStop").value+". هذا أمر حقيقي على Binance. هل تؤكد؟"):("إرسال SELL LIMIT: "+quantity+" "+symbol+" بسعر "+price+" على حساب Binance الحقيقي. هل تؤكد؟");if(!window.confirm(summary))return;const id="mumin-"+(window.crypto&&crypto.randomUUID?crypto.randomUUID().replaceAll("-","").slice(0,24):String(Date.now()));$("mainnetSubmit").disabled=true;try{let path,body;if(isBuy){path="/api/mainnet/entries/protected";body={symbol,quantity,working_price:price,take_profit_price:$("mainnetTakeProfit").value,stop_price:$("mainnetStop").value,stop_limit_price:$("mainnetStopLimit").value,list_client_order_id:id,working_client_order_id:id+"-w",pending_above_client_order_id:id+"-tp",pending_below_client_order_id:id+"-sl",confirmed:true};}else{path="/api/mainnet/orders";body={side,symbol,quantity,price,client_order_id:id,confirmed:true};}const result=await api(path,{method:"POST",headers:{"Content-Type":"application/json","Idempotency-Key":id},body:JSON.stringify(body)});setMessage("تم إرسال الطلب. الحالة: "+(result.order?.status||result.order_list?.listOrderStatus||result.order_list?.listStatusType||"UNKNOWN"));$("mainnetQuantity").value="";$("mainnetPrice").value="";await load()}catch(error){setMessage(error.message,true)}finally{$("mainnetSubmit").disabled=!enabled}});
+$("mainnetOrderForm").addEventListener("submit",async event=>{
+ event.preventDefault();
+ if(!enabled)return;
+ const side=$("mainnetSide").value,symbol=$("mainnetSymbol").value,quantity=$("mainnetQuantity").value,price=$("mainnetPrice").value;
+ const isBuy=side==="BUY";
+ const command=isBuy
+  ? `BUY ${symbol} qty=${quantity} price=${price} tp=${$("mainnetTakeProfit").value} stop=${$("mainnetStop").value} stop_limit=${$("mainnetStopLimit").value}`
+  : `SELL ${symbol} qty=${quantity} price=${price}`;
+ $("mainnetSubmit").disabled=true;
+ try{
+  const prepared=await api("/api/operations-chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:command})});
+  const proposal=prepared.proposal;
+  if(!proposal)throw new Error(prepared.answer||"لم يتم إنشاء موافقة صالحة للأمر.");
+  const buy=proposal.type==="protected_buy";
+  const summary=buy
+   ?("إدخال BUY محمي OPOCO: "+proposal.quantity+" "+proposal.symbol+" بسعر "+proposal.working_price+"، TP "+proposal.take_profit_price+"، SL "+proposal.stop_price+". هذا أمر حقيقي على Binance. هل تؤكد؟")
+   :("إرسال SELL LIMIT: "+proposal.quantity+" "+proposal.symbol+" بسعر "+proposal.price+" على حساب Binance الحقيقي. هل تؤكد؟");
+  if(!window.confirm(summary))return;
+  const endpoint=buy?"/api/mainnet/entries/protected":"/api/mainnet/orders";
+  const id=buy?proposal.list_client_order_id:proposal.client_order_id;
+  const body={...proposal,confirmed:true};
+  const result=await api(endpoint,{method:"POST",headers:{"Content-Type":"application/json","Idempotency-Key":id},body:JSON.stringify(body)});
+  setMessage("تم إرسال الطلب. الحالة: "+(result.order?.status||result.order_list?.listOrderStatus||result.order_list?.listStatusType||"UNKNOWN"));
+  $("mainnetQuantity").value="";
+  $("mainnetPrice").value="";
+  await load();
+ }catch(error){setMessage(error.message,true)}
+ finally{$("mainnetSubmit").disabled=!enabled}
+});
 document.addEventListener("click",async event=>{const button=event.target.closest("[data-mainnet-cancel-list]");if(!button)return;const id=button.dataset.mainnetCancelList,symbol=button.dataset.symbol;if(!window.confirm("تحذير: إلغاء قائمة الحماية قد يترك مركزاً مفتوحاً دون وقف خسارة. هل تؤكد؟"))return;try{await api("/api/mainnet/order-lists/"+encodeURIComponent(id),{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({symbol,confirmed:true})});setMessage("تم إرسال طلب إلغاء قائمة الحماية؛ راجع المركز يدوياً فوراً.");await load()}catch(error){setMessage(error.message,true)}});
 document.addEventListener("click",async event=>{const button=event.target.closest("[data-mainnet-cancel]");if(!button)return;const id=button.dataset.mainnetCancel,symbol=button.dataset.symbol;if(!window.confirm("تأكيد إلغاء الأمر "+id+"؟"))return;try{await api("/api/mainnet/orders/"+encodeURIComponent(id),{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({symbol,confirmed:true})});setMessage("تم إرسال طلب الإلغاء؛ تحقّق من حالة الأمر بعد المصالحة.");await load()}catch(error){setMessage(error.message,true)}});
 
