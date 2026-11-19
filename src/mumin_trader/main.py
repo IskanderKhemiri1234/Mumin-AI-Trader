@@ -28,6 +28,7 @@ from mumin_trader.exchanges.binance.spot_mainnet_execution import (
     SpotExecutionError,
     SpotOrderOutcomeUnknown,
 )
+from mumin_trader.execution.mainnet_signal_worker import MainnetSignalLedger, _sqlite_path as _mainnet_signal_db_path
 from mumin_trader.execution.mainnet_approval_audit import (
     begin_mainnet_approval,
     finish_mainnet_approval,
@@ -146,6 +147,10 @@ class MainnetLimitOrderCommand(BaseModel):
 class MainnetCancelOrderRequest(BaseModel):
     symbol: str
     confirmed: bool = False
+
+
+class MainnetSignalWorkerControlRequest(BaseModel):
+    desired_state: Literal["RUNNING", "STOPPED"]
 
 
 class MainnetProtectedEntryCommand(BaseModel):
@@ -815,6 +820,46 @@ async def submit_mainnet_protected_entry(
             get_settings(), request.approval_id, "REJECTED", error=str(exc),
         )
         raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@app.get("/api/mainnet/signal-worker/status")
+async def mainnet_signal_worker_status(
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    database = _mainnet_signal_db_path(
+        os.getenv("MAINNET_SIGNAL_DATABASE_URL", "sqlite:///./data/mumin_mainnet_signals.db")
+    )
+    ledger = MainnetSignalLedger(database)
+    with ledger._connect() as db:
+        signals = [dict(row) for row in db.execute(
+            "SELECT symbol,signal,score,disposition,order_list_client_id,created_at "
+            "FROM mainnet_signal_events ORDER BY id DESC LIMIT 20"
+        ).fetchall()]
+        events = [dict(row) for row in db.execute(
+            "SELECT event_type,actor,detail_json,created_at "
+            "FROM mainnet_worker_audit ORDER BY id DESC LIMIT 20"
+        ).fetchall()]
+    return {
+        "desired_state": ledger.desired_state(),
+        "mode": "AUTONOMOUS_PROTECTED_OPOCO" if os.getenv("MAINNET_AUTONOMOUS_EXECUTION_ENABLED", "").lower() in {"1", "true", "yes", "on"} else "SHADOW_ONLY",
+        "signals": signals,
+        "events": events,
+    }
+
+
+@app.post("/api/mainnet/signal-worker/control")
+async def control_mainnet_signal_worker(
+    request: MainnetSignalWorkerControlRequest,
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    database = _mainnet_signal_db_path(
+        os.getenv("MAINNET_SIGNAL_DATABASE_URL", "sqlite:///./data/mumin_mainnet_signals.db")
+    )
+    ledger = MainnetSignalLedger(database)
+    ledger.set_desired_state(request.desired_state, "dashboard_authenticated_user")
+    return {"status": "accepted", "desired_state": ledger.desired_state(), "execution_authorized": False}
 
 
 @app.get("/api/mainnet/approvals")
