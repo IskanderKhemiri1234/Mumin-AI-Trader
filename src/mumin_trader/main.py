@@ -57,7 +57,16 @@ def _get_mainnet_service() -> tuple[BinanceSpotMainnetExecution, SQLiteOrderStor
     if not settings.MAINNET_SPOT_EXECUTION_ENABLED:
         raise HTTPException(status_code=423, detail="Mainnet Spot execution is locked by server configuration.")
     if _mainnet_executor is None or _mainnet_store is None:
-        _mainnet_store = SQLiteOrderStore(settings.MAINNET_ORDER_DATABASE_URL)
+        database_value = settings.MAINNET_ORDER_DATABASE_URL
+        if database_value.startswith("sqlite:///"):
+            database_value = database_value.removeprefix("sqlite:///")
+        elif "://" in database_value:
+            raise HTTPException(status_code=503, detail="Unsupported Mainnet order database URL.")
+        database_path = Path(database_value).expanduser()
+        if not database_path.is_absolute():
+            database_path = PROJECT_ROOT / database_path
+        database_path.parent.mkdir(parents=True, exist_ok=True)
+        _mainnet_store = SQLiteOrderStore(str(database_path))
         try:
             _mainnet_executor = BinanceSpotMainnetExecution(settings, _mainnet_store)
         except Exception:
