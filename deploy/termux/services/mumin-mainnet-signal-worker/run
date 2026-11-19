@@ -8,6 +8,7 @@ if [ -f "$ROOT/.env" ]; then set -a; . "$ROOT/.env"; set +a; fi
 export PYTHONUNBUFFERED=1
 export MAINNET_SIGNAL_INTERVAL_SECONDS="${MAINNET_SIGNAL_INTERVAL_SECONDS:-60}"
 export MAINNET_AUTONOMOUS_EXECUTION_ENABLED="${MAINNET_AUTONOMOUS_EXECUTION_ENABLED:-false}"
+export MAINNET_AUTONOMOUS_BOOT_RESUME_ENABLED="${MAINNET_AUTONOMOUS_BOOT_RESUME_ENABLED:-false}"
 exec python scripts/mainnet_worker_supervisor.py \
   --interval-seconds "$MAINNET_SIGNAL_INTERVAL_SECONDS" \
   --restart-initial-seconds 2 \
