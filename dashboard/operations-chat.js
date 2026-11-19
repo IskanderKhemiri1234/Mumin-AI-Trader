@@ -34,7 +34,7 @@ function addProposal(proposal){
    const dashboardPassword=sessionStorage.getItem("mumin_dashboard_password");
    const isBuy=proposal.type==="protected_buy";
    const endpoint=isBuy?"/api/mainnet/entries/protected":"/api/mainnet/orders";
-   const body=isBuy?{...proposal,confirmed:true}:{side:"SELL",symbol:proposal.symbol,quantity:proposal.quantity,price:proposal.price,client_order_id:proposal.client_order_id,confirmed:true};
+   const body=isBuy?{...proposal,confirmed:true}:{approval_id:proposal.approval_id,side:"SELL",symbol:proposal.symbol,quantity:proposal.quantity,price:proposal.price,client_order_id:proposal.client_order_id,confirmed:true};
    const id=isBuy?proposal.list_client_order_id:proposal.client_order_id;
    const response=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json","X-Dashboard-Password":dashboardPassword,"Idempotency-Key":id},body:JSON.stringify(body),cache:"no-store"});
    const result=await response.json();
