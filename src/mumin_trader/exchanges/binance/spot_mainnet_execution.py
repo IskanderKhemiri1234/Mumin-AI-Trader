@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-from config.config import Settings, TradingEnvironment, TradingMode
+from config.config import MAINNET_CONFIRMATION_PHRASE, Settings, TradingEnvironment, TradingMode
 from mumin_trader.exchanges.binance.order_store import SQLiteOrderStore
 from mumin_trader.exchanges.binance.mainnet_order_preflight import (
     BinanceSpotMainnetOrderPreflight,
@@ -66,7 +66,7 @@ class BinanceSpotMainnetExecution:
             raise SpotExecutionError("Both independent Mainnet/live gates must be enabled.")
         if not settings.MAINNET_LEGAL_ELIGIBILITY_CONFIRMED:
             raise SpotExecutionError("Mainnet legal-eligibility confirmation is required.")
-        if settings.MAINNET_CONFIRMATION != "I_ACKNOWLEDGE_REAL_MONEY_SPOT_TRADING":
+        if settings.MAINNET_CONFIRMATION != MAINNET_CONFIRMATION_PHRASE:
             raise SpotExecutionError("Exact Mainnet real-money confirmation phrase is required.")
         if settings.TESTNET_ORDER_PREFLIGHT_ENABLED or settings.TESTNET_SPOT_EXECUTION_ENABLED:
             raise SpotExecutionError("Mainnet and Testnet execution gates cannot be enabled together.")
