@@ -90,6 +90,7 @@ class MainnetSignalLedger:
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA busy_timeout=15000")
         db.execute("PRAGMA foreign_keys=ON")
+        db.execute("PRAGMA synchronous=FULL")
         return db
 
     @staticmethod
@@ -364,7 +365,8 @@ class MainnetSignalWorker:
 
 async def _main() -> None:
     settings = get_settings()
-    worker = MainnetSignalWorker(settings)
+    interval = float(os.getenv("MAINNET_SIGNAL_INTERVAL_SECONDS", str(DEFAULT_INTERVAL_SECONDS)))
+    worker = MainnetSignalWorker(settings, interval_seconds=interval)
     await worker.run()
 
 
