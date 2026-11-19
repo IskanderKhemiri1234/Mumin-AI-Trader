@@ -1,4 +1,4 @@
-name: Mumin AI Trader Android APK
+name: Mumin AI Trader Android CI
 
 on:
   push:
@@ -47,32 +47,8 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Build installable debug APK
+      - name: Compile Android app for CI validation only
         run: gradle --no-daemon --stacktrace :app:assembleDebug --project-dir android
-
-      - name: Verify APK and prepare download
-        shell: bash
-        run: |
-          set -euo pipefail
-          APK="android/app/build/outputs/apk/debug/app-debug.apk"
-          test -s "$APK"
-          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
-          "$BUILD_TOOLS/apksigner" verify --verbose "$APK"
-          "$BUILD_TOOLS/aapt" dump badging "$APK" | grep -q "package: name='com.mumin.aitrader'"
-          mkdir -p dist
-          cp "$APK" dist/Mumin-AI-Trader.apk
-          sha256sum dist/Mumin-AI-Trader.apk | tee dist/SHA256SUMS.txt
-          ls -lh dist/Mumin-AI-Trader.apk
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Mumin-AI-Trader-APK
-          path: |
-            dist/Mumin-AI-Trader.apk
-            dist/SHA256SUMS.txt
-          if-no-files-found: error
-          retention-days: 30
 
 
   publish-signed-release:
