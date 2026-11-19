@@ -8,7 +8,7 @@ import sqlite3
 import uuid
 
 import httpx
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 from typing import Any
@@ -386,13 +386,23 @@ class MainnetSignalWorker:
                 return {"status": "HALTED", "reason": halt_reason, "signals": 0, "orders": 0}
 
         candidates = await self.scanner.scan(self.market)
-        bucket = self._bucket(datetime.now(timezone.utc))
-        approved = [item for item in candidates if item.signal == "BUY_CANDIDATE"]
+        approved: list[Any] = []
+        buckets: dict[str, str] = {}
         orders = 0
         recorded = 0
         for candidate in candidates:
+            if candidate.signal_candle_open_time_ms <= 0:
+                self.ledger.audit(
+                    "SIGNAL_REJECTED_MISSING_CANDLE_TIME", self.actor,
+                    {"symbol": candidate.symbol, "interval": self.scanner.interval},
+                )
+                continue
+            bucket = self._bucket(candidate.signal_candle_open_time_ms)
+            buckets[candidate.symbol] = bucket
             disposition = "SHADOW_PROPOSAL" if candidate.signal == "BUY_CANDIDATE" else "FILTERED"
             inserted = self.ledger.record_candidate(candidate, bucket, disposition)
+            if candidate.signal == "BUY_CANDIDATE":
+                approved.append(candidate)
             if inserted:
                 recorded += 1
                 self.ledger.audit(
@@ -412,7 +422,7 @@ class MainnetSignalWorker:
             elif approved:
                 candidate = approved[0]
                 try:
-                    orders = int(await self._submit_protected(candidate, bucket))
+                    orders = int(await self._submit_protected(candidate, buckets[candidate.symbol]))
                 except Exception as exc:
                     self.ledger.audit(
                         "PROTECTED_ENTRY_REJECTED", self.actor,
