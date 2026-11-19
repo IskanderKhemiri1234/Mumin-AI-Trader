@@ -24,7 +24,7 @@ def test_mainnet_is_blocked_without_explicit_flags():
 
 
 def test_mainnet_is_hard_blocked_even_if_all_opt_in_flags_are_set():
-    with pytest.raises(ValidationError, match="MAINNET is disabled"):
+    with pytest.raises(ValidationError, match="Mainnet confirmation phrase"):
         Settings(
             _env_file=None,
             TRADING_ENV="MAINNET",
@@ -40,9 +40,9 @@ def test_mainnet_is_hard_blocked_even_if_all_opt_in_flags_are_set():
 
 def test_endpoint_properties_fail_closed_if_model_validation_is_bypassed():
     unvalidated = Settings.model_construct(TRADING_ENV=TradingEnvironment.MAINNET)
-    with pytest.raises(ValueError, match="REST access is hard-blocked"):
+    with pytest.raises(ValueError, match="Mainnet requires TRADING_MODE=LIVE"):
         _ = unvalidated.rest_base_url
-    with pytest.raises(ValueError, match="WebSocket access is hard-blocked"):
+    with pytest.raises(ValueError, match="Mainnet requires TRADING_MODE=LIVE"):
         _ = unvalidated.websocket_base_url
 
 

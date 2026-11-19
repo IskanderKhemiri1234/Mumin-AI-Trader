@@ -155,11 +155,11 @@ class UnifiedDashboardActivity : Activity() {
                 }
 
                 override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
-                    connectionStatus.text = if (remoteHost == null) "جارٍ فتح العرض التجريبي المحلي…" else "جارٍ فتح لوحة الويب من الخادم…"
+                    connectionStatus.text = "جارٍ فتح لوحة التشغيل من الخادم…"
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
-                    connectionStatus.text = if (remoteHost == null) "العرض التجريبي المحلي جاهز · بيانات اصطناعية · لا اتصال بـ Binance." else "تم تحميل لوحة التحكم من الخادم. أدخل رمز لوحة التحكم داخل الصفحة."
+                    connectionStatus.text = "تم تحميل لوحة التحكم من الخادم. أدخل كلمة مرور اللوحة داخل الصفحة."
                 }
 
                 override fun onReceivedError(
@@ -238,10 +238,12 @@ class UnifiedDashboardActivity : Activity() {
                     val health = JSONObject(payload)
                     val status = health.optString("status")
                     val execution = health.optString("execution")
-                    if (status != "ok" ||
-                        execution != "PAPER_ONLY; TESTNET_DISABLED; MAINNET_BLOCKED"
-                    ) {
-                        error("Server safety mode is not the expected Paper-only configuration.")
+                    val allowedExecutionModes = setOf(
+                        "PAPER_ONLY; TESTNET_DISABLED; MAINNET_BLOCKED",
+                        "SPOT_MAINNET_LIMIT_ENABLED; PAPER_SEPARATE; TESTNET_SEPARATE"
+                    )
+                    if (status != "ok" || execution !in allowedExecutionModes) {
+                        error("Server execution mode is unknown or violates the supported isolation policy.")
                     }
                 } finally {
                     connection.disconnect()
@@ -249,7 +251,7 @@ class UnifiedDashboardActivity : Activity() {
             }
             runOnUiThread {
                 result.onSuccess {
-                    connectionStatus.text = "خادم S21 سليم · Paper فقط · Testnet وMainnet مغلقان."
+                    connectionStatus.text = if (baseUrl.isNotBlank()) "تم التحقق من الخادم ووضع التنفيذ المعلن. أدخل كلمة مرور اللوحة." else "تم التحقق من الخادم."
                     loadUnifiedDashboard(baseUrl)
                 }.onFailure { error ->
                     webView.visibility = View.INVISIBLE

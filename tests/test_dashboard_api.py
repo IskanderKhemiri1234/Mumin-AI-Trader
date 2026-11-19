@@ -15,6 +15,66 @@ def test_root_reports_public_market_paper_only_without_account_link():
     assert response.json()["account_link"] == "NONE"
 
 
+def test_mainnet_api_is_locked_by_default_and_never_falls_back_to_paper(monkeypatch):
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "server-only-password")
+    client = TestClient(app)
+    headers = {"X-Dashboard-Password": "server-only-password"}
+
+    status = client.get("/api/mainnet/status", headers=headers)
+    assert status.status_code == 200
+    assert status.json()["status"] == "LOCKED"
+    assert status.json()["execution_enabled"] is False
+
+    order = client.post(
+        "/api/mainnet/orders",
+        headers={**headers, "Idempotency-Key": "mumin-live-test-0001"},
+        json={
+            "side": "SELL",
+            "symbol": "BTCUSDT",
+            "quantity": "0.001",
+            "price": "50000",
+            "client_order_id": "mumin-live-test-0001",
+            "confirmed": True,
+        },
+    )
+    assert order.status_code == 423
+    assert "locked" in order.json()["detail"].lower()
+
+    unprotected_buy = client.post(
+        "/api/mainnet/orders",
+        headers={**headers, "Idempotency-Key": "mumin-live-buy-0001"},
+        json={
+            "side": "BUY",
+            "symbol": "BTCUSDT",
+            "quantity": "0.001",
+            "price": "50000",
+            "client_order_id": "mumin-live-buy-0001",
+            "confirmed": True,
+        },
+    )
+    assert unprotected_buy.status_code == 409
+    assert "OPOCO" in unprotected_buy.json()["detail"]
+
+    protected_entry = client.post(
+        "/api/mainnet/entries/protected",
+        headers={**headers, "Idempotency-Key": "mumin-live-test-0002"},
+        json={
+            "symbol": "BTCUSDT",
+            "quantity": "0.001",
+            "working_price": "50000",
+            "take_profit_price": "50625",
+            "stop_price": "49750",
+            "stop_limit_price": "49740",
+            "list_client_order_id": "mumin-live-test-0002",
+            "working_client_order_id": "mumin-live-test-0002-w",
+            "pending_above_client_order_id": "mumin-live-test-0002-tp",
+            "pending_below_client_order_id": "mumin-live-test-0002-sl",
+            "confirmed": True,
+        },
+    )
+    assert protected_entry.status_code == 423
+
+
 def test_dashboard_api_requires_server_password(monkeypatch, tmp_path):
     monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
     monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(tmp_path / "ledger.sqlite3"))

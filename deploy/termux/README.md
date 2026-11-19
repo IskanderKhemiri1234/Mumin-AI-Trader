@@ -16,7 +16,7 @@ cd ~/Mumin-AI-Trader
 bash deploy/termux/install.sh
 ```
 
-The installer installs Python dependencies, creates a private `.env` only if absent, prompts you to choose a private dashboard password (minimum 12 characters), removes the legacy token setting, installs the API, Paper engine, and six-hour verified local backup runit services, and registers a Termux:Boot startup script. It refuses unsafe trading configuration.
+The installer installs Python dependencies, creates a private `.env` only if absent, prompts you to choose a private dashboard password (minimum 12 characters), removes the legacy token setting, installs the API, isolated Paper engine, six-hour verified local backup, Paper watchdog, and a separate Mainnet signal-worker supervisor in Shadow-only mode, and registers a Termux:Boot startup script. It refuses unsafe trading configuration.
 
 Dashboard: `http://127.0.0.1:8000/dashboard`\n\nThe dashboard accepts only `DASHBOARD_PASSWORD` from the private `.env` file. The former `DASHBOARD_ACCESS_TOKEN` setting and `X-Dashboard-Token` header are no longer accepted. Never put your password in GitHub or send it in chat. Passwords must be at least 12 characters.
 Health: `http://127.0.0.1:8000/health`
@@ -27,12 +27,14 @@ sv status mumin-api
 sv status mumin-paper-engine
 sv status mumin-paper-backup
 sv status mumin-paper-watchdog
+sv status mumin-mainnet-signal-worker
 sv restart mumin-api
 sv restart mumin-paper-engine
 sv down mumin-paper-engine
 sv up mumin-paper-engine
 tail -f ~/.mumin-ai-trader/logs/api.log
 tail -f ~/.mumin-ai-trader/logs/paper-engine.log
+tail -f ~/.mumin-ai-trader/logs/mainnet-signal-worker.log
 ```
 
 SQLite remains at `data/mumin_public_paper.db`. A runit backup service creates an SQLite online-backup snapshot every six hours under `data/backups/`, verifies SQLite integrity and SHA-256, and retains 30 days. These snapshots are on the same phone and are not disaster-proof; periodically copy them to a separate trusted device/storage. Back up before replacing/reinstalling Termux. Never delete `data/` during updates.
@@ -99,7 +101,11 @@ sv restart mumin-paper-engine
 - GitHub is source control, CI, PR review and audit trail. The live SQLite database is local to this phone; Actions is not a continuous host.
 - Android Doze, force-stop, reboot, heat, storage and network failures can interrupt service. Termux:Boot and wake lock improve recovery but cannot guarantee uptime.
 - No failover is configured.
-- This deployment is PAPER only. It does not submit Binance orders. Testnet order gates and Mainnet stay disabled.
+- The existing Paper engine remains isolated and does not submit Binance orders.
+- The separate Mainnet signal worker reads real Binance public Spot market data and applies the MarketScanner strategy to closed candles. It writes signals and audit events to `data/mumin_mainnet_signals.db`.
+- Mainnet signal worker defaults to `SHADOW_ONLY`; it does not create a private Mainnet executor or submit orders unless `MAINNET_AUTONOMOUS_EXECUTION_ENABLED=true`, the separate exact confirmation phrase is configured, and all independent Mainnet execution gates and credentials are valid. Keep these disabled during Shadow validation.
+- The Mainnet supervisor persists desired RUNNING/STOPPED state in its own SQLite ledger, uses a process lock and bounded restart backoff, and is registered with Termux:Boot. Shadow mode resumes after reboot. If autonomous Mainnet mode is ever explicitly configured, the supervisor forces it to STOPPED after a process/phone restart unless `MAINNET_AUTONOMOUS_BOOT_RESUME_ENABLED=true`; the dashboard must otherwise be used to start it again. Android cannot guarantee 24/7 uptime.
+- Do not set autonomous execution until strategy shadow results, full mocked lifecycle tests, account permissions and independent review are complete.
 - A ChatGPT-like LLM requires a separately selected model provider and possibly paid API usage; this installer does not invent or enable one.
 
 

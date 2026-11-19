@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hmac
+import json
 import os
 import re
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -11,6 +13,10 @@ from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
+
+from config.config import get_settings
+from mumin_trader.exchanges.binance.realized_pnl import build_realized_pnl_report
+from mumin_trader.execution.mainnet_approval_audit import prepare_mainnet_approval
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATABASE = PROJECT_ROOT / "data" / "mumin_public_paper.db"
@@ -34,6 +40,13 @@ def normalize_message(message: str) -> str:
 
 def classify_intent(message: str) -> str:
     value = normalize_message(message)
+    if re.match(r"^\s*/?(?:BUY|SELL|شراء|بيع)\b", message, flags=re.IGNORECASE):
+        return "mainnet_order"
+    if any(term in value for term in (
+        "binance", "mainnet", "حساب حقيقي", "الرصيد الحقيقي",
+        "الصفقات الحقيقيه", "اوامر حقيقيه", "تداول حقيقي",
+    )):
+        return "mainnet"
     groups = {
         "alerts": (
             "تنبيه", "التنبيهات", "انذار", "تحذير", "alert", "alerts", "warning",
@@ -295,8 +308,202 @@ def read_operations_snapshot(database: Path) -> dict[str, Any]:
     }
 
 
+def read_mainnet_operations_snapshot() -> dict[str, Any]:
+    settings = get_settings()
+    if not settings.MAINNET_SPOT_EXECUTION_ENABLED:
+        return {"status": "LOCKED", "execution_enabled": False, "database_status": "locked"}
+    value = settings.MAINNET_ORDER_DATABASE_URL
+    if value.startswith("sqlite:///"):
+        value = value.removeprefix("sqlite:///")
+    elif "://" in value:
+        return {"status": "UNAVAILABLE", "execution_enabled": True, "database_status": "unsupported_database"}
+    database = Path(value)
+    if not database.is_absolute():
+        database = PROJECT_ROOT / database
+    if not database.is_file():
+        return {"status": "NOT_INITIALIZED", "execution_enabled": True, "database_status": "missing"}
+    connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=3)
+    connection.row_factory = sqlite3.Row
+    try:
+        tables = _table_names(connection)
+        required = {"spot_execution_control", "spot_order_intents", "spot_trade_fills", "spot_reconciliation_snapshots"}
+        if not required.issubset(tables):
+            return {"status": "NOT_INITIALIZED", "execution_enabled": True, "database_status": "incomplete"}
+        control = connection.execute(
+            "SELECT halted,halt_reason FROM spot_execution_control WHERE id=1"
+        ).fetchone()
+        latest = connection.execute(
+            "SELECT created_at,balances_json,open_orders_json,discrepancies_json FROM spot_reconciliation_snapshots ORDER BY snapshot_id DESC LIMIT 1"
+        ).fetchone()
+        orders = [
+            dict(row) for row in connection.execute(
+                "SELECT client_order_id,symbol,side,quantity,price,state,executed_quantity,created_at,updated_at,last_error FROM spot_order_intents ORDER BY created_at DESC LIMIT 20"
+            ).fetchall()
+        ]
+        fills = [
+            dict(row) for row in connection.execute(
+                "SELECT symbol,trade_id,price,quantity,quote_quantity,commission,commission_asset,is_buyer,is_maker,commission_quote_value,trade_time_ms FROM spot_trade_fills ORDER BY trade_time_ms DESC LIMIT 5000"
+            ).fetchall()
+        ]
+        pnl = build_realized_pnl_report(fills, quote_asset=settings.QUOTE_ASSET)
+        balances = json.loads(latest["balances_json"]) if latest else []
+        open_orders = json.loads(latest["open_orders_json"]) if latest else []
+        discrepancies = json.loads(latest["discrepancies_json"]) if latest else []
+        positions = {
+            symbol: {
+                "quantity": item.get("open_quantity", "0"),
+                "cost_basis": item.get("open_cost_basis_quote", "0"),
+            }
+            for symbol, item in pnl.get("symbols", {}).items()
+            if Decimal(str(item.get("open_quantity", "0"))) > ZERO
+        }
+        unresolved_count = sum(
+            1 for item in orders
+            if item["state"] in {"SUBMITTING", "UNKNOWN", "NEW", "PARTIALLY_FILLED", "CANCEL_PENDING"}
+        )
+        age_seconds = None
+        if latest:
+            try:
+                reconciled_at = datetime.fromisoformat(str(latest["created_at"]))
+                if reconciled_at.tzinfo is None:
+                    reconciled_at = reconciled_at.replace(tzinfo=timezone.utc)
+                age_seconds = max(0, int((datetime.now(timezone.utc) - reconciled_at).total_seconds()))
+            except ValueError:
+                age_seconds = None
+        is_halted = bool(control["halted"]) if control else True
+        mainnet_status = "HALTED" if is_halted else "READY" if age_seconds is not None and age_seconds <= 90 else "STALE"
+        return {
+            "status": mainnet_status,
+            "execution_enabled": True,
+            "database_status": "ready",
+            "halted": is_halted,
+            "halt_reason": str(control["halt_reason"]) if control else "CONTROL_ROW_MISSING",
+            "last_reconciliation": latest["created_at"] if latest else None,
+            "last_reconciliation_age_seconds": age_seconds,
+            "balances": balances,
+            "open_orders": open_orders,
+            "discrepancies": discrepancies,
+            "orders": orders,
+            "trades": fills[:20],
+            "positions": positions,
+            "pnl": pnl,
+            "unresolved_orders": unresolved_count,
+        }
+    except (sqlite3.Error, ValueError, TypeError, KeyError):
+        return {"status": "UNAVAILABLE", "execution_enabled": True, "database_status": "read_error"}
+    finally:
+        connection.close()
+
+
+def parse_mainnet_order_proposal(message: str, mainnet: dict[str, Any]) -> dict[str, Any] | None:
+    settings = get_settings()
+    if not settings.MAINNET_SPOT_EXECUTION_ENABLED:
+        return None
+    if mainnet.get("status") != "READY" or mainnet.get("halted"):
+        return None
+    parts = message.strip().split()
+    if len(parts) < 3:
+        return None
+    action = parts[0].lstrip("/").upper()
+    symbol = parts[1].upper()
+    if symbol not in settings.watchlist_symbols:
+        return None
+    values: dict[str, str] = {}
+    for part in parts[2:]:
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        values[key.strip().lower()] = value.strip()
+    required = {"qty", "price"}
+    if not required.issubset(values):
+        return None
+    try:
+        quantity = Decimal(values["qty"])
+        price = Decimal(values["price"])
+        if not quantity.is_finite() or not price.is_finite() or quantity <= ZERO or price <= ZERO:
+            return None
+        notional = quantity * price
+        if notional < settings.MIN_TRADE_ALLOCATION_USD or notional > settings.MAX_TRADE_ALLOCATION_USD:
+            return None
+        client_id = "mumin-" + uuid.uuid4().hex[:24]
+        if action in {"BUY", "شراء"}:
+            if not {"tp", "stop", "stop_limit"}.issubset(values):
+                return None
+            take_profit = Decimal(values["tp"])
+            stop = Decimal(values["stop"])
+            stop_limit = Decimal(values["stop_limit"])
+            if not all(value.is_finite() and value > ZERO for value in (take_profit, stop, stop_limit)):
+                return None
+            stop_percent = (price - stop) / price * Decimal("100")
+            target_percent = (take_profit - price) / price * Decimal("100")
+            if abs(stop_percent - Decimal("0.50")) > Decimal("0.02"):
+                return None
+            if abs(target_percent - Decimal("1.25")) > Decimal("0.02"):
+                return None
+            if not stop_limit < stop < price < take_profit:
+                return None
+            return {
+                "type": "protected_buy",
+                "symbol": symbol,
+                "quantity": str(quantity),
+                "working_price": str(price),
+                "take_profit_price": str(take_profit),
+                "stop_price": str(stop),
+                "stop_limit_price": str(stop_limit),
+                "list_client_order_id": client_id,
+                "working_client_order_id": client_id + "-w",
+                "pending_above_client_order_id": client_id + "-tp",
+                "pending_below_client_order_id": client_id + "-sl",
+            }
+        if action == "SELL" or action == "بيع":
+            return {
+                "type": "sell_limit",
+                "side": "SELL",
+                "symbol": symbol,
+                "quantity": str(quantity),
+                "price": str(price),
+                "client_order_id": client_id,
+            }
+    except (InvalidOperation, ValueError):
+        return None
+    return None
+
+
 def _reply(intent: str, language: str, snapshot: dict[str, Any]) -> str:
     ar = language == "ar"
+    if intent == "mainnet":
+        mainnet = snapshot.get("mainnet") or {}
+        if not mainnet.get("execution_enabled"):
+            return "تنفيذ Binance Mainnet مقفول من إعدادات الخادم؛ لا توجد صلاحية إرسال أوامر." if ar else "Binance Mainnet execution is locked by server configuration; no order submission is available."
+        if mainnet.get("database_status") != "ready":
+            return "محرك Mainnet مفعّل إعدادياً لكنه لم ينجز مصالحة حساب ناجحة بعد. لا يمكن اعتبار الأرصدة أو المراكز جاهزة." if ar else "Mainnet is configured but has not completed a successful account reconciliation. Balances and positions are not yet verified."
+        pnl = mainnet.get("pnl") or {}
+        balances = mainnet.get("balances") or []
+        active = [row for row in balances if Decimal(str(row.get("free", "0"))) + Decimal(str(row.get("locked", "0"))) > ZERO]
+        positions = mainnet.get("positions") or {}
+        summary = [
+            f"{row.get('asset')}: free={row.get('free')} locked={row.get('locked')}"
+            for row in active[:12]
+        ]
+        if ar:
+            return (
+                f"حالة حساب Binance Mainnet: {mainnet.get('status')}. "
+                f"قفل الطوارئ: {mainnet.get('halted')}. السبب: {mainnet.get('halt_reason') or 'لا يوجد'}. "
+                f"PnL المحقق FIFO: {pnl.get('realized_pnl_quote', 'غير متاح')} {pnl.get('quote_asset', 'USDT')}. "
+                f"اكتمال دفتر الرسوم والتكلفة: {pnl.get('complete')}. "
+                f"المراكز المسجلة: {len(positions)}. الأوامر غير المحسومة: {mainnet.get('unresolved_orders', 0)}. "
+                f"اختلافات آخر مصالحة: {len(mainnet.get('discrepancies', []))}. "
+                + ("الأرصدة: " + "؛ ".join(summary) if summary else "لا توجد أرصدة غير صفرية في آخر مصالحة.")
+            )
+        return (
+            f"Binance Mainnet status: {mainnet.get('status')}; emergency halt: {mainnet.get('halted')} "
+            f"({mainnet.get('halt_reason') or 'none'}). FIFO realized PnL: "
+            f"{pnl.get('realized_pnl_quote', 'unavailable')} {pnl.get('quote_asset', 'USDT')}; "
+            f"ledger complete: {pnl.get('complete')}; open positions: {len(positions)}; "
+            f"unresolved orders: {mainnet.get('unresolved_orders', 0)}; "
+            f"latest reconciliation discrepancies: {len(mainnet.get('discrepancies', []))}. "
+            + ("Balances: " + "; ".join(summary) if summary else "No non-zero balances in the last reconciliation.")
+        )
     account = snapshot.get("account")
     engine = snapshot.get("engine") or {}
     if snapshot.get("database_status") != "ready" or account is None:
@@ -386,6 +593,41 @@ async def operations_chat(
     language = "ar" if re.search(r"[\u0600-\u06ff]", message) else "en"
     intent = classify_intent(message)
     snapshot = read_operations_snapshot(database)
+    snapshot["mainnet"] = read_mainnet_operations_snapshot()
+    if intent == "mainnet_order":
+        proposal = parse_mainnet_order_proposal(message, snapshot["mainnet"])
+        if proposal:
+            proposal["approval_id"] = prepare_mainnet_approval(get_settings(), proposal)
+            answer = (
+                "تم تجهيز أمر دون إرساله. راجع الرمز والكمية والسعر ومخارج الحماية ثم اضغط تأكيد التنفيذ مرة واحدة."
+                if language == "ar"
+                else "Order prepared but not submitted. Review symbol, quantity, price and protective exits, then explicitly confirm once."
+            )
+            return {
+                "language": language,
+                "intent": intent,
+                "answer": answer,
+                "read_only": True,
+                "requires_confirmation": True,
+                "proposal": proposal,
+                "external_services_used": False,
+                "snapshot": snapshot,
+            }
+        answer = (
+            "لم أجهز أمراً. تأكد أن Mainnet جاهز وغير موقوف، وأن الصيغة والكمية والسعر ضمن الحدود. BUY يحتاج tp وstop وstop_limit وفق سياسة 0.50% و1.25%."
+            if language == "ar"
+            else "No order was prepared. Ensure Mainnet is READY and not halted, and the syntax and allocation are within limits. BUY requires tp, stop and stop_limit matching the 0.50%/1.25% policy."
+        )
+        return {
+            "language": language,
+            "intent": intent,
+            "answer": answer,
+            "read_only": True,
+            "requires_confirmation": False,
+            "proposal": None,
+            "external_services_used": False,
+            "snapshot": snapshot,
+        }
     return {
         "language": language,
         "intent": intent,

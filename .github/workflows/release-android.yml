@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, for example 1.2.0"
+        description: "Release version, for example 1.4.6"
         required: true
-        default: "1.4.3"
+        default: "1.4.6"
   push:
     tags:
       - "v*"
@@ -61,8 +61,8 @@ jobs:
               raise SystemExit(
                   f"Release tag/input {requested!r} does not match APK versionName {expected!r}."
               )
-          if code < 8:
-              raise SystemExit("Android versionCode must be greater than the previous 1.4.2 release.")
+          if code <= 10:
+              raise SystemExit("Android versionCode must be greater than the published v1.4.5 baseline (code 10).")
           print(f"Release metadata verified: versionName={expected}, versionCode={code}.")
           PY
 
@@ -122,7 +122,7 @@ jobs:
           # Normalize mobile clipboard artifacts without exposing the secret.
           value = value.lstrip("\ufeff")
           value = re.sub(r"(?m)^\s*`{3}[^\n]*$|^\s*`{3}\s*$", "", value)
-          normalized = value.strip().replace("\\n", "").replace("\\r", "")
+          normalized = value.strip().replace("\n", "").replace("\\r", "")
           normalized = re.sub(r"^data:[^,]*;base64,", "", normalized, flags=re.I)
           if normalized.lower().startswith("base64:"):
               normalized = normalized.split(":", 1)[1]
@@ -267,6 +267,10 @@ jobs:
 
       - name: Verify package and signing certificate
         shell: bash
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/mumin-release-key.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           set -euo pipefail
           APK="android/app/build/outputs/apk/release/app-release.apk"
@@ -274,8 +278,26 @@ jobs:
           BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
           "$BUILD_TOOLS/apksigner" verify --verbose "$APK"
           "$BUILD_TOOLS/aapt" dump badging "$APK" | grep -q "package: name='com.mumin.aitrader'"
+          BASELINE_APK="$RUNNER_TEMP/Mumin-AI-Trader-v1.4.5.apk"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://github.com/IskanderKhemiri1234/Mumin-AI-Trader/releases/download/v1.4.5/Mumin-AI-Trader.apk" \
+            --output "$BASELINE_APK"
+          "$BUILD_TOOLS/apksigner" verify --verbose "$BASELINE_APK"
+          "$BUILD_TOOLS/aapt" dump badging "$BASELINE_APK" | grep -q "package: name='com.mumin.aitrader'"
+          "$BUILD_TOOLS/aapt" dump badging "$BASELINE_APK" | grep -q "versionCode='10' versionName='1.4.5'"
+          BASELINE_CERT_SHA256="$("$BUILD_TOOLS/apksigner" verify --print-certs "$BASELINE_APK" | awk -F': ' '/Signer #1 certificate SHA-256 digest/ {print tolower($2); exit}')"
+          KEY_CERT_SHA256="$(keytool -exportcert -keystore "$ANDROID_KEYSTORE_PATH" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" | sha256sum | awk '{print tolower($1)}')"
+          APK_CERT_SHA256="$("$BUILD_TOOLS/apksigner" verify --print-certs "$APK" | awk -F': ' '/Signer #1 certificate SHA-256 digest/ {print tolower($2); exit}')"
+          test -n "$BASELINE_CERT_SHA256"
+          test -n "$KEY_CERT_SHA256"
+          test -n "$APK_CERT_SHA256"
+          if [ "$BASELINE_CERT_SHA256" != "$KEY_CERT_SHA256" ] || [ "$KEY_CERT_SHA256" != "$APK_CERT_SHA256" ]; then
+            printf "Release signer differs from the v1.4.5 baseline or configured keystore.\n" >&2
+            exit 1
+          fi
           mkdir -p dist
           cp "$APK" dist/Mumin-AI-Trader.apk
+          printf 'SHA-256 certificate fingerprint: %s\n' "$APK_CERT_SHA256" | tee dist/SIGNING-CERTIFICATE-SHA256.txt
           sha256sum dist/Mumin-AI-Trader.apk | tee dist/SHA256SUMS.txt
 
       - name: Determine release tag
@@ -302,3 +324,4 @@ jobs:
           files: |
             dist/Mumin-AI-Trader.apk
             dist/SHA256SUMS.txt
+            dist/SIGNING-CERTIFICATE-SHA256.txt

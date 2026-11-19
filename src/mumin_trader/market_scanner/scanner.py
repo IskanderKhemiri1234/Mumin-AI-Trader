@@ -38,6 +38,7 @@ class MarketCandidate:
     change_percent: Decimal
     last_price: Decimal = ZERO
     signal: str = "HOLD"
+    signal_candle_open_time_ms: int = 0
     rsi: Decimal | None = None
     ema_fast: Decimal | None = None
     ema_slow: Decimal | None = None
@@ -55,11 +56,13 @@ class _ClosedOHLCV:
     highs: list[Decimal]
     lows: list[Decimal]
     volumes: list[Decimal]
+    last_closed_open_time_ms: int = 0
 
 
 def _closed_ohlcv(candles: Sequence[Sequence[Any]]) -> _ClosedOHLCV:
     """Parse Binance klines and deliberately exclude the still-forming last candle."""
     parsed: list[tuple[Decimal, Decimal, Decimal, Decimal]] = []
+    last_closed_open_time_ms = 0
     for candle in candles[:-1]:
         if len(candle) <= 5:
             continue
@@ -70,11 +73,17 @@ def _closed_ohlcv(candles: Sequence[Sequence[Any]]) -> _ClosedOHLCV:
         if low > high or not low <= close <= high:
             continue
         parsed.append((high, low, close, volume))
+        if len(candle) > 6:
+            try:
+                last_closed_open_time_ms = int(candle[0])
+            except (TypeError, ValueError):
+                last_closed_open_time_ms = 0
     return _ClosedOHLCV(
         closes=[item[2] for item in parsed],
         highs=[item[0] for item in parsed],
         lows=[item[1] for item in parsed],
         volumes=[item[3] * item[2] for item in parsed],
+        last_closed_open_time_ms=last_closed_open_time_ms,
     )
 
 
@@ -145,6 +154,8 @@ class MarketScanner:
         self.max_spread_bps = Decimal(max_spread_bps)
         requested = {s.upper() for s in allowed_symbols} if allowed_symbols else set(CORE_SYMBOLS)
         self.allowed_symbols = requested.intersection(CORE_SYMBOLS)
+        if interval not in TIMEFRAMES:
+            raise ValueError(f"Unsupported strategy entry timeframe: {interval}")
         self.interval = interval
         self.candle_limit = max(60, min(int(candle_limit), 500))
         self.max_symbols = max(1, min(int(max_symbols), len(CORE_SYMBOLS)))
@@ -227,7 +238,8 @@ class MarketScanner:
                 raw = await client.klines(symbol, interval=timeframe, limit=self.candle_limit)
                 frame_data[timeframe] = _closed_ohlcv(raw)
 
-            base = frame_data["5m"]
+            base = frame_data[self.interval]
+            fast_frame = frame_data["5m"]
             if min(len(base.closes), len(base.highs), len(base.lows), len(base.volumes)) < 30:
                 continue
 
@@ -260,8 +272,8 @@ class MarketScanner:
             advanced_gates = (trend, momentum, liquidity, price_action, regime, net_edge)
             filter_reasons = tuple(gate.reason for gate in advanced_gates if not gate.passed)
 
-            fast = _ema(base.closes, 9)
-            slow = _ema(base.closes, 21)
+            fast = _ema(fast_frame.closes, 9)
+            slow = _ema(fast_frame.closes, 21)
             rsi = _rsi(base.closes, 14)
             momentum_bps = (
                 (base.closes[-1] / base.closes[-11] - Decimal(1)) * BPS
@@ -295,6 +307,7 @@ class MarketScanner:
                     change_percent=change,
                     last_price=last,
                     signal="BUY_CANDIDATE" if decision.approved and not filter_reasons else "HOLD",
+                    signal_candle_open_time_ms=base.last_closed_open_time_ms,
                     rsi=rsi,
                     ema_fast=fast,
                     ema_slow=slow,

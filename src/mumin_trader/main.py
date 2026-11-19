@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import json
 from contextlib import asynccontextmanager
 import os
 import sqlite3
@@ -21,6 +22,19 @@ from mumin_trader.exchanges.binance.account_readonly import (
     BinanceReadOnlyAccountError,
     read_binance_spot_account,
 )
+from mumin_trader.exchanges.binance.order_store import SQLiteOrderStore
+from mumin_trader.exchanges.binance.spot_mainnet_execution import (
+    BinanceSpotMainnetExecution,
+    SpotExecutionError,
+    SpotOrderOutcomeUnknown,
+)
+from mumin_trader.execution.mainnet_signal_worker import MainnetSignalLedger, _sqlite_path as _mainnet_signal_db_path
+from mumin_trader.execution.mainnet_approval_audit import (
+    begin_mainnet_approval,
+    finish_mainnet_approval,
+    list_mainnet_approval_events,
+    list_mainnet_approvals,
+)
 from mumin_trader.execution.command_plane import (
     CommandRejected,
     get_command,
@@ -40,13 +54,49 @@ DEFAULT_PAPER_DB = PROJECT_ROOT / "data" / "mumin_public_paper.db"
 
 
 _market_stream = MarketStreamService()
+_mainnet_executor: BinanceSpotMainnetExecution | None = None
+_mainnet_store: SQLiteOrderStore | None = None
+
+
+def _get_mainnet_service() -> tuple[BinanceSpotMainnetExecution, SQLiteOrderStore]:
+    global _mainnet_executor, _mainnet_store
+    settings = get_settings()
+    if not settings.MAINNET_SPOT_EXECUTION_ENABLED:
+        raise HTTPException(status_code=423, detail="Mainnet Spot execution is locked by server configuration.")
+    if _mainnet_executor is None or _mainnet_store is None:
+        database_value = settings.MAINNET_ORDER_DATABASE_URL
+        if database_value.startswith("sqlite:///"):
+            database_value = database_value.removeprefix("sqlite:///")
+        elif "://" in database_value:
+            raise HTTPException(status_code=503, detail="Unsupported Mainnet order database URL.")
+        database_path = Path(database_value).expanduser()
+        if not database_path.is_absolute():
+            database_path = PROJECT_ROOT / database_path
+        database_path.parent.mkdir(parents=True, exist_ok=True)
+        _mainnet_store = SQLiteOrderStore(str(database_path))
+        try:
+            _mainnet_executor = BinanceSpotMainnetExecution(settings, _mainnet_store)
+        except Exception:
+            _mainnet_store = None
+            raise
+    return _mainnet_executor, _mainnet_store
 
 
 @asynccontextmanager
 async def app_lifespan(_app: FastAPI):
+    settings = get_settings()
+    if settings.MAINNET_SPOT_EXECUTION_ENABLED:
+        try:
+            executor, store = _get_mainnet_service()
+            await executor.reconcile()
+        except Exception:
+            if _mainnet_store is not None:
+                _mainnet_store.halt("STARTUP_RECONCILIATION_FAILED")
     try:
         yield
     finally:
+        if _mainnet_executor is not None:
+            await _mainnet_executor.close()
         await _market_stream.close()
 
 
@@ -81,6 +131,40 @@ class PaperOrderCommand(BaseModel):
 
 
 class EmergencyStopRequest(BaseModel):
+    confirmed: bool = False
+
+
+class MainnetLimitOrderCommand(BaseModel):
+    approval_id: str = ""
+    side: Literal["BUY", "SELL"]
+    symbol: str
+    quantity: str
+    price: str
+    client_order_id: str
+    confirmed: bool = False
+
+
+class MainnetCancelOrderRequest(BaseModel):
+    symbol: str
+    confirmed: bool = False
+
+
+class MainnetSignalWorkerControlRequest(BaseModel):
+    desired_state: Literal["RUNNING", "STOPPED"]
+
+
+class MainnetProtectedEntryCommand(BaseModel):
+    approval_id: str = ""
+    symbol: str
+    quantity: str
+    working_price: str
+    take_profit_price: str
+    stop_price: str
+    stop_limit_price: str
+    list_client_order_id: str
+    working_client_order_id: str
+    pending_above_client_order_id: str
+    pending_below_client_order_id: str
     confirmed: bool = False
 
 
@@ -465,6 +549,422 @@ async def binance_readonly_account(
         raise HTTPException(status_code=502, detail=str(exc)) from None
 
 
+
+@app.get("/api/mainnet/status")
+async def mainnet_status(
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    settings = get_settings()
+    if not settings.MAINNET_SPOT_EXECUTION_ENABLED:
+        return {
+            "environment": settings.TRADING_ENV.value,
+            "mode": settings.TRADING_MODE.value,
+            "status": "LOCKED",
+            "execution_enabled": False,
+            "host": "https://api.binance.com",
+            "database": "separate_mainnet_spot_ledger",
+            "available_actions": [],
+        }
+    _, store = _get_mainnet_service()
+    halted, reason = store.is_halted()
+    with sqlite3.connect(store.database_path, timeout=5) as database:
+        latest = database.execute(
+            "SELECT created_at FROM spot_reconciliation_snapshots ORDER BY snapshot_id DESC LIMIT 1"
+        ).fetchone()
+    age_seconds = None
+    if latest:
+        try:
+            reconciled_at = datetime.fromisoformat(str(latest[0]))
+            if reconciled_at.tzinfo is None:
+                reconciled_at = reconciled_at.replace(tzinfo=timezone.utc)
+            age_seconds = max(0, int((datetime.now(timezone.utc) - reconciled_at).total_seconds()))
+        except ValueError:
+            age_seconds = None
+    can_submit = not halted and age_seconds is not None and age_seconds <= 90
+    status_value = "HALTED" if halted else "ENABLED" if can_submit else "STALE"
+    return {
+        "environment": settings.TRADING_ENV.value,
+        "mode": settings.TRADING_MODE.value,
+        "status": status_value,
+        "execution_enabled": True,
+        "can_submit": can_submit,
+        "host": "https://api.binance.com",
+        "halted": halted,
+        "halt_reason": reason,
+        "last_reconciliation_age_seconds": age_seconds,
+        "unresolved_orders": len(store.unresolved_orders()),
+        "available_actions": ["ACCOUNT", "RECONCILE", "CANCEL_ORDER", "EMERGENCY_STOP"] + (["LIMIT_ORDER"] if can_submit else []),
+    }
+
+
+@app.get("/api/mainnet/account")
+async def mainnet_account(
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    executor, _ = _get_mainnet_service()
+    try:
+        account = await executor._account()
+        return {
+            "account_type": account.get("accountType"),
+            "can_trade": account.get("canTrade"),
+            "balances": account.get("balances", []),
+            "update_time": account.get("updateTime"),
+            "host": "https://api.binance.com",
+        }
+    except Exception:
+        raise HTTPException(status_code=502, detail="Binance Mainnet account query failed.") from None
+
+
+@app.post("/api/mainnet/reconcile")
+async def mainnet_reconcile(
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    executor, _ = _get_mainnet_service()
+    try:
+        return await executor.reconcile()
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="Mainnet reconciliation failed; the execution ledger has been halted pending manual review.",
+        ) from None
+
+
+@app.get("/api/mainnet/orders")
+async def mainnet_orders(
+    limit: int = 50,
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    _, store = _get_mainnet_service()
+    database = sqlite3.connect(store.database_path, timeout=5)
+    database.row_factory = sqlite3.Row
+    try:
+        rows = database.execute(
+            "SELECT client_order_id,symbol,side,quantity,price,state,exchange_order_id,executed_quantity,cumulative_quote_quantity,last_error,created_at,updated_at FROM spot_order_intents ORDER BY created_at DESC LIMIT ?",
+            (max(1, min(limit, 200)),),
+        ).fetchall()
+        has_lists = database.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='spot_oco_order_lists'"
+        ).fetchone()
+        order_lists = []
+        if has_lists:
+            order_lists = [
+                dict(row) for row in database.execute(
+                    "SELECT list_client_order_id,symbol,side,quantity,state,order_list_id,working_client_order_id,created_at,updated_at,last_error FROM spot_oco_order_lists ORDER BY created_at DESC LIMIT ?",
+                    (max(1, min(limit, 200)),),
+                ).fetchall()
+            ]
+        latest = database.execute(
+            "SELECT open_orders_json,created_at,discrepancies_json FROM spot_reconciliation_snapshots ORDER BY snapshot_id DESC LIMIT 1"
+        ).fetchone()
+        exchange_open_orders = json.loads(latest["open_orders_json"]) if latest else []
+        return {
+            "orders": [dict(row) for row in rows],
+            "order_lists": order_lists,
+            "exchange_open_orders": exchange_open_orders,
+            "last_reconciliation": latest["created_at"] if latest else None,
+            "discrepancies": json.loads(latest["discrepancies_json"]) if latest else [],
+        }
+    finally:
+        database.close()
+
+
+@app.get("/api/mainnet/trades")
+async def mainnet_trades(
+    limit: int = 100,
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    executor, store = _get_mainnet_service()
+    try:
+        await executor.sync_trade_history()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Mainnet trade history could not be reconciled.") from None
+    database = sqlite3.connect(store.database_path, timeout=5)
+    database.row_factory = sqlite3.Row
+    try:
+        rows = database.execute(
+            "SELECT symbol,trade_id,order_id,price,quantity,quote_quantity,commission,commission_asset,commission_quote_value,is_buyer,trade_time_ms FROM spot_trade_fills ORDER BY trade_time_ms DESC LIMIT ?",
+            (max(1, min(limit, 500)),),
+        ).fetchall()
+        return {"trades": [dict(row) for row in rows]}
+    finally:
+        database.close()
+
+
+@app.get("/api/mainnet/pnl")
+async def mainnet_pnl(
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    _, store = _get_mainnet_service()
+    return store.realized_pnl_report(get_settings().QUOTE_ASSET)
+
+
+@app.post("/api/mainnet/orders")
+async def submit_mainnet_limit_order(
+    request: MainnetLimitOrderCommand,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    if not request.confirmed:
+        raise HTTPException(status_code=428, detail="Explicit order confirmation is required.")
+    if request.side == "BUY":
+        raise HTTPException(
+            status_code=409,
+            detail="Unprotected BUY LIMIT orders are disabled. Use the atomic protected OPOCO entry workflow.",
+        )
+    if not idempotency_key or idempotency_key != request.client_order_id:
+        raise HTTPException(status_code=400, detail="Idempotency-Key must match client_order_id.")
+    executor, _ = _get_mainnet_service()
+    try:
+        begin_mainnet_approval(
+            get_settings(),
+            request.approval_id,
+            {
+                "type": "sell_limit",
+                "side": request.side,
+                "symbol": request.symbol,
+                "quantity": request.quantity,
+                "price": request.price,
+                "client_order_id": request.client_order_id,
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    try:
+        result = await executor.submit_limit_order(
+            symbol=request.symbol,
+            side=request.side,
+            quantity=request.quantity,
+            price=request.price,
+            client_order_id=request.client_order_id,
+        )
+        finish_mainnet_approval(
+            get_settings(), request.approval_id, "SUBMITTED", result=result,
+        )
+        return {"order": result, "execution": "BINANCE_SPOT_MAINNET"}
+    except SpotOrderOutcomeUnknown as exc:
+        finish_mainnet_approval(
+            get_settings(), request.approval_id, "OUTCOME_UNKNOWN", error=str(exc),
+        )
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except SpotExecutionError as exc:
+        finish_mainnet_approval(
+            get_settings(), request.approval_id, "REJECTED", error=str(exc),
+        )
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+
+@app.post("/api/mainnet/entries/protected")
+async def submit_mainnet_protected_entry(
+    request: MainnetProtectedEntryCommand,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    if not request.confirmed:
+        raise HTTPException(status_code=428, detail="Explicit protected-entry confirmation is required.")
+    if not idempotency_key or idempotency_key != request.list_client_order_id:
+        raise HTTPException(status_code=400, detail="Idempotency-Key must match list_client_order_id.")
+    executor, _ = _get_mainnet_service()
+    try:
+        begin_mainnet_approval(
+            get_settings(),
+            request.approval_id,
+            {
+                "type": "protected_buy",
+                "symbol": request.symbol,
+                "quantity": request.quantity,
+                "working_price": request.working_price,
+                "take_profit_price": request.take_profit_price,
+                "stop_price": request.stop_price,
+                "stop_limit_price": request.stop_limit_price,
+                "list_client_order_id": request.list_client_order_id,
+                "working_client_order_id": request.working_client_order_id,
+                "pending_above_client_order_id": request.pending_above_client_order_id,
+                "pending_below_client_order_id": request.pending_below_client_order_id,
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    try:
+        result = await executor.opoco.place_buy_opoco(
+            symbol=request.symbol,
+            quantity=request.quantity,
+            working_price=request.working_price,
+            take_profit_price=request.take_profit_price,
+            stop_price=request.stop_price,
+            stop_limit_price=request.stop_limit_price,
+            list_client_order_id=request.list_client_order_id,
+            working_client_order_id=request.working_client_order_id,
+            pending_above_client_order_id=request.pending_above_client_order_id,
+            pending_below_client_order_id=request.pending_below_client_order_id,
+        )
+        finish_mainnet_approval(
+            get_settings(), request.approval_id, "SUBMITTED", result=result,
+        )
+        return {"order_list": result, "execution": "BINANCE_SPOT_MAINNET_PROTECTED_OPOCO"}
+    except SpotOrderOutcomeUnknown as exc:
+        finish_mainnet_approval(
+            get_settings(), request.approval_id, "OUTCOME_UNKNOWN", error=str(exc),
+        )
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except SpotExecutionError as exc:
+        finish_mainnet_approval(
+            get_settings(), request.approval_id, "REJECTED", error=str(exc),
+        )
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@app.get("/api/mainnet/signal-worker/status")
+async def mainnet_signal_worker_status(
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    database = _mainnet_signal_db_path(
+        os.getenv("MAINNET_SIGNAL_DATABASE_URL", "sqlite:///./data/mumin_mainnet_signals.db")
+    )
+    ledger = MainnetSignalLedger(database)
+    with ledger._connect() as db:
+        signals = [dict(row) for row in db.execute(
+            "SELECT symbol,signal,score,disposition,order_list_client_id,created_at "
+            "FROM mainnet_signal_events ORDER BY id DESC LIMIT 20"
+        ).fetchall()]
+        events = [dict(row) for row in db.execute(
+            "SELECT event_type,actor,detail_json,created_at "
+            "FROM mainnet_worker_audit ORDER BY id DESC LIMIT 20"
+        ).fetchall()]
+        runtime_row = db.execute(
+            "SELECT supervisor_pid,worker_pid,supervisor_heartbeat_at,worker_heartbeat_at "
+            "FROM mainnet_worker_runtime WHERE id=1"
+        ).fetchone()
+    runtime = dict(runtime_row) if runtime_row else {}
+    def heartbeat_age(value: str | None) -> float | None:
+        if not value:
+            return None
+        try:
+            stamp = datetime.fromisoformat(value)
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            return (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds()
+        except (TypeError, ValueError):
+            return None
+    supervisor_age = heartbeat_age(runtime.get("supervisor_heartbeat_at"))
+    worker_age = heartbeat_age(runtime.get("worker_heartbeat_at"))
+    supervisor_online = supervisor_age is not None and -5 <= supervisor_age <= 30
+    worker_online = worker_age is not None and -5 <= worker_age <= 90
+    desired = ledger.desired_state()
+    return {
+        "desired_state": desired,
+        "mode": "AUTONOMOUS_PROTECTED_OPOCO" if os.getenv("MAINNET_AUTONOMOUS_EXECUTION_ENABLED", "").lower() in {"1", "true", "yes", "on"} else "SHADOW_ONLY",
+        "status": "online" if supervisor_online or worker_online else "offline",
+        "supervisor_status": "online" if supervisor_online else "offline",
+        "worker_status": "running" if worker_online else "starting" if supervisor_online and desired == "RUNNING" else "stopped" if desired == "STOPPED" else "offline",
+        "supervisor_heartbeat_age_seconds": supervisor_age,
+        "worker_heartbeat_age_seconds": worker_age,
+        "supervisor_pid": runtime.get("supervisor_pid"),
+        "worker_pid": runtime.get("worker_pid"),
+        "signals": signals,
+        "events": events,
+    }
+
+
+@app.post("/api/mainnet/signal-worker/control")
+async def control_mainnet_signal_worker(
+    request: MainnetSignalWorkerControlRequest,
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    database = _mainnet_signal_db_path(
+        os.getenv("MAINNET_SIGNAL_DATABASE_URL", "sqlite:///./data/mumin_mainnet_signals.db")
+    )
+    ledger = MainnetSignalLedger(database)
+    ledger.set_desired_state(request.desired_state, "dashboard_authenticated_user")
+    autonomous = os.getenv("MAINNET_AUTONOMOUS_EXECUTION_ENABLED", "").lower() in {"1", "true", "yes", "on"}
+    return {
+        "status": "accepted",
+        "desired_state": ledger.desired_state(),
+        "mode": "AUTONOMOUS_PROTECTED_OPOCO" if autonomous else "SHADOW_ONLY",
+        "autonomous_mode_configured": autonomous,
+    }
+
+
+@app.get("/api/mainnet/approvals")
+async def mainnet_approvals(
+    limit: int = 50,
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    return {"approvals": list_mainnet_approvals(get_settings(), limit)}
+
+
+@app.get("/api/mainnet/approvals/{approval_id}/events")
+async def mainnet_approval_events(
+    approval_id: str,
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    return {"approval_id": approval_id, "events": list_mainnet_approval_events(get_settings(), approval_id)}
+
+
+@app.delete("/api/mainnet/orders/{client_order_id}")
+async def cancel_mainnet_order(
+    client_order_id: str,
+    request: MainnetCancelOrderRequest,
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    if not request.confirmed:
+        raise HTTPException(status_code=428, detail="Explicit cancellation confirmation is required.")
+    executor, _ = _get_mainnet_service()
+    try:
+        return await executor.cancel_order(symbol=request.symbol, client_order_id=client_order_id)
+    except SpotOrderOutcomeUnknown as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except SpotExecutionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+
+@app.delete("/api/mainnet/order-lists/{list_client_order_id}")
+async def cancel_mainnet_order_list(
+    list_client_order_id: str,
+    request: MainnetCancelOrderRequest,
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    if not request.confirmed:
+        raise HTTPException(status_code=428, detail="Explicit protective-order cancellation confirmation is required.")
+    executor, _ = _get_mainnet_service()
+    try:
+        return await executor.opoco.cancel_order_list(
+            symbol=request.symbol,
+            list_client_order_id=list_client_order_id,
+        )
+    except SpotOrderOutcomeUnknown as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except SpotExecutionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@app.post("/api/mainnet/emergency-stop")
+async def mainnet_emergency_stop(
+    request: EmergencyStopRequest,
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    if not request.confirmed:
+        raise HTTPException(status_code=428, detail="Explicit emergency-stop confirmation is required.")
+    executor, _ = _get_mainnet_service()
+    return await executor.emergency_stop()
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     settings = get_settings()
@@ -472,7 +972,11 @@ async def health() -> dict[str, str]:
         "status": "ok",
         "environment": settings.TRADING_ENV.value,
         "mode": settings.TRADING_MODE.value,
-        "execution": "PAPER_ONLY; TESTNET_DISABLED; MAINNET_BLOCKED",
+        "execution": (
+            "SPOT_MAINNET_LIMIT_ENABLED; PAPER_SEPARATE; TESTNET_SEPARATE"
+            if settings.MAINNET_SPOT_EXECUTION_ENABLED
+            else "PAPER_ONLY; TESTNET_DISABLED; MAINNET_BLOCKED"
+        ),
     }
 
 
@@ -480,10 +984,10 @@ async def health() -> dict[str, str]:
 async def root() -> dict[str, str]:
     return {
         "service": "Mumin AI Trader",
-        "status": "paper_only",
+        "status": "mainnet_spot_enabled" if get_settings().MAINNET_SPOT_EXECUTION_ENABLED else "paper_only",
         "market_data": "BINANCE_PUBLIC_SPOT",
-        "execution": "SIMULATED_PAPER_ONLY",
-        "account_link": "NONE",
+        "execution": "BINANCE_SPOT_MAINNET_LIMIT" if get_settings().MAINNET_SPOT_EXECUTION_ENABLED else "SIMULATED_PAPER_ONLY",
+        "account_link": "BINANCE_SPOT_MAINNET" if get_settings().MAINNET_SPOT_EXECUTION_ENABLED else "NONE",
         "dashboard": "/dashboard",
         "api": "/api/dashboard",
     }
@@ -501,6 +1005,14 @@ async def operations_chat_script() -> FileResponse:
     script = PROJECT_ROOT / "dashboard" / "operations-chat.js"
     if not script.is_file():
         raise HTTPException(status_code=503, detail="Operations chat asset is missing.")
+    return FileResponse(script, media_type="application/javascript")
+
+
+@app.get("/mainnet-operations.js", include_in_schema=False)
+async def mainnet_operations_script() -> FileResponse:
+    script = PROJECT_ROOT / "dashboard" / "mainnet-operations.js"
+    if not script.is_file():
+        raise HTTPException(status_code=503, detail="Mainnet dashboard asset is missing.")
     return FileResponse(script, media_type="application/javascript")
 
 
@@ -537,16 +1049,29 @@ async def dashboard_snapshot(
         list_commands(_dashboard_database(), limit=20)
         if _dashboard_database().is_file() else []
     )
+    mainnet_enabled = get_settings().MAINNET_SPOT_EXECUTION_ENABLED
+    mainnet_status = {"status": "LOCKED", "execution_enabled": False}
+    if mainnet_enabled:
+        _, mainnet_store = _get_mainnet_service()
+        halted, halt_reason = mainnet_store.is_halted()
+        mainnet_status = {
+            "status": "HALTED" if halted else "ENABLED",
+            "execution_enabled": True,
+            "halted": halted,
+            "halt_reason": halt_reason,
+            "unresolved_orders": len(mainnet_store.unresolved_orders()),
+        }
+    snapshot["mainnet"] = mainnet_status
     snapshot["control_plane"] = {
         "read_only": False,
         "paper_order_submission": "CONFIRMED_PAPER_ONLY",
         "paper_engine_control": "AUTHENTICATED_PAUSE_RESUME_ONLY",
         "testnet_order_submission": "DISABLED_PENDING_EXPLICIT_OPERATIONAL_APPROVAL",
-        "mainnet_order_submission": "BLOCKED",
+        "mainnet_order_submission": "CONFIRMED_LIMIT_ONLY" if mainnet_enabled else "BLOCKED",
         "execution_authorized": False,
         "available_actions": [
             "PAPER_BUY", "PAPER_SELL", "PAPER_PAUSE", "PAPER_RESUME"
-        ],
+        ] + (["MAINNET_LIMIT_ORDER", "MAINNET_CANCEL", "MAINNET_EMERGENCY_STOP"] if mainnet_enabled else []),
     }
     return snapshot
 
