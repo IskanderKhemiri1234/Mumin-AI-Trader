@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from mumin_trader.execution.mainnet_signal_worker import MainnetSignalLedger
 from scripts.mainnet_worker_supervisor import MainnetWorkerSupervisor
 
