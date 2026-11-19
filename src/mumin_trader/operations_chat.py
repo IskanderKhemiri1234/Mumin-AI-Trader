@@ -39,7 +39,7 @@ def normalize_message(message: str) -> str:
 
 def classify_intent(message: str) -> str:
     value = normalize_message(message)
-    if re.match(r"^\\s*/?(?:BUY|SELL|شراء|بيع)\\b", message, flags=re.IGNORECASE):
+    if re.match(r"^\s*/?(?:BUY|SELL|شراء|بيع)\b", message, flags=re.IGNORECASE):
         return "mainnet_order"
     if any(term in value for term in (
         "binance", "mainnet", "حساب حقيقي", "الرصيد الحقيقي",
