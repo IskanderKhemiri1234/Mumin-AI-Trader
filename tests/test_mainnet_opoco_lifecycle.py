@@ -44,7 +44,7 @@ def _transport(*, working_status: str = "FILLED", working_filled: str = "0.0001"
         "orderListId": 701,
         "listClientOrderId": ids["listClientOrderId"],
         "listStatusType": "EXEC_STARTED",
-        "listOrderStatus": "EXECUTING" if working_status not in {"CANCELED", "EXPIRED"} else "ALL_DONE",
+        "listOrderStatus": "ALL_DONE" if working_status in {"CANCELED", "EXPIRED"} or take_profit_status == "FILLED" or stop_status == "FILLED" else "EXECUTING",
         "orders": [
             {"symbol": "BTCUSDT", "orderId": 801, "clientOrderId": ids["workingClientOrderId"]},
             {"symbol": "BTCUSDT", "orderId": 802, "clientOrderId": ids["pendingAboveClientOrderId"]},
@@ -175,5 +175,22 @@ async def test_cancel_unfilled_working_order_persists_canceled_state(tmp_path) -
         )
         assert executor.opoco._state(result) == "CANCELED"
         assert executor.opoco.store.get("mumin-list-0001")["state"] == "CANCELED"
+    finally:
+        await executor.close()
+
+
+@pytest.mark.asyncio
+async def test_take_profit_fill_completes_the_protective_order_list(tmp_path) -> None:
+    path = tmp_path / "take-profit.sqlite3"
+    executor = _executor(
+        path,
+        _transport(take_profit_status="FILLED", stop_status="CANCELED"),
+    )
+    try:
+        result = await executor.opoco.get_order_list(
+            symbol="BTCUSDT", list_client_order_id="mumin-list-0001",
+        )
+        assert executor.opoco._state(result) == "COMPLETE"
+        assert executor.opoco.store.get("mumin-list-0001")["state"] == "COMPLETE"
     finally:
         await executor.close()
