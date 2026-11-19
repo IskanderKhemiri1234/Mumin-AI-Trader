@@ -388,6 +388,25 @@ class BinanceSpotMainnetExecution:
         await self._backfill_bnb_fee_valuations()
         return self.store.trade_position_quantities(self.settings.QUOTE_ASSET)
 
+    def _ensure_recent_reconciliation(self, *, max_age_seconds: int = 90) -> None:
+        with sqlite3.connect(self.store.database_path, timeout=5) as database:
+            row = database.execute(
+                "SELECT created_at FROM spot_reconciliation_snapshots ORDER BY snapshot_id DESC LIMIT 1"
+            ).fetchone()
+        if row is None:
+            raise SpotExecutionError("A successful Mainnet reconciliation is required before order submission.")
+        try:
+            reconciled_at = datetime.fromisoformat(str(row[0]))
+            if reconciled_at.tzinfo is None:
+                reconciled_at = reconciled_at.replace(tzinfo=timezone.utc)
+            age_seconds = (datetime.now(timezone.utc) - reconciled_at).total_seconds()
+        except (TypeError, ValueError):
+            raise SpotExecutionError("Mainnet reconciliation timestamp is invalid; reconcile before order submission.") from None
+        if age_seconds < 0 or age_seconds > max_age_seconds:
+            raise SpotExecutionError(
+                f"Mainnet account reconciliation is stale ({max_age_seconds}s maximum); reconcile before order submission."
+            )
+
     async def _check_portfolio_risk(
         self,
         *,
@@ -399,6 +418,7 @@ class BinanceSpotMainnetExecution:
         open_orders: list[dict[str, Any]],
         symbol_info: dict[str, Any],
     ) -> None:
+        self._ensure_recent_reconciliation()
         balances = self._balance_map(account)
         quote_asset = str(symbol_info.get("quoteAsset", self.settings.QUOTE_ASSET)).upper()
         base_asset = str(symbol_info.get("baseAsset", "")).upper()
