@@ -6,7 +6,6 @@ import pytest
 
 from config.config import Settings
 from mumin_trader.execution.mainnet_signal_worker import (
-    AUTONOMOUS_CONFIRMATION,
     MainnetSignalLedger,
     MainnetSignalWorker,
 )
