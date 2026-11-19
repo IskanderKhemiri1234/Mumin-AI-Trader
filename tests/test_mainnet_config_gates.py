@@ -34,7 +34,7 @@ def test_mainnet_rejects_partial_or_missing_authorization() -> None:
 
 
 def test_mainnet_execution_requires_independent_preflight_gate() -> None:
-    with pytest.raises(ValidationError, match="requires Mainnet order preflight"):
+    with pytest.raises(ValidationError, match="requires the Mainnet order preflight gate"):
         Settings(
             _env_file=None,
             TRADING_ENV="MAINNET",
