@@ -606,7 +606,18 @@ async def mainnet_orders(
             "SELECT client_order_id,symbol,side,quantity,price,state,exchange_order_id,executed_quantity,cumulative_quote_quantity,last_error,created_at,updated_at FROM spot_order_intents ORDER BY created_at DESC LIMIT ?",
             (max(1, min(limit, 200)),),
         ).fetchall()
-        return {"orders": [dict(row) for row in rows]}
+        has_lists = database.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='spot_oco_order_lists'"
+        ).fetchone()
+        order_lists = []
+        if has_lists:
+            order_lists = [
+                dict(row) for row in database.execute(
+                    "SELECT list_client_order_id,symbol,side,quantity,state,order_list_id,working_client_order_id,created_at,updated_at,last_error FROM spot_oco_order_lists ORDER BY created_at DESC LIMIT ?",
+                    (max(1, min(limit, 200)),),
+                ).fetchall()
+            ]
+        return {"orders": [dict(row) for row in rows], "order_lists": order_lists}
     finally:
         database.close()
 
@@ -720,6 +731,28 @@ async def cancel_mainnet_order(
     executor, _ = _get_mainnet_service()
     try:
         return await executor.cancel_order(symbol=request.symbol, client_order_id=client_order_id)
+    except SpotOrderOutcomeUnknown as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except SpotExecutionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+
+@app.delete("/api/mainnet/order-lists/{list_client_order_id}")
+async def cancel_mainnet_order_list(
+    list_client_order_id: str,
+    request: MainnetCancelOrderRequest,
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    if not request.confirmed:
+        raise HTTPException(status_code=428, detail="Explicit protective-order cancellation confirmation is required.")
+    executor, _ = _get_mainnet_service()
+    try:
+        return await executor.opoco.cancel_order_list(
+            symbol=request.symbol,
+            list_client_order_id=list_client_order_id,
+        )
     except SpotOrderOutcomeUnknown as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     except SpotExecutionError as exc:
