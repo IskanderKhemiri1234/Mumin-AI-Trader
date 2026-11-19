@@ -207,6 +207,8 @@ async def test_shadow_scan_records_signals_for_all_eight_symbols(tmp_path) -> No
     ]
 
     class FakeScanner:
+        interval = "15m"
+
         async def scan(self, _market):
             return candidates
 
