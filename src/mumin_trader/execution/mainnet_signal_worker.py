@@ -203,6 +203,23 @@ class MainnetSignalLedger:
             )
             return cursor.rowcount == 1
 
+    def finish_submission(self, symbol: str, bucket: str, state: str, error: str) -> None:
+        if state not in {"SUBMISSION_REJECTED", "OUTCOME_UNKNOWN"}:
+            raise ValueError("Unsupported Mainnet signal submission result.")
+        with self._connect() as db:
+            cursor = db.execute(
+                """UPDATE mainnet_signal_events SET disposition=?,detail=?
+                   WHERE symbol=? AND candle_bucket=? AND disposition='SUBMISSION_STARTED'
+                     AND order_list_client_id IS NOT NULL""",
+                (state, error[:1000], symbol, bucket),
+            )
+        if cursor.rowcount:
+            self.audit(
+                "MAINNET_SIGNAL_SUBMISSION_FINISHED",
+                "mainnet-signal-worker",
+                {"symbol": symbol, "candle_bucket": bucket, "state": state, "error": error[:500]},
+            )
+
     def attach_order(self, symbol: str, bucket: str, client_id: str, detail: str) -> None:
         with self._connect() as db:
             db.execute(
@@ -451,9 +468,28 @@ class MainnetSignalWorker:
                 candidate = approved[0]
                 try:
                     orders = int(await self._submit_protected(candidate, buckets[candidate.symbol]))
-                except Exception as exc:
+                except SpotOrderOutcomeUnknown as exc:
+                    self.ledger.finish_submission(
+                        candidate.symbol, buckets[candidate.symbol], "OUTCOME_UNKNOWN", str(exc),
+                    )
+                    self.ledger.audit(
+                        "PROTECTED_ENTRY_OUTCOME_UNKNOWN", self.actor,
+                        {"symbol": candidate.symbol, "reason": str(exc)[:500]},
+                    )
+                except SpotExecutionError as exc:
+                    self.ledger.finish_submission(
+                        candidate.symbol, buckets[candidate.symbol], "SUBMISSION_REJECTED", str(exc),
+                    )
                     self.ledger.audit(
                         "PROTECTED_ENTRY_REJECTED", self.actor,
+                        {"symbol": candidate.symbol, "error_type": type(exc).__name__, "reason": str(exc)[:500]},
+                    )
+                except Exception as exc:
+                    self.ledger.finish_submission(
+                        candidate.symbol, buckets[candidate.symbol], "OUTCOME_UNKNOWN", str(exc),
+                    )
+                    self.ledger.audit(
+                        "PROTECTED_ENTRY_OUTCOME_UNKNOWN", self.actor,
                         {"symbol": candidate.symbol, "error_type": type(exc).__name__, "reason": str(exc)[:500]},
                     )
         self.ledger.audit(
