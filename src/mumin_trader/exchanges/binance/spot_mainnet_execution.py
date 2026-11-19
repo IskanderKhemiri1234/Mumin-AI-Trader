@@ -29,8 +29,8 @@ class SpotOrderOutcomeUnknown(SpotExecutionError):
 class BinanceSpotMainnetExecution:
     """Mainnet-only LIMIT execution with durable intents, fail-closed retries and reconciliation.
 
-    No configurable host is accepted. This adapter is not imported by the Paper engine
-    and has no Mainnet, Margin, Futures, withdrawal, or market-order implementation.
+    No configurable host is accepted. This adapter is isolated from the Paper engine and has no Margin, Futures,
+    withdrawal, transfer, or market-order implementation.
     """
 
     def __init__(
@@ -76,8 +76,6 @@ class BinanceSpotMainnetExecution:
             raise SpotExecutionError("Spot Mainnet execution gate is disabled by default.")
         if not settings.BINANCE_MAINNET_API_KEY.get_secret_value() or not settings.BINANCE_MAINNET_API_SECRET.get_secret_value():
             raise SpotExecutionError("Dedicated Binance Spot Mainnet credentials are required.")
-        if not settings.BINANCE_MAINNET_API_KEY.get_secret_value() or not settings.BINANCE_MAINNET_API_SECRET.get_secret_value():
-            raise SpotExecutionError("Binance Spot Mainnet credentials are required.")
 
     async def close(self) -> None:
         await self._validator.close()
