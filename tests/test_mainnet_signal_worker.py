@@ -84,7 +84,7 @@ async def test_mainnet_signal_worker_defaults_to_public_data_shadow_only(tmp_pat
     try:
         assert worker.execution is None
         assert worker.order_store is None
-        assert worker.scanner.allowed_symbols == {"BTCUSDT"}
+        assert worker.scanner.allowed_symbols == {"BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT"}
         assert worker.scanner.interval == "15m"
         assert worker._interval_milliseconds() == 900_000
         candle_open = int(datetime(2026, 11, 19, 10, 0, tzinfo=timezone.utc).timestamp() * 1000)
