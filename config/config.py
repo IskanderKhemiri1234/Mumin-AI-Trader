@@ -95,6 +95,8 @@ class Settings(BaseSettings):
                 raise ValueError("Testnet order preflight requires Spot Testnet API credentials.")
 
         if self.TRADING_ENV is TradingEnvironment.MAINNET:
+            if self.MAINNET_SPOT_EXECUTION_ENABLED and not self.MAINNET_ORDER_PREFLIGHT_ENABLED:
+                raise ValueError("Mainnet Spot execution requires the Mainnet order preflight gate.")
             if self.TRADING_MODE is not TradingMode.LIVE:
                 raise ValueError("Mainnet requires TRADING_MODE=LIVE.")
             if not self.ALLOW_MAINNET or not self.LIVE_TRADING_ENABLED:
@@ -107,8 +109,6 @@ class Settings(BaseSettings):
                 raise ValueError("Mainnet requires dedicated server-side Spot credentials.")
             if self.TESTNET_ORDER_PREFLIGHT_ENABLED or self.TESTNET_SPOT_EXECUTION_ENABLED:
                 raise ValueError("Mainnet and Testnet execution gates cannot be enabled together.")
-            if self.MAINNET_SPOT_EXECUTION_ENABLED and not self.MAINNET_ORDER_PREFLIGHT_ENABLED:
-                raise ValueError("Mainnet Spot execution requires the Mainnet order preflight gate.")
         elif self.MAINNET_ORDER_PREFLIGHT_ENABLED or self.MAINNET_SPOT_EXECUTION_ENABLED:
             raise ValueError("Mainnet execution gates require TRADING_ENV=MAINNET.")
 
@@ -119,12 +119,14 @@ class Settings(BaseSettings):
     @property
     def rest_base_url(self) -> str:
         if self.TRADING_ENV is TradingEnvironment.MAINNET:
+            self.validate_limits()
             return "https://api.binance.com"
         return "https://testnet.binance.vision"
 
     @property
     def websocket_base_url(self) -> str:
         if self.TRADING_ENV is TradingEnvironment.MAINNET:
+            self.validate_limits()
             return "wss://stream.binance.com:9443/ws"
         return "wss://stream.testnet.binance.vision/ws"
 
