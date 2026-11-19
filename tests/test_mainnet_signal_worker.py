@@ -72,3 +72,25 @@ def test_mainnet_autonomous_worker_refuses_non_mainnet_configuration(tmp_path) -
             ledger_path=tmp_path / "autonomous.sqlite3",
             autonomous=True,
         )
+
+
+@pytest.mark.asyncio
+async def test_mainnet_worker_refuses_strategy_exit_levels_outside_execution_policy(tmp_path) -> None:
+    worker = MainnetSignalWorker(
+        Settings(_env_file=None),
+        ledger_path=tmp_path / "strategy-policy.sqlite3",
+        autonomous=False,
+    )
+    worker.execution = object()
+    candidate = SimpleNamespace(
+        symbol="BTCUSDT",
+        last_price=__import__("decimal").Decimal("50000"),
+        stop_loss_price=__import__("decimal").Decimal("49750"),
+        take_profit_price=__import__("decimal").Decimal("51000"),
+    )
+    try:
+        with pytest.raises(Exception, match="do not match the protected Mainnet risk policy"):
+            await worker._submit_protected(candidate, "2026-11-19T10:00:00+00:00")
+    finally:
+        await worker.market.close()
+        await worker._market_http.aclose()
