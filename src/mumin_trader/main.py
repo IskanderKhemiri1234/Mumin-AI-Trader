@@ -28,6 +28,11 @@ from mumin_trader.exchanges.binance.spot_mainnet_execution import (
     SpotExecutionError,
     SpotOrderOutcomeUnknown,
 )
+from mumin_trader.execution.mainnet_approval_audit import (
+    begin_mainnet_approval,
+    finish_mainnet_approval,
+    list_mainnet_approval_events,
+)
 from mumin_trader.execution.command_plane import (
     CommandRejected,
     get_command,
@@ -128,6 +133,7 @@ class EmergencyStopRequest(BaseModel):
 
 
 class MainnetLimitOrderCommand(BaseModel):
+    approval_id: str
     side: Literal["BUY", "SELL"]
     symbol: str
     quantity: str
@@ -142,6 +148,7 @@ class MainnetCancelOrderRequest(BaseModel):
 
 
 class MainnetProtectedEntryCommand(BaseModel):
+    approval_id: str
     symbol: str
     quantity: str
     working_price: str
@@ -709,6 +716,21 @@ async def submit_mainnet_limit_order(
         raise HTTPException(status_code=400, detail="Idempotency-Key must match client_order_id.")
     executor, _ = _get_mainnet_service()
     try:
+        begin_mainnet_approval(
+            get_settings(),
+            request.approval_id,
+            {
+                "type": "sell_limit",
+                "side": request.side,
+                "symbol": request.symbol,
+                "quantity": request.quantity,
+                "price": request.price,
+                "client_order_id": request.client_order_id,
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    try:
         result = await executor.submit_limit_order(
             symbol=request.symbol,
             side=request.side,
@@ -716,10 +738,19 @@ async def submit_mainnet_limit_order(
             price=request.price,
             client_order_id=request.client_order_id,
         )
+        finish_mainnet_approval(
+            get_settings(), request.approval_id, "SUBMITTED", result=result,
+        )
         return {"order": result, "execution": "BINANCE_SPOT_MAINNET"}
     except SpotOrderOutcomeUnknown as exc:
+        finish_mainnet_approval(
+            get_settings(), request.approval_id, "OUTCOME_UNKNOWN", error=str(exc),
+        )
         raise HTTPException(status_code=409, detail=str(exc)) from None
     except SpotExecutionError as exc:
+        finish_mainnet_approval(
+            get_settings(), request.approval_id, "REJECTED", error=str(exc),
+        )
         raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
@@ -737,6 +768,26 @@ async def submit_mainnet_protected_entry(
         raise HTTPException(status_code=400, detail="Idempotency-Key must match list_client_order_id.")
     executor, _ = _get_mainnet_service()
     try:
+        begin_mainnet_approval(
+            get_settings(),
+            request.approval_id,
+            {
+                "type": "protected_buy",
+                "symbol": request.symbol,
+                "quantity": request.quantity,
+                "working_price": request.working_price,
+                "take_profit_price": request.take_profit_price,
+                "stop_price": request.stop_price,
+                "stop_limit_price": request.stop_limit_price,
+                "list_client_order_id": request.list_client_order_id,
+                "working_client_order_id": request.working_client_order_id,
+                "pending_above_client_order_id": request.pending_above_client_order_id,
+                "pending_below_client_order_id": request.pending_below_client_order_id,
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    try:
         result = await executor.opoco.place_buy_opoco(
             symbol=request.symbol,
             quantity=request.quantity,
@@ -749,11 +800,29 @@ async def submit_mainnet_protected_entry(
             pending_above_client_order_id=request.pending_above_client_order_id,
             pending_below_client_order_id=request.pending_below_client_order_id,
         )
+        finish_mainnet_approval(
+            get_settings(), request.approval_id, "SUBMITTED", result=result,
+        )
         return {"order_list": result, "execution": "BINANCE_SPOT_MAINNET_PROTECTED_OPOCO"}
     except SpotOrderOutcomeUnknown as exc:
+        finish_mainnet_approval(
+            get_settings(), request.approval_id, "OUTCOME_UNKNOWN", error=str(exc),
+        )
         raise HTTPException(status_code=409, detail=str(exc)) from None
     except SpotExecutionError as exc:
+        finish_mainnet_approval(
+            get_settings(), request.approval_id, "REJECTED", error=str(exc),
+        )
         raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@app.get("/api/mainnet/approvals/{approval_id}/events")
+async def mainnet_approval_events(
+    approval_id: str,
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    return {"approval_id": approval_id, "events": list_mainnet_approval_events(get_settings(), approval_id)}
 
 
 @app.delete("/api/mainnet/orders/{client_order_id}")
