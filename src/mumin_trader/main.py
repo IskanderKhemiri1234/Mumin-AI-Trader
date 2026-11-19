@@ -131,6 +131,20 @@ class MainnetCancelOrderRequest(BaseModel):
     confirmed: bool = False
 
 
+class MainnetProtectedEntryCommand(BaseModel):
+    symbol: str
+    quantity: str
+    working_price: str
+    take_profit_price: str
+    stop_price: str
+    stop_limit_price: str
+    list_client_order_id: str
+    working_client_order_id: str
+    pending_above_client_order_id: str
+    pending_below_client_order_id: str
+    confirmed: bool = False
+
+
 def _require_dashboard_password(x_require_dashboard_password: str | None) -> str:
     password = os.getenv("DASHBOARD_PASSWORD", "")
     if not password:
@@ -638,6 +652,11 @@ async def submit_mainnet_limit_order(
     _require_dashboard_password(x_require_dashboard_password)
     if not request.confirmed:
         raise HTTPException(status_code=428, detail="Explicit order confirmation is required.")
+    if request.side == "BUY":
+        raise HTTPException(
+            status_code=409,
+            detail="Unprotected BUY LIMIT orders are disabled. Use the atomic protected OPOCO entry workflow.",
+        )
     if not idempotency_key or idempotency_key != request.client_order_id:
         raise HTTPException(status_code=400, detail="Idempotency-Key must match client_order_id.")
     executor, _ = _get_mainnet_service()
@@ -650,6 +669,39 @@ async def submit_mainnet_limit_order(
             client_order_id=request.client_order_id,
         )
         return {"order": result, "execution": "BINANCE_SPOT_MAINNET"}
+    except SpotOrderOutcomeUnknown as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except SpotExecutionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+
+@app.post("/api/mainnet/entries/protected")
+async def submit_mainnet_protected_entry(
+    request: MainnetProtectedEntryCommand,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    if not request.confirmed:
+        raise HTTPException(status_code=428, detail="Explicit protected-entry confirmation is required.")
+    if not idempotency_key or idempotency_key != request.list_client_order_id:
+        raise HTTPException(status_code=400, detail="Idempotency-Key must match list_client_order_id.")
+    executor, _ = _get_mainnet_service()
+    try:
+        result = await executor.opoco.place_buy_opoco(
+            symbol=request.symbol,
+            quantity=request.quantity,
+            working_price=request.working_price,
+            take_profit_price=request.take_profit_price,
+            stop_price=request.stop_price,
+            stop_limit_price=request.stop_limit_price,
+            list_client_order_id=request.list_client_order_id,
+            working_client_order_id=request.working_client_order_id,
+            pending_above_client_order_id=request.pending_above_client_order_id,
+            pending_below_client_order_id=request.pending_below_client_order_id,
+        )
+        return {"order_list": result, "execution": "BINANCE_SPOT_MAINNET_PROTECTED_OPOCO"}
     except SpotOrderOutcomeUnknown as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     except SpotExecutionError as exc:
