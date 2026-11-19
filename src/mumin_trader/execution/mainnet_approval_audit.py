@@ -217,6 +217,20 @@ def finish_mainnet_approval(
         db.close()
 
 
+def list_mainnet_approvals(settings: Settings, limit: int = 50) -> list[dict[str, Any]]:
+    db = _connect(settings)
+    try:
+        rows = db.execute(
+            """SELECT approval_id,proposal_type,state,created_at,expires_at,
+                      confirmed_at,last_error
+               FROM mainnet_chat_approvals ORDER BY created_at DESC LIMIT ?""",
+            (max(1, min(int(limit), 200)),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        db.close()
+
+
 def list_mainnet_approval_events(settings: Settings, approval_id: str) -> list[dict[str, Any]]:
     db = _connect(settings)
     try:
