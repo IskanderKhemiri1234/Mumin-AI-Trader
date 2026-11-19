@@ -246,8 +246,8 @@ class SQLiteOCOOrderStore:
                 continue
             try:
                 request = json.loads(item["request_json"])
-            except (TypeError, ValueError):
-                continue
+            except (TypeError, ValueError) as exc:
+                raise SpotExecutionError("Stored OCO/OPOCO request record is corrupted.") from exc
             if "workingClientOrderId" in request:
                 result.append(item)
         return result
