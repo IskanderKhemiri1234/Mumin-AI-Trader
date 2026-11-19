@@ -61,8 +61,8 @@ jobs:
               raise SystemExit(
                   f"Release tag/input {requested!r} does not match APK versionName {expected!r}."
               )
-          if code < 8:
-              raise SystemExit("Android versionCode must be greater than the previous 1.4.2 release.")
+          if code <= 10:
+              raise SystemExit("Android versionCode must be greater than the published v1.4.5 baseline (code 10).")
           print(f"Release metadata verified: versionName={expected}, versionCode={code}.")
           PY
 
