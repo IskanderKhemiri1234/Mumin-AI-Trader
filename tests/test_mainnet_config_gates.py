@@ -28,8 +28,8 @@ def test_mainnet_rejects_partial_or_missing_authorization() -> None:
             _env_file=None,
             TRADING_ENV="MAINNET",
             TRADING_MODE="LIVE",
-            MAINNET_API_KEY="key",
-            MAINNET_API_SECRET="secret",
+            BINANCE_MAINNET_API_KEY="key",
+            BINANCE_MAINNET_API_SECRET="secret",
         )
 
 
@@ -43,8 +43,8 @@ def test_mainnet_execution_requires_independent_preflight_gate() -> None:
             LIVE_TRADING_ENABLED=True,
             MAINNET_CONFIRMATION=MAINNET_CONFIRMATION_PHRASE,
             MAINNET_LEGAL_ELIGIBILITY_CONFIRMED=True,
-            MAINNET_API_KEY="key",
-            MAINNET_API_SECRET="secret",
+            BINANCE_MAINNET_API_KEY="key",
+            BINANCE_MAINNET_API_SECRET="secret",
             MAINNET_SPOT_EXECUTION_ENABLED=True,
             MAINNET_ORDER_PREFLIGHT_ENABLED=False,
         )
@@ -59,8 +59,8 @@ def test_fully_gated_mainnet_configuration_uses_only_official_host() -> None:
         LIVE_TRADING_ENABLED=True,
         MAINNET_CONFIRMATION=MAINNET_CONFIRMATION_PHRASE,
         MAINNET_LEGAL_ELIGIBILITY_CONFIRMED=True,
-        MAINNET_API_KEY="server-key",
-        MAINNET_API_SECRET="server-secret",
+        BINANCE_MAINNET_API_KEY="server-key",
+        BINANCE_MAINNET_API_SECRET="server-secret",
         MAINNET_ORDER_PREFLIGHT_ENABLED=True,
         MAINNET_SPOT_EXECUTION_ENABLED=True,
     )
