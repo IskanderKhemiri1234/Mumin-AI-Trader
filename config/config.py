@@ -19,20 +19,37 @@ class TradingMode(str, Enum):
     LIVE = "LIVE"
 
 
+MAINNET_CONFIRMATION_PHRASE = "I_ACCEPT_REAL_SPOT_TRADING_RISK"
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
     APP_ENV: str = "development"
     LOG_LEVEL: str = "INFO"
     TRADING_ENV: TradingEnvironment = TradingEnvironment.TESTNET
     TRADING_MODE: TradingMode = TradingMode.PAPER
+
+    # All Mainnet capabilities remain disabled unless every independent gate is set.
     ALLOW_MAINNET: bool = False
     LIVE_TRADING_ENABLED: bool = False
-    TESTNET_ORDER_PREFLIGHT_ENABLED: bool = False
-    TESTNET_SPOT_EXECUTION_ENABLED: bool = False
+    MAINNET_ORDER_PREFLIGHT_ENABLED: bool = False
+    MAINNET_SPOT_EXECUTION_ENABLED: bool = False
     MAINNET_CONFIRMATION: str = ""
     MAINNET_LEGAL_ELIGIBILITY_CONFIRMED: bool = False
+    MAINNET_API_KEY: SecretStr = SecretStr("")
+    MAINNET_API_SECRET: SecretStr = SecretStr("")
+    MAINNET_ORDER_DATABASE_URL: str = "sqlite:///./data/mumin_mainnet_spot.db"
+
+    TESTNET_ORDER_PREFLIGHT_ENABLED: bool = False
+    TESTNET_SPOT_EXECUTION_ENABLED: bool = False
     BINANCE_API_KEY: SecretStr = SecretStr("")
     BINANCE_API_SECRET: SecretStr = SecretStr("")
+
     BINANCE_RECV_WINDOW_MS: int = Field(default=5000, ge=1000, le=10000)
     BINANCE_TIMEOUT_SECONDS: float = Field(default=10.0, gt=0, le=60)
     INITIAL_CAPITAL_USD: Decimal = Field(default=Decimal("70.00"), gt=0)
@@ -61,38 +78,67 @@ class Settings(BaseSettings):
             raise ValueError("Minimum trade allocation exceeds maximum trade allocation.")
         if self.MAX_RISK_PER_TRADE_PERCENT >= self.MAX_DAILY_LOSS_PERCENT:
             raise ValueError("Per-trade risk must be below daily loss limit.")
-        if self.TRADING_ENV == TradingEnvironment.TESTNET and (self.TRADING_MODE == TradingMode.LIVE or self.LIVE_TRADING_ENABLED):
-            raise ValueError("Live trading is prohibited in TESTNET configuration.")
+
+        mainnet_flags = (
+            self.ALLOW_MAINNET,
+            self.LIVE_TRADING_ENABLED,
+            self.MAINNET_ORDER_PREFLIGHT_ENABLED,
+            self.MAINNET_SPOT_EXECUTION_ENABLED,
+        )
+        if self.TRADING_ENV is TradingEnvironment.TESTNET:
+            if self.TRADING_MODE is TradingMode.LIVE or self.LIVE_TRADING_ENABLED or self.ALLOW_MAINNET:
+                raise ValueError("Live/Mainnet flags are prohibited in TESTNET configuration.")
+            if self.MAINNET_ORDER_PREFLIGHT_ENABLED or self.MAINNET_SPOT_EXECUTION_ENABLED:
+                raise ValueError("Mainnet execution flags are prohibited in TESTNET configuration.")
         if self.TESTNET_SPOT_EXECUTION_ENABLED and not self.TESTNET_ORDER_PREFLIGHT_ENABLED:
             raise ValueError("Spot Testnet execution requires the order preflight gate.")
         if self.TESTNET_SPOT_EXECUTION_ENABLED:
             if self.TRADING_ENV is not TradingEnvironment.TESTNET or self.TRADING_MODE is not TradingMode.TESTNET:
                 raise ValueError("Spot Testnet execution requires TRADING_ENV=TESTNET and TRADING_MODE=TESTNET.")
-            if self.ALLOW_MAINNET or self.LIVE_TRADING_ENABLED:
+            if any(mainnet_flags):
                 raise ValueError("Spot Testnet execution requires all Mainnet/live flags disabled.")
+            if not self.BINANCE_API_KEY.get_secret_value() or not self.BINANCE_API_SECRET.get_secret_value():
+                raise ValueError("Spot Testnet execution requires Testnet API credentials.")
         if self.TESTNET_ORDER_PREFLIGHT_ENABLED:
             if self.TRADING_ENV is not TradingEnvironment.TESTNET:
                 raise ValueError("Testnet order preflight is restricted to TESTNET.")
             if self.TRADING_MODE not in {TradingMode.PAPER, TradingMode.TESTNET}:
                 raise ValueError("Testnet preflight requires PAPER or TESTNET mode.")
-            if self.ALLOW_MAINNET or self.LIVE_TRADING_ENABLED:
+            if any(mainnet_flags):
                 raise ValueError("Testnet order preflight requires all Mainnet/live flags disabled.")
             if not self.BINANCE_API_KEY.get_secret_value() or not self.BINANCE_API_SECRET.get_secret_value():
                 raise ValueError("Testnet order preflight requires Spot Testnet API credentials.")
+
         if self.TRADING_ENV is TradingEnvironment.MAINNET:
-            raise ValueError("MAINNET is disabled in this release; only the isolated Spot TESTNET adapter exists.")
+            if self.TRADING_MODE is not TradingMode.LIVE:
+                raise ValueError("Mainnet requires TRADING_MODE=LIVE.")
+            if not self.ALLOW_MAINNET or not self.LIVE_TRADING_ENABLED:
+                raise ValueError("Mainnet requires ALLOW_MAINNET and LIVE_TRADING_ENABLED.")
+            if self.MAINNET_CONFIRMATION != MAINNET_CONFIRMATION_PHRASE:
+                raise ValueError("The exact Mainnet risk confirmation phrase is required.")
+            if not self.MAINNET_LEGAL_ELIGIBILITY_CONFIRMED:
+                raise ValueError("Mainnet legal and account eligibility must be explicitly confirmed.")
+            if not self.MAINNET_API_KEY.get_secret_value() or not self.MAINNET_API_SECRET.get_secret_value():
+                raise ValueError("Dedicated server-side Mainnet Spot credentials are required.")
+            if self.TESTNET_ORDER_PREFLIGHT_ENABLED or self.TESTNET_SPOT_EXECUTION_ENABLED:
+                raise ValueError("Testnet execution flags cannot be mixed with Mainnet.")
+            if self.MAINNET_SPOT_EXECUTION_ENABLED and not self.MAINNET_ORDER_PREFLIGHT_ENABLED:
+                raise ValueError("Mainnet Spot execution requires Mainnet order preflight.")
+        elif self.MAINNET_ORDER_PREFLIGHT_ENABLED or self.MAINNET_SPOT_EXECUTION_ENABLED:
+            raise ValueError("Mainnet execution flags require TRADING_ENV=MAINNET.")
+
         return self
 
     @property
     def rest_base_url(self) -> str:
-        if self.TRADING_ENV is not TradingEnvironment.TESTNET:
-            raise ValueError("Binance Mainnet REST access is hard-blocked in this release.")
+        if self.TRADING_ENV is TradingEnvironment.MAINNET:
+            return "https://api.binance.com"
         return "https://testnet.binance.vision"
 
     @property
     def websocket_base_url(self) -> str:
-        if self.TRADING_ENV is not TradingEnvironment.TESTNET:
-            raise ValueError("Binance Mainnet WebSocket access is hard-blocked in this release.")
+        if self.TRADING_ENV is TradingEnvironment.MAINNET:
+            return "wss://stream.binance.com:9443/ws"
         return "wss://stream.testnet.binance.vision/ws"
 
     @property
