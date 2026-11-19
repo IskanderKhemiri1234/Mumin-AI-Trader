@@ -53,6 +53,7 @@ page.innerHTML=`
 <section class="mainnet-panel"><h3>دفتر الأوامر المحلي</h3><div id="mainnetOrders" class="mainnet-table"></div></section>
 <section class="mainnet-panel"><h3>أوامر Binance المفتوحة</h3><div id="mainnetExchangeOpenOrders" class="mainnet-table"></div></section>
 <section class="mainnet-panel"><h3>الصفقات الأخيرة</h3><div id="mainnetTrades" class="mainnet-table"></div></section>
+<section class="mainnet-panel"><h3>سجل موافقات الشات والتدقيق</h3><div id="mainnetApprovals" class="mainnet-table"></div></section>
 </div>`;
 const footer=main.querySelector(".footer");if(footer)main.insertBefore(page,footer);else main.appendChild(page);
 const $=id=>document.getElementById(id);
@@ -70,8 +71,8 @@ async function load(){if(busy)return;busy=true;$("mainnetRefresh").disabled=true
  $("mainnetState").textContent=status.status||"UNKNOWN";$("mainnetState").className="mainnet-status "+(enabled&&status.can_submit?"ok":"bad");
  $("mainnetStatusDetails").innerHTML=kv("Environment",status.environment||"—")+kv("Mode",status.mode||"—")+kv("Host",status.host||"—")+kv("Unresolved orders",status.unresolved_orders??"—")+kv("Halt reason",status.halt_reason||"—");
  $("mainnetSubmit").disabled=!enabled||!status.can_submit;
- if(!enabled){$("mainnetAccountDetails").innerHTML=kv("الحالة","مقفول من إعدادات الخادم");$("mainnetPnlDetails").innerHTML=kv("التداول الحقيقي","غير مفعّل");$("mainnetBalances").innerHTML="—";$("mainnetOrders").innerHTML="—";$("mainnetExchangeOpenOrders").innerHTML="—";$("mainnetTrades").innerHTML="—";setMessage("Mainnet مقفول حالياً. لا يمكن إرسال أي أمر.");return}
- const [account,pnl,orders,trades]=await Promise.all([api("/api/mainnet/account"),api("/api/mainnet/pnl"),api("/api/mainnet/orders?limit=20"),api("/api/mainnet/trades?limit=20")]);
+ if(!enabled){$("mainnetAccountDetails").innerHTML=kv("الحالة","مقفول من إعدادات الخادم");$("mainnetPnlDetails").innerHTML=kv("التداول الحقيقي","غير مفعّل");$("mainnetBalances").innerHTML="—";$("mainnetOrders").innerHTML="—";$("mainnetExchangeOpenOrders").innerHTML="—";$("mainnetTrades").innerHTML="—";$("mainnetApprovals").innerHTML="—";setMessage("Mainnet مقفول حالياً. لا يمكن إرسال أي أمر.");return}
+ const [account,pnl,orders,trades,approvals]=await Promise.all([api("/api/mainnet/account"),api("/api/mainnet/pnl"),api("/api/mainnet/orders?limit=20"),api("/api/mainnet/trades?limit=20"),api("/api/mainnet/approvals?limit=30")]);
  $("mainnetAccountDetails").innerHTML=kv("Account type",account.account_type)+kv("Spot trading permission",String(account.can_trade));
  $("mainnetPnlDetails").innerHTML=kv("Realized PnL",pnl.realized_pnl_quote??"—")+kv("Quote asset",pnl.quote_asset||"USDT")+kv("Ledger complete",String(pnl.complete))+kv("Unresolved items",(pnl.unresolved||[]).length);
  $("mainnetBalances").innerHTML=table(["Asset","Free","Locked"],(account.balances||[]).filter(x=>Number(x.free||0)+Number(x.locked||0)>0).map(x=>'<tr><td>'+escapeHtml(x.asset)+'</td><td>'+escapeHtml(x.free)+'</td><td>'+escapeHtml(x.locked)+'</td></tr>'));
@@ -80,6 +81,7 @@ async function load(){if(busy)return;busy=true;$("mainnetRefresh").disabled=true
  $("mainnetOrders").innerHTML=table(["Type","Symbol","Side","Qty","Price","State","Action"],orderRows.map(x=>{const active=["NEW","PARTIALLY_FILLED","SUBMITTING","UNKNOWN","CANCEL_PENDING","WORKING","PROTECTION_ARMED","EXECUTING","EXEC_STARTED"].includes(x.state);const isList=x.kind==="OPOCO";const id=isList?x.list_client_order_id:x.client_order_id;return '<tr><td>'+x.kind+'</td><td>'+escapeHtml(x.symbol)+'</td><td>'+escapeHtml(x.side)+'</td><td>'+escapeHtml(x.quantity)+'</td><td>'+escapeHtml(x.price||"—")+'</td><td>'+escapeHtml(x.state)+'</td><td>'+(active?(isList?'<button class="btn" data-mainnet-cancel-list="'+escapeHtml(id)+'" data-symbol="'+escapeHtml(x.symbol)+'">إلغاء الحماية</button>':'<button class="btn" data-mainnet-cancel="'+escapeHtml(id)+'" data-symbol="'+escapeHtml(x.symbol)+'">إلغاء</button>'):'—')+'</td></tr>'}));
  $("mainnetExchangeOpenOrders").innerHTML=table(["Symbol","Side","Original Qty","Executed","Price","Status"],(orders.exchange_open_orders||[]).map(x=>'<tr><td>'+escapeHtml(x.symbol)+'</td><td>'+escapeHtml(x.side)+'</td><td>'+escapeHtml(x.origQty)+'</td><td>'+escapeHtml(x.executedQty)+'</td><td>'+escapeHtml(x.price)+'</td><td>'+escapeHtml(x.status)+'</td></tr>'));
  $("mainnetTrades").innerHTML=table(["Symbol","Side","Qty","Price","Fee"],(trades.trades||[]).slice(0,20).map(x=>'<tr><td>'+escapeHtml(x.symbol)+'</td><td>'+((x.is_buyer)?"BUY":"SELL")+'</td><td>'+escapeHtml(x.quantity)+'</td><td>'+escapeHtml(x.price)+'</td><td>'+escapeHtml(x.commission)+" "+escapeHtml(x.commission_asset)+'</td></tr>'));
+ $("mainnetApprovals").innerHTML=table(["Approval ID","Type","State","Created","Error"],(approvals.approvals||[]).map(x=>'<tr><td>'+escapeHtml(String(x.approval_id||"").slice(0,12))+'</td><td>'+escapeHtml(x.proposal_type)+'</td><td>'+escapeHtml(x.state)+'</td><td>'+escapeHtml(x.created_at)+'</td><td>'+escapeHtml(x.last_error||"—")+'</td></tr>'));
  setMessage("تم تحديث بيانات حساب Binance Mainnet من الخادم.");
  }catch(error){setMessage(error.message,true);$("mainnetState").textContent="ERROR";$("mainnetState").className="mainnet-status bad"}finally{busy=false;$("mainnetRefresh").disabled=false}}
 $("mainnetRefresh").addEventListener("click",load);
