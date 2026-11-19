@@ -22,13 +22,13 @@ The responsive platform is served by FastAPI at `/dashboard`. It includes:
 - Automatic read-only refresh from the SQLite Paper ledger.
 - No browser-side Binance API credentials and no order-placement controls.
 
-The data API at `/api/dashboard` is protected by the server-side `DASHBOARD_ACCESS_TOKEN`. Set a long random token in the private server environment before using the dashboard. The token entered in the browser is held in session storage for the current tab only; it is not a Binance credential. The dashboard is a private operations console, not a public website. Do not expose it publicly without adding a proper identity provider, TLS, rate limiting, and deployment access controls.
+The data API at `/api/dashboard` is protected by the server-side `DASHBOARD_PASSWORD` (minimum 12 characters). Set the same strong password (at least 12 characters) in the private server environment before using the dashboard. The password entered in the browser is held in session storage for the current tab only; it is not a Binance credential. The dashboard is a private operations console, not a public website. Do not expose it publicly without adding a proper identity provider, TLS, rate limiting, and deployment access controls.
 
 The API reads `MUMIN_PAPER_DB_PATH`, defaulting to `data/mumin_public_paper.db`. Docker Compose's Paper worker writes to `/app/data/mumin_public_paper.db`, which matches this default. The API opens the SQLite database read-only and never creates or modifies ledger records.
 
 ## Android companion app
 
-The Android companion in `android/` is a WebView client for the **same-device live Termux operations API**. On launch it connects to `http://127.0.0.1:8000/dashboard`, so Termux's FastAPI service and Paper worker must be running on the same phone. The dashboard then reads the actual SQLite Paper ledger and loads Mumin Operations Chat from the API. The user enters the private `DASHBOARD_ACCESS_TOKEN` in the dashboard login; the token is not embedded in the APK. The app contains no Binance credentials and cannot enable exchange execution.
+The Android companion in `android/` is a WebView client for the always-on Termux node on the same Samsung phone. It connects to `http://127.0.0.1:8000/dashboard`; the `mumin-api` and `mumin-paper-engine` services run under `termux-services`, with Termux:Boot configured by `deploy/termux/install.sh`. No phone Termux node or external hosting is part of this architecture. The dashboard then reads the actual SQLite Paper ledger and loads Mumin Operations Chat from the API. The user enters the exact `DASHBOARD_PASSWORD` configured on the selected server in the dashboard login; the password is not embedded in the APK. The app contains no Binance credentials and cannot enable exchange execution. The password used for dashboard login is not the Binance API key or secret.
 
 - GitHub Actions workflow: `.github/workflows/build-apk.yml`.
 - Trigger: changes to `android/**`, workflow dispatch, or pull requests that touch the Android app.
@@ -36,7 +36,7 @@ The Android companion in `android/` is a WebView client for the **same-device li
 - The CI artifact is a debug-signed installable APK for supervised device testing; it is not a Play Store release or a privately release-signed production package.
 - The app permits HTTP only to loopback hosts `127.0.0.1` and `localhost`; all remote server connections must use HTTPS.
 - The dashboard includes Paper-only controls. Backend execution gates remain authoritative; this Android client does not enable Testnet or Mainnet execution.
-- If Termux is stopped or the local API is unavailable, the live dashboard cannot load. The optional embedded demo is synthetic and must not be confused with live account or Paper ledger data.
+- If Termux services are stopped, the dashboard cannot load. The phone is the server; Termux:Boot and the service supervisor keep the API and Paper engine running after restart. The optional embedded demo is synthetic and must not be confused with live account or Paper ledger data.
 
 ## Run locally
 
@@ -45,19 +45,19 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env
-# Set DASHBOARD_ACCESS_TOKEN to a long random secret in .env.
+# Set DASHBOARD_PASSWORD to a long random secret in .env.
 uvicorn mumin_trader.main:app --reload
 ```
 
 - Dashboard: http://127.0.0.1:8000/dashboard
 - Health: http://127.0.0.1:8000/health
-- Read-only API: http://127.0.0.1:8000/api/dashboard (requires `X-Dashboard-Token` header)
+- Read-only API: http://127.0.0.1:8000/api/dashboard (requires `X-Dashboard-Password` header)
 
 ## Run with Docker
 
 ```bash
 cp .env.example .env
-# Set DASHBOARD_ACCESS_TOKEN in the private .env file.
+# Set DASHBOARD_PASSWORD in the private .env file.
 docker compose up --build -d
 docker compose logs -f
 ```

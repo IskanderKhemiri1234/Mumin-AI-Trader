@@ -95,19 +95,26 @@ def test_missing_ledger_returns_actionable_alert(tmp_path: Path) -> None:
     assert snapshot["alerts"][0]["code"] == "LEDGER_MISSING"
 
 
-def test_chat_api_requires_dashboard_token(monkeypatch: pytest.MonkeyPatch, paper_ledger: Path) -> None:
+def test_chat_api_requires_shared_dashboard_password(monkeypatch: pytest.MonkeyPatch, paper_ledger: Path) -> None:
     from mumin_trader.main import app
 
-    monkeypatch.setenv("DASHBOARD_ACCESS_TOKEN", "test-dashboard-token-123456789")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "test-dashboard-password-123456")
     monkeypatch.setenv("MUMIN_PAPER_DB_PATH", str(paper_ledger))
     client = TestClient(app)
 
     denied = client.post("/api/operations-chat", json={"message": "engine status"})
     assert denied.status_code == 401
 
+    legacy = client.post(
+        "/api/operations-chat",
+        headers={"X-Dashboard-Token": "test-dashboard-password-123456"},
+        json={"message": "engine status"},
+    )
+    assert legacy.status_code == 401
+
     response = client.post(
         "/api/operations-chat",
-        headers={"X-Dashboard-Token": "test-dashboard-token-123456789"},
+        headers={"X-Dashboard-Password": "test-dashboard-password-123456"},
         json={"message": "حالة المحرك"},
     )
     assert response.status_code == 200
@@ -119,3 +126,6 @@ def test_chat_api_requires_dashboard_token(monkeypatch: pytest.MonkeyPatch, pape
     asset = client.get("/operations-chat.js")
     assert asset.status_code == 200
     assert "api/operations-chat" in asset.text
+    assert "X-Dashboard-Password" in asset.text
+    assert "mumin_dashboard_password" in asset.text
+    assert "X-Dashboard-Token" not in asset.text

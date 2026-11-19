@@ -6,11 +6,22 @@ on:
     tags: ["v*"]
     paths:
       - "android/**"
+      - "src/**"
+      - "dashboard/**"
+      - "config/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - "Dockerfile"
       - ".github/workflows/build-apk.yml"
   pull_request:
     branches: [main, 'feat/**']
     paths:
       - "android/**"
+      - "src/**"
+      - "dashboard/**"
+      - "config/**"
+      - "scripts/**"
+      - "pyproject.toml"
       - ".github/workflows/build-apk.yml"
   workflow_dispatch:
 
