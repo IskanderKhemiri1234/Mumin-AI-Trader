@@ -80,8 +80,18 @@ class MainnetSignalLedger:
                     desired_state TEXT NOT NULL DEFAULT 'RUNNING',
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS mainnet_worker_runtime (
+                    id INTEGER PRIMARY KEY CHECK(id=1),
+                    supervisor_pid INTEGER,
+                    worker_pid INTEGER,
+                    supervisor_heartbeat_at TEXT,
+                    worker_heartbeat_at TEXT,
+                    updated_at TEXT NOT NULL
+                );
                 INSERT OR IGNORE INTO mainnet_worker_control(id, desired_state, updated_at)
                 VALUES (1, 'RUNNING', '1970-01-01T00:00:00+00:00');
+                INSERT OR IGNORE INTO mainnet_worker_runtime(id, updated_at)
+                VALUES (1, '1970-01-01T00:00:00+00:00');
                 """
             )
 
@@ -120,6 +130,25 @@ class MainnetSignalLedger:
                 (desired_state, self._now()),
             )
         self.audit("MAINNET_SIGNAL_DESIRED_STATE_CHANGED", actor, {"desired_state": desired_state})
+
+    def supervisor_heartbeat(self, pid: int, worker_pid: int | None) -> None:
+        now = self._now()
+        with self._connect() as db:
+            db.execute(
+                """UPDATE mainnet_worker_runtime
+                   SET supervisor_pid=?,worker_pid=?,supervisor_heartbeat_at=?,updated_at=?
+                   WHERE id=1""",
+                (pid, worker_pid, now, now),
+            )
+
+    def worker_heartbeat(self, pid: int) -> None:
+        now = self._now()
+        with self._connect() as db:
+            db.execute(
+                """UPDATE mainnet_worker_runtime
+                   SET worker_pid=?,worker_heartbeat_at=?,updated_at=? WHERE id=1""",
+                (pid, now, now),
+            )
 
     def record_candidate(self, candidate: Any, bucket: str, disposition: str, detail: str = "") -> bool:
         with self._connect() as db:
@@ -373,6 +402,8 @@ class MainnetSignalWorker:
                         {"error_type": type(exc).__name__, "reason": str(exc)[:500]},
                     )
                     print(f"Mainnet signal cycle failed closed: {type(exc).__name__}", flush=True)
+                finally:
+                    self.ledger.worker_heartbeat(os.getpid())
                 elapsed = asyncio.get_running_loop().time() - started
                 await asyncio.sleep(max(1.0, self.interval_seconds - elapsed))
         finally:
