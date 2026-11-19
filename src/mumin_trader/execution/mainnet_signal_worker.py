@@ -8,7 +8,7 @@ import sqlite3
 import uuid
 
 import httpx
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 from typing import Any
@@ -183,13 +183,24 @@ class MainnetSignalLedger:
             )
             return cursor.rowcount == 1
 
+    def claim_submission(self, symbol: str, bucket: str, client_id: str) -> bool:
+        with self._connect() as db:
+            cursor = db.execute(
+                """UPDATE mainnet_signal_events
+                   SET disposition='SUBMISSION_STARTED',order_list_client_id=?,detail=?
+                   WHERE symbol=? AND candle_bucket=?
+                     AND order_list_client_id IS NULL AND disposition='SHADOW_PROPOSAL'""",
+                (client_id, "Durable one-attempt-per-symbol-per-candle claim.", symbol, bucket),
+            )
+            return cursor.rowcount == 1
+
     def attach_order(self, symbol: str, bucket: str, client_id: str, detail: str) -> None:
         with self._connect() as db:
             db.execute(
                 """UPDATE mainnet_signal_events
                    SET disposition='ORDER_SUBMITTED', order_list_client_id=?, detail=?
-                   WHERE symbol=? AND candle_bucket=?""",
-                (client_id, detail[:1000], symbol, bucket),
+                   WHERE symbol=? AND candle_bucket=? AND order_list_client_id=?""",
+                (client_id, detail[:1000], symbol, bucket, client_id),
             )
 
 
@@ -220,14 +231,23 @@ class MainnetSignalWorker:
             if os.getenv("MAINNET_AUTONOMOUS_CONFIRMATION", "") != AUTONOMOUS_CONFIRMATION:
                 raise RuntimeError("Autonomous Mainnet execution requires its separate exact confirmation phrase.")
         self.actor = f"mainnet-signal-worker-{os.getpid()}"
+        requested_symbols = {
+            item.strip().upper()
+            for item in os.getenv("MAINNET_SIGNAL_SYMBOLS", "BTCUSDT").split(",")
+            if item.strip()
+        }
+        allowed_symbols = requested_symbols.intersection(settings.watchlist_symbols).intersection(CORE_SYMBOLS)
+        if not allowed_symbols:
+            raise ValueError("Mainnet signal symbols must be in the configured Spot watchlist.")
+        entry_interval = os.getenv("MAINNET_SIGNAL_INTERVAL", "15m").strip().lower()
         self.scanner = MarketScanner(
-            allowed_symbols=set(settings.watchlist_symbols).intersection(CORE_SYMBOLS),
+            allowed_symbols=allowed_symbols,
             quote_asset=settings.QUOTE_ASSET,
             min_quote_volume=Decimal("1000000"),
             max_spread_bps=Decimal("8"),
-            interval="5m",
+            interval=entry_interval,
             candle_limit=100,
-            max_symbols=8,
+            max_symbols=len(allowed_symbols),
             min_expected_move_bps=Decimal("35"),
         )
         # Strategy scanning uses the fixed Binance public Mainnet host, with no API key.
@@ -249,10 +269,19 @@ class MainnetSignalWorker:
     def request_stop(self, _signum: int, _frame: object) -> None:
         self.stop_requested = True
 
-    @staticmethod
-    def _bucket(now: datetime) -> str:
-        minute = (now.minute // 5) * 5
-        return now.replace(minute=minute, second=0, microsecond=0).isoformat()
+    def _bucket(self, now: datetime) -> str:
+        interval = self.scanner.interval
+        if interval.endswith("m"):
+            minutes = int(interval[:-1])
+        elif interval.endswith("h"):
+            minutes = int(interval[:-1]) * 60
+        else:
+            raise ValueError("Unsupported Mainnet signal candle interval.")
+        if minutes <= 0 or 1440 % minutes != 0:
+            raise ValueError("Mainnet signal interval must divide a UTC day.")
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        slot = ((now.hour * 60 + now.minute) // minutes) * minutes
+        return (start + timedelta(minutes=slot)).isoformat()
 
     @staticmethod
     def _floor_step(value: Decimal, step: Decimal) -> Decimal:
@@ -266,7 +295,7 @@ class MainnetSignalWorker:
             raise ValueError("Exchange PRICE_FILTER tickSize is invalid.")
         return (value / tick).to_integral_value(rounding=ROUND_DOWN) * tick
 
-    async def _submit_protected(self, candidate: Any, bucket: str) -> None:
+    async def _submit_protected(self, candidate: Any, bucket: str) -> bool:
         if self.execution is None:
             raise RuntimeError("Execution adapter is unavailable in SHADOW mode.")
         symbol = candidate.symbol
@@ -292,19 +321,35 @@ class MainnetSignalWorker:
         working = self._floor_tick(candidate.bid, tick)
         if working <= 0:
             raise SpotExecutionError("Strategy candidate has no valid executable bid price.")
-        quantity = self._floor_step(self.settings.MIN_TRADE_ALLOCATION_USD / working, step)
-        if quantity <= 0:
-            raise SpotExecutionError("Configured allocation is below the exchange minimum quantity.")
         take_profit = self._floor_tick(working * Decimal("1.0125"), tick)
         stop = self._floor_tick(working * Decimal("0.995"), tick)
         stop_limit = self._floor_tick(stop * Decimal("0.999"), tick)
         if not (take_profit > candidate.last_price > stop and working < candidate.last_price):
             raise SpotExecutionError("Live quote moved outside the strategy's protected-entry price envelope.")
+        max_risk_usd = (
+            self.settings.MAX_CAPITAL_ALLOCATION_USD
+            * self.settings.MAX_RISK_PER_TRADE_PERCENT / Decimal("100")
+        )
+        risk_limited_quantity = max_risk_usd / (working - stop)
+        allocation_limited_quantity = self.settings.MAX_TRADE_ALLOCATION_USD / working
+        quantity = self._floor_step(min(risk_limited_quantity, allocation_limited_quantity), step)
+        notional = quantity * working
+        estimated_risk = quantity * (working - stop)
+        if quantity <= 0 or notional < self.settings.MIN_TRADE_ALLOCATION_USD:
+            raise SpotExecutionError("Risk and allocation limits cannot satisfy the exchange minimum notional.")
+        if notional > self.settings.MAX_TRADE_ALLOCATION_USD or estimated_risk > max_risk_usd:
+            raise SpotExecutionError("Protected entry exceeds configured allocation or per-trade risk.")
 
         list_id = "m" + uuid.uuid4().hex
         working_id = "m" + uuid.uuid4().hex
         above_id = "m" + uuid.uuid4().hex
         below_id = "m" + uuid.uuid4().hex
+        if not self.ledger.claim_submission(symbol, bucket, list_id):
+            self.ledger.audit(
+                "SIGNAL_ALREADY_CLAIMED", self.actor,
+                {"symbol": symbol, "candle_bucket": bucket, "order_list_client_id": list_id},
+            )
+            return False
         response = await self.execution.opoco.place_buy_opoco(
             symbol=symbol,
             quantity=quantity,
@@ -327,8 +372,10 @@ class MainnetSignalWorker:
             "PROTECTED_OPOCO_SUBMITTED",
             self.actor,
             {"symbol": symbol, "order_list_client_id": list_id, "working_price": str(working),
-             "quantity": str(quantity), "strategy_score": candidate.strategy_score},
+             "quantity": str(quantity), "estimated_risk_usd": str(estimated_risk),
+             "strategy_score": candidate.strategy_score},
         )
+        return True
 
     async def run_once(self) -> dict[str, Any]:
         if self.autonomous:
@@ -370,8 +417,7 @@ class MainnetSignalWorker:
             elif approved:
                 candidate = approved[0]
                 try:
-                    await self._submit_protected(candidate, bucket)
-                    orders = 1
+                    orders = int(await self._submit_protected(candidate, bucket))
                 except Exception as exc:
                     self.ledger.audit(
                         "PROTECTED_ENTRY_REJECTED", self.actor,
