@@ -33,7 +33,7 @@ The Android companion in `android/` is a WebView client for the always-on Termux
 - GitHub Actions workflow: `.github/workflows/build-apk.yml`.
 - Trigger: changes to `android/**`, workflow dispatch, or pull requests that touch the Android app.
 - Output artifact: `Mumin-AI-Trader-APK`, containing `Mumin-AI-Trader.apk` and its SHA-256 checksum.
-- The CI artifact is a debug-signed installable APK for supervised device testing; it is not a Play Store release or a privately release-signed production package.
+- Android CI compiles the app for validation but does not publish or distribute a Debug APK. The distributable package is produced only by `.github/workflows/release-android.yml` as a signed Release APK using the existing stable signing keystore and certificate verification.
 - The app permits HTTP only to loopback hosts `127.0.0.1` and `localhost`; all remote server connections must use HTTPS.
 - The dashboard includes Paper-only controls. Backend execution gates remain authoritative; this Android client does not enable Testnet or Mainnet execution.
 - If Termux services are stopped, the dashboard cannot load. The phone is the server; Termux:Boot and the service supervisor keep the API and Paper engine running after restart. The optional embedded demo is synthetic and must not be confused with live account or Paper ledger data.

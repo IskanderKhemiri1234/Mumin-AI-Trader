@@ -16,7 +16,7 @@ Mumin Operations Chat is a bilingual Arabic/English operations assistant served 
 - Chat requests go only to the same-origin Mumin API.
 - The backend reads the configured Paper SQLite database using SQLite `mode=ro` and enables `PRAGMA query_only=ON`.
 - The chat does not write to SQLite, create commands, pause/resume the engine, or submit BUY/SELL/cancel orders.
-- Dashboard access is protected by the existing `X-Dashboard-Token`.
+- Dashboard and operations chat use the unified `X-Dashboard-Password` header, backed by the server-side `DASHBOARD_PASSWORD`.
 
 ## Language understanding
 
@@ -28,7 +28,7 @@ This deliberately keeps the feature small, auditable, dependency-free, and usabl
 
 - `POST /api/operations-chat`
 - JSON body: `{"message":"engine status"}`
-- Header: `X-Dashboard-Token: <dashboard token>`
+- Header: `X-Dashboard-Password: <dashboard password>`
 - Maximum message length: 500 characters.
 
 The response includes a localized answer, detected intent, a read-only flag, an explicit `external_services_used=false` marker, and the underlying snapshot with alerts and recent events.

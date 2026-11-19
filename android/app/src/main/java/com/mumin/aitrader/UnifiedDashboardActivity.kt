@@ -108,28 +108,17 @@ class UnifiedDashboardActivity : Activity() {
             text = "تحديث التطبيق"
             setOnClickListener { checkForUpdates() }
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        actions.addView(Button(this).apply {
-            text = "العرض التجريبي المحلي"
-            setOnClickListener { loadLocalDemo() }
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         connectionPanel.addView(actions)
         connectionStatus = TextView(this).apply {
-            text = "الوضع الحالي: عرض تجريبي محلي دون خادم. البيانات اصطناعية وليست من Binance."
+            text = "جارٍ الاتصال تلقائياً بخادم S21 المحلي ودفتر Paper الفعلي…"
             textSize = 11f
             setTextColor(MUTED)
             setPadding(0, dp(6), 0, 0)
         }
         connectionPanel.addView(connectionStatus)
-        connectionPanel.visibility = View.GONE
-        header.addView(Button(this).apply {
-            text = "اتصال بالخادم (اختياري)"
-            setOnClickListener {
-                connectionPanel.visibility =
-                    if (connectionPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-            }
-        }, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ))
+        // The S21 Termux node is the production data source. Keep connection
+        // controls visible and never present synthetic demo data as the default.
+        connectionPanel.visibility = View.VISIBLE
         root.addView(header)
         root.addView(connectionPanel)
 
@@ -208,7 +197,7 @@ class UnifiedDashboardActivity : Activity() {
         remoteScheme = Uri.parse(normalized).scheme
         remotePort = Uri.parse(normalized).port.takeIf { it > 0 }
             ?: if (remoteScheme == "https") 443 else 8000
-        loadUnifiedDashboard(normalized)
+        verifyServerHealthThenLoad(normalized)
     }
 
     private fun normalizeServerUrl(value: String): String? {
@@ -230,24 +219,44 @@ class UnifiedDashboardActivity : Activity() {
     private fun getSavedServerUrl(): String =
         getPreferences(MODE_PRIVATE).getString(SERVER_KEY, "").orEmpty()
 
-    private fun loadLocalDemo() {
-        remoteHost = null
-        remotePort = 443
-        remoteScheme = null
-        webView.visibility = View.VISIBLE
-        connectionStatus.text = "العرض التجريبي المحلي · بيانات اصطناعية فقط · لا اتصال بخادم أو Binance."
-        runCatching {
-            assets.open("dashboard/index.html").bufferedReader(Charsets.UTF_8).use { it.readText() }
-        }.onSuccess { html ->
-            webView.loadDataWithBaseURL(
-                "https://appassets.androidplatform.net/assets/dashboard/index.html",
-                html,
-                "text/html",
-                "UTF-8",
-                null
-            )
-        }.onFailure {
-            connectionStatus.text = "تعذر تحميل لوحة العرض المحلية المضمّنة."
+    private fun verifyServerHealthThenLoad(baseUrl: String) {
+        webView.visibility = View.INVISIBLE
+        connectionStatus.text = "جارٍ التحقق من صحة خادم S21 وبيئة Paper قبل فتح اللوحة…"
+        io.execute {
+            val result = runCatching {
+                val connection = URL("$baseUrl/health").openConnection() as HttpURLConnection
+                try {
+                    connection.requestMethod = "GET"
+                    connection.connectTimeout = 5000
+                    connection.readTimeout = 5000
+                    connection.useCaches = false
+                    val code = connection.responseCode
+                    if (code != HttpURLConnection.HTTP_OK) {
+                        error("Health endpoint returned HTTP $code")
+                    }
+                    val payload = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    val health = JSONObject(payload)
+                    val status = health.optString("status")
+                    val execution = health.optString("execution")
+                    if (status != "ok" ||
+                        execution != "PAPER_ONLY; TESTNET_DISABLED; MAINNET_BLOCKED"
+                    ) {
+                        error("Server safety mode is not the expected Paper-only configuration.")
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+            }
+            runOnUiThread {
+                result.onSuccess {
+                    connectionStatus.text = "خادم S21 سليم · Paper فقط · Testnet وMainnet مغلقان."
+                    loadUnifiedDashboard(baseUrl)
+                }.onFailure { error ->
+                    webView.visibility = View.INVISIBLE
+                    connectionStatus.text =
+                        "تعذر التحقق من خادم S21 أو إعدادات الأمان: ${error.message ?: "اتصال غير متاح"}. لن تُعرض بيانات تجريبية."
+                }
+            }
         }
     }
 
