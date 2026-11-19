@@ -19,7 +19,7 @@ class TradingMode(str, Enum):
     LIVE = "LIVE"
 
 
-MAINNET_CONFIRMATION_PHRASE = "I_ACCEPT_REAL_SPOT_TRADING_RISK"
+MAINNET_CONFIRMATION_PHRASE = "I_ACKNOWLEDGE_REAL_MONEY_SPOT_TRADING"
 
 
 class Settings(BaseSettings):
@@ -41,8 +41,8 @@ class Settings(BaseSettings):
     MAINNET_SPOT_EXECUTION_ENABLED: bool = False
     MAINNET_CONFIRMATION: str = ""
     MAINNET_LEGAL_ELIGIBILITY_CONFIRMED: bool = False
-    MAINNET_API_KEY: SecretStr = SecretStr("")
-    MAINNET_API_SECRET: SecretStr = SecretStr("")
+    BINANCE_MAINNET_API_KEY: SecretStr = SecretStr("")
+    BINANCE_MAINNET_API_SECRET: SecretStr = SecretStr("")
     MAINNET_ORDER_DATABASE_URL: str = "sqlite:///./data/mumin_mainnet_spot.db"
 
     TESTNET_ORDER_PREFLIGHT_ENABLED: bool = False
@@ -118,7 +118,7 @@ class Settings(BaseSettings):
                 raise ValueError("The exact Mainnet risk confirmation phrase is required.")
             if not self.MAINNET_LEGAL_ELIGIBILITY_CONFIRMED:
                 raise ValueError("Mainnet legal and account eligibility must be explicitly confirmed.")
-            if not self.MAINNET_API_KEY.get_secret_value() or not self.MAINNET_API_SECRET.get_secret_value():
+            if not self.BINANCE_MAINNET_API_KEY.get_secret_value() or not self.BINANCE_MAINNET_API_SECRET.get_secret_value():
                 raise ValueError("Dedicated server-side Mainnet Spot credentials are required.")
             if self.TESTNET_ORDER_PREFLIGHT_ENABLED or self.TESTNET_SPOT_EXECUTION_ENABLED:
                 raise ValueError("Testnet execution flags cannot be mixed with Mainnet.")
