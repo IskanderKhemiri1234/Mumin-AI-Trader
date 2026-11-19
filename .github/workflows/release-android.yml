@@ -122,7 +122,7 @@ jobs:
           # Normalize mobile clipboard artifacts without exposing the secret.
           value = value.lstrip("\ufeff")
           value = re.sub(r"(?m)^\s*`{3}[^\n]*$|^\s*`{3}\s*$", "", value)
-          normalized = value.strip().replace("\\n", "").replace("\\r", "")
+          normalized = value.strip().replace("\n", "").replace("\\r", "")
           normalized = re.sub(r"^data:[^,]*;base64,", "", normalized, flags=re.I)
           if normalized.lower().startswith("base64:"):
               normalized = normalized.split(":", 1)[1]
@@ -279,8 +279,8 @@ jobs:
           "$BUILD_TOOLS/apksigner" verify --verbose "$APK"
           "$BUILD_TOOLS/aapt" dump badging "$APK" | grep -q "package: name='com.mumin.aitrader'"
           BASELINE_APK="$RUNNER_TEMP/Mumin-AI-Trader-v1.4.5.apk"
-          curl --fail --location --retry 3 --retry-delay 2 \\
-            "https://github.com/IskanderKhemiri1234/Mumin-AI-Trader/releases/download/v1.4.5/Mumin-AI-Trader.apk" \\
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://github.com/IskanderKhemiri1234/Mumin-AI-Trader/releases/download/v1.4.5/Mumin-AI-Trader.apk" \
             --output "$BASELINE_APK"
           "$BUILD_TOOLS/apksigner" verify --verbose "$BASELINE_APK"
           "$BUILD_TOOLS/aapt" dump badging "$BASELINE_APK" | grep -q "package: name='com.mumin.aitrader'"
@@ -291,12 +291,12 @@ jobs:
           test -n "$KEY_CERT_SHA256"
           test -n "$APK_CERT_SHA256"
           if [ "$BASELINE_CERT_SHA256" != "$KEY_CERT_SHA256" ] || [ "$KEY_CERT_SHA256" != "$APK_CERT_SHA256" ]; then
-            printf "Release signer differs from the v1.4.5 baseline or configured keystore.\\n" >&2
+            printf "Release signer differs from the v1.4.5 baseline or configured keystore.\n" >&2
             exit 1
           fi
           mkdir -p dist
           cp "$APK" dist/Mumin-AI-Trader.apk
-          printf 'SHA-256 certificate fingerprint: %s\\n' "$APK_CERT_SHA256" | tee dist/SIGNING-CERTIFICATE-SHA256.txt
+          printf 'SHA-256 certificate fingerprint: %s\n' "$APK_CERT_SHA256" | tee dist/SIGNING-CERTIFICATE-SHA256.txt
           sha256sum dist/Mumin-AI-Trader.apk | tee dist/SHA256SUMS.txt
 
       - name: Determine release tag
