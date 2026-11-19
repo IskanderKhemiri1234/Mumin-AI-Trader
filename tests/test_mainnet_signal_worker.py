@@ -151,7 +151,8 @@ def test_unknown_submission_outcome_is_durable_and_never_reclaimed(tmp_path) -> 
     assert row["detail"] == "mock timeout after submit"
 
 
-def test_worker_scans_all_eight_configured_spot_symbols_and_prioritizes_best_signal(tmp_path, monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_worker_scans_all_eight_configured_spot_symbols_and_prioritizes_best_signal(tmp_path, monkeypatch) -> None:
     symbols = "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,AVAXUSDT,LINKUSDT"
     monkeypatch.setenv("MAINNET_SIGNAL_SYMBOLS", symbols)
     worker = MainnetSignalWorker(
@@ -174,6 +175,5 @@ def test_worker_scans_all_eight_configured_spot_symbols_and_prioritizes_best_sig
         assert selected.symbol == "SOLUSDT"
         assert selected.strategy_score == 91
     finally:
-        import asyncio
-        asyncio.run(worker.market.close())
-        asyncio.run(worker._market_http.aclose())
+        await worker.market.close()
+        await worker._market_http.aclose()
