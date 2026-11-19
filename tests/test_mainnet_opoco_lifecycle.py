@@ -194,3 +194,52 @@ async def test_take_profit_fill_completes_the_protective_order_list(tmp_path) ->
         assert executor.opoco.store.get("mumin-list-0001")["state"] == "COMPLETE"
     finally:
         await executor.close()
+
+
+@pytest.mark.asyncio
+async def test_full_account_reconciliation_recovers_protection_after_restart(tmp_path) -> None:
+    path = tmp_path / "full-reconcile.sqlite3"
+    first = _executor(path, _transport())
+    first.opoco.store.claim("mumin-list-0001")
+    first.opoco.store.update("mumin-list-0001", state="WORKING")
+    await first.close()
+
+    second = _executor(path, _transport())
+
+    async def account_snapshot():
+        return {
+            "balances": [
+                {"asset": "USDT", "free": "70", "locked": "0"},
+                {"asset": "BTC", "free": "0", "locked": "0"},
+                {"asset": "BNB", "free": "0", "locked": "0"},
+            ]
+        }
+
+    original_request = second._request
+
+    async def request_with_open_orders(method, endpoint, params=None, *, signed=False):
+        if endpoint == "/api/v3/openOrders":
+            return [
+                {"symbol": "BTCUSDT", "clientOrderId": "mumin-tp-0001", "status": "NEW"},
+                {"symbol": "BTCUSDT", "clientOrderId": "mumin-sl-0001", "status": "NEW"},
+            ]
+        return await original_request(method, endpoint, params, signed=signed)
+
+    async def no_trade_history():
+        return {}
+
+    second._account = account_snapshot
+    second._request = request_with_open_orders
+    second.sync_trade_history = no_trade_history
+    second.store.realized_pnl_report = lambda _quote: {"complete": True, "unresolved": []}
+    second.store.reconcile_account_balances = lambda *_args, **_kwargs: []
+    second.store.update_risk_state = lambda **_kwargs: None
+    second.store.unmatched_trade_order_ids = lambda: []
+    second.store.order_fill_quantity_discrepancies = lambda: []
+    try:
+        result = await second.reconcile()
+        assert result["discrepancies"] == []
+        assert result["halted"] is False
+        assert second.opoco.store.get("mumin-list-0001")["state"] == "PROTECTION_ARMED"
+    finally:
+        await second.close()
