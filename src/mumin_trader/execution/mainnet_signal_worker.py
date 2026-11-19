@@ -270,6 +270,15 @@ class MainnetSignalWorker:
         if self.execution is None:
             raise RuntimeError("Execution adapter is unavailable in SHADOW mode.")
         symbol = candidate.symbol
+        if candidate.stop_loss_price is None or candidate.take_profit_price is None or candidate.last_price <= 0:
+            raise SpotExecutionError("Strategy approved the signal without complete entry/exit price levels.")
+        strategy_stop_percent = (candidate.last_price - candidate.stop_loss_price) / candidate.last_price * Decimal("100")
+        strategy_target_percent = (candidate.take_profit_price - candidate.last_price) / candidate.last_price * Decimal("100")
+        if (
+            abs(strategy_stop_percent - Decimal("0.50")) > Decimal("0.02")
+            or abs(strategy_target_percent - Decimal("1.25")) > Decimal("0.02")
+        ):
+            raise SpotExecutionError("Strategy exit levels do not match the protected Mainnet risk policy.")
         metadata = await self.execution._exchange_symbol(symbol)
         filters = {
             item.get("filterType"): item
