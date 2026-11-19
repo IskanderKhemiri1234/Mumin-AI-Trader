@@ -840,9 +840,36 @@ async def mainnet_signal_worker_status(
             "SELECT event_type,actor,detail_json,created_at "
             "FROM mainnet_worker_audit ORDER BY id DESC LIMIT 20"
         ).fetchall()]
+        runtime_row = db.execute(
+            "SELECT supervisor_pid,worker_pid,supervisor_heartbeat_at,worker_heartbeat_at "
+            "FROM mainnet_worker_runtime WHERE id=1"
+        ).fetchone()
+    runtime = dict(runtime_row) if runtime_row else {}
+    def heartbeat_age(value: str | None) -> float | None:
+        if not value:
+            return None
+        try:
+            stamp = datetime.fromisoformat(value)
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            return (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds()
+        except (TypeError, ValueError):
+            return None
+    supervisor_age = heartbeat_age(runtime.get("supervisor_heartbeat_at"))
+    worker_age = heartbeat_age(runtime.get("worker_heartbeat_at"))
+    supervisor_online = supervisor_age is not None and -5 <= supervisor_age <= 30
+    worker_online = worker_age is not None and -5 <= worker_age <= 90
+    desired = ledger.desired_state()
     return {
-        "desired_state": ledger.desired_state(),
+        "desired_state": desired,
         "mode": "AUTONOMOUS_PROTECTED_OPOCO" if os.getenv("MAINNET_AUTONOMOUS_EXECUTION_ENABLED", "").lower() in {"1", "true", "yes", "on"} else "SHADOW_ONLY",
+        "status": "online" if supervisor_online or worker_online else "offline",
+        "supervisor_status": "online" if supervisor_online else "offline",
+        "worker_status": "running" if worker_online else "starting" if supervisor_online and desired == "RUNNING" else "stopped" if desired == "STOPPED" else "offline",
+        "supervisor_heartbeat_age_seconds": supervisor_age,
+        "worker_heartbeat_age_seconds": worker_age,
+        "supervisor_pid": runtime.get("supervisor_pid"),
+        "worker_pid": runtime.get("worker_pid"),
         "signals": signals,
         "events": events,
     }
