@@ -12,6 +12,10 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+
+def _enabled(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
 from mumin_trader.execution.mainnet_signal_worker import MainnetSignalLedger, _sqlite_path  # noqa: E402
 
 
@@ -90,9 +94,18 @@ class MainnetWorkerSupervisor:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as exc:
                 raise RuntimeError("Another Mainnet worker supervisor already holds the process lock.") from exc
+            autonomous = _enabled(os.getenv("MAINNET_AUTONOMOUS_EXECUTION_ENABLED"))
+            boot_resume = _enabled(os.getenv("MAINNET_AUTONOMOUS_BOOT_RESUME_ENABLED"))
+            if autonomous and not boot_resume and self.ledger.desired_state() == "RUNNING":
+                self.ledger.set_desired_state("STOPPED", self.instance_id)
+                self._record(
+                    "AUTONOMOUS_BOOT_RESUME_BLOCKED",
+                    {"reason": "Fresh dashboard confirmation is required after supervisor restart."},
+                )
             self._record(
                 "MAINNET_SUPERVISOR_STARTED",
-                {"pid": os.getpid(), "desired_state": self.ledger.desired_state()},
+                {"pid": os.getpid(), "desired_state": self.ledger.desired_state(),
+                 "autonomous": autonomous, "boot_resume_enabled": boot_resume},
             )
             started_at = time.monotonic()
             try:
