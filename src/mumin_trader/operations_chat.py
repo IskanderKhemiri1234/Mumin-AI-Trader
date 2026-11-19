@@ -358,13 +358,25 @@ def read_mainnet_operations_snapshot() -> dict[str, Any]:
             1 for item in orders
             if item["state"] in {"SUBMITTING", "UNKNOWN", "NEW", "PARTIALLY_FILLED", "CANCEL_PENDING"}
         )
+        age_seconds = None
+        if latest:
+            try:
+                reconciled_at = datetime.fromisoformat(str(latest["created_at"]))
+                if reconciled_at.tzinfo is None:
+                    reconciled_at = reconciled_at.replace(tzinfo=timezone.utc)
+                age_seconds = max(0, int((datetime.now(timezone.utc) - reconciled_at).total_seconds()))
+            except ValueError:
+                age_seconds = None
+        is_halted = bool(control["halted"]) if control else True
+        mainnet_status = "HALTED" if is_halted else "READY" if age_seconds is not None and age_seconds <= 90 else "STALE"
         return {
-            "status": "HALTED" if control and control["halted"] else "READY" if latest else "AWAITING_RECONCILIATION",
+            "status": mainnet_status,
             "execution_enabled": True,
             "database_status": "ready",
-            "halted": bool(control["halted"]) if control else True,
+            "halted": is_halted,
             "halt_reason": str(control["halt_reason"]) if control else "CONTROL_ROW_MISSING",
             "last_reconciliation": latest["created_at"] if latest else None,
+            "last_reconciliation_age_seconds": age_seconds,
             "balances": balances,
             "open_orders": open_orders,
             "discrepancies": discrepancies,
