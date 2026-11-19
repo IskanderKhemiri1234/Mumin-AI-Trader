@@ -1,6 +1,6 @@
 # Binance Spot Mainnet operations
 
-> **Not a release checklist.** Mainnet is disabled by default. Do not enable these settings until the Mainnet signal worker, bot supervisor, end-to-end exchange tests, independent review, and signed Android release are complete.
+> **Not a release checklist.** Mainnet is disabled by default. The independent signal worker and supervisor are implemented on the feature branch but still require passing CI, sustained Shadow evaluation, independent review, verified Binance account permissions, and a signed Android release before any live activation.
 
 ## Isolation and credentials
 
@@ -26,6 +26,33 @@ The following are intentionally disabled in `.env.example`:
 - `MAINNET_ORDER_DATABASE_URL=sqlite:///./data/mumin_mainnet_spot.db`
 
 The application rejects partial gate combinations. Testnet and Mainnet flags cannot be mixed. The Mainnet REST host is pinned to `https://api.binance.com`; no host override is accepted.
+
+## Independent Mainnet signal worker and supervisor
+
+The dedicated worker lives in `src/mumin_trader/execution/mainnet_signal_worker.py`. It consumes public Binance Mainnet Spot market data through the fixed public REST host and runs the existing MarketScanner/StrategyEngine filters over closed candles. It does not import or reuse the Continuous Paper worker, Paper execution engine, Paper account, or Paper database.
+
+Default configuration:
+
+- `MAINNET_AUTONOMOUS_EXECUTION_ENABLED=false`
+- `MAINNET_AUTONOMOUS_CONFIRMATION=` (empty)
+- `MAINNET_AUTONOMOUS_BOOT_RESUME_ENABLED=false`
+- `MAINNET_SIGNAL_INTERVAL_SECONDS=60`
+- `MAINNET_SIGNAL_DATABASE_URL=sqlite:///./data/mumin_mainnet_signals.db`
+
+In Shadow mode, no private Mainnet executor is constructed and no orders are sent. Signals, per-candle decisions and audit events are stored in the separate signal ledger. Autonomous mode is a distinct opt-in path: it requires the separate flag, exact confirmation phrase, all Mainnet execution gates, server-only Mainnet credentials, fresh reconciliation before each cycle, and the protected OPOCO entry workflow. It allows no more than one approved entry per cycle. Do not enable it until a sustained Shadow evaluation and independent review have passed.
+
+The Termux runit service `mumin-mainnet-signal-worker` runs the dedicated supervisor. The supervisor uses a process lock, bounded restart backoff, persistent desired RUNNING/STOPPED state and supervisor/worker heartbeats. It is registered in the Termux:Boot startup script. Authenticated controls are available at:
+
+- `GET /api/mainnet/signal-worker/status`
+- `POST /api/mainnet/signal-worker/control` with `{"desired_state":"RUNNING"}` or `{"desired_state":"STOPPED"}`
+
+Shadow mode resumes after a phone/supervisor restart. If autonomous mode is configured, the supervisor forces the desired state to STOPPED after a supervisor restart unless `MAINNET_AUTONOMOUS_BOOT_RESUME_ENABLED=true`. This requires a fresh dashboard start confirmation by default. Android battery management and operating-system process termination still mean that uninterrupted 24/7 availability cannot be guaranteed.
+
+## Chat approvals and audit
+
+A valid chat proposal is persisted for five minutes with a canonical proposal hash. The authenticated submission endpoint atomically consumes the approval; replay, expired approvals and any change to symbol, side, quantity, price, client IDs or protection prices are rejected. Submission success, rejection and unknown outcomes are recorded in the same durable Mainnet database and displayed in the Mainnet dashboard. Unknown outcomes are never automatically retried.
+
+The Android Mainnet order form uses the same Operations Chat proposal/approval path; it must not submit directly without an approval ID.
 
 ## Order controls
 
@@ -60,4 +87,4 @@ If an order result is unknown, do not submit it again. Reconcile the account and
 
 ## Current release boundary
 
-This branch is not yet a production live-trading release. The existing continuous Paper worker is deliberately not connected to Mainnet order submission. A separate validated signal worker and bot execution bridge, chat audit/approval lifecycle, restart supervisor, end-to-end OPOCO lifecycle tests, independent review, Android client integration, and original APK signing-certificate verification remain required. No real Binance order has been submitted by CI or by this branch.
+This branch is not yet a production live-trading release. The independent worker, durable supervisor, approval ledger and mocked OPOCO lifecycle tests are now present, but they have not yet completed final CI/review or a sustained market Shadow evaluation. The signed Release workflow compares the certificate from the configured keystore and new APK with the published v1.4.5 APK baseline; the installed phone app must have come from that release (or its signer must be separately verified). The Release workflow has not been run with the private signing secrets. All Binance exchange tests are mocked/offline. No real Binance account has been accessed and no real Binance order has been submitted by CI or by this branch.
