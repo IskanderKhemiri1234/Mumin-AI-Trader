@@ -108,28 +108,17 @@ class UnifiedDashboardActivity : Activity() {
             text = "تحديث التطبيق"
             setOnClickListener { checkForUpdates() }
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        actions.addView(Button(this).apply {
-            text = "العرض التجريبي المحلي"
-            setOnClickListener { loadLocalDemo() }
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         connectionPanel.addView(actions)
         connectionStatus = TextView(this).apply {
-            text = "الوضع الحالي: عرض تجريبي محلي دون خادم. البيانات اصطناعية وليست من Binance."
+            text = "جارٍ الاتصال تلقائياً بخادم S21 المحلي ودفتر Paper الفعلي…"
             textSize = 11f
             setTextColor(MUTED)
             setPadding(0, dp(6), 0, 0)
         }
         connectionPanel.addView(connectionStatus)
-        connectionPanel.visibility = View.GONE
-        header.addView(Button(this).apply {
-            text = "اتصال بالخادم (اختياري)"
-            setOnClickListener {
-                connectionPanel.visibility =
-                    if (connectionPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-            }
-        }, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ))
+        // The S21 Termux node is the production data source. Keep connection
+        // controls visible and never present synthetic demo data as the default.
+        connectionPanel.visibility = View.VISIBLE
         root.addView(header)
         root.addView(connectionPanel)
 
