@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from urllib.parse import parse_qs
+import sqlite3
 
 import httpx
 import pytest
@@ -102,5 +103,29 @@ async def test_mainnet_executor_and_preflight_use_fixed_binance_host(tmp_path) -
     try:
         assert str(executor._client.base_url) == "https://api.binance.com"
         assert str(executor._validator._client.base_url) == "https://api.binance.com"
+    finally:
+        await executor.close()
+
+
+@pytest.mark.asyncio
+async def test_mainnet_orders_require_reconciliation_younger_than_90_seconds(tmp_path) -> None:
+    settings = mainnet_settings()
+    store = SQLiteOrderStore(str(tmp_path / "mainnet-stale.sqlite3"))
+    store.record_reconciliation([], [], [])
+    with sqlite3.connect(store.database_path) as database:
+        database.execute(
+            "UPDATE spot_reconciliation_snapshots SET created_at=?",
+            ("2000-01-01T00:00:00+00:00",),
+        )
+    executor = BinanceSpotMainnetExecution(
+        settings,
+        store,
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json={"serverTime": 1700000000000})
+        ),
+    )
+    try:
+        with pytest.raises(SpotExecutionError, match="reconciliation is stale"):
+            executor._ensure_recent_reconciliation()
     finally:
         await executor.close()
