@@ -555,16 +555,33 @@ async def mainnet_status(
         }
     _, store = _get_mainnet_service()
     halted, reason = store.is_halted()
+    with sqlite3.connect(store.database_path, timeout=5) as database:
+        latest = database.execute(
+            "SELECT created_at FROM spot_reconciliation_snapshots ORDER BY snapshot_id DESC LIMIT 1"
+        ).fetchone()
+    age_seconds = None
+    if latest:
+        try:
+            reconciled_at = datetime.fromisoformat(str(latest[0]))
+            if reconciled_at.tzinfo is None:
+                reconciled_at = reconciled_at.replace(tzinfo=timezone.utc)
+            age_seconds = max(0, int((datetime.now(timezone.utc) - reconciled_at).total_seconds()))
+        except ValueError:
+            age_seconds = None
+    can_submit = not halted and age_seconds is not None and age_seconds <= 90
+    status_value = "HALTED" if halted else "ENABLED" if can_submit else "STALE"
     return {
         "environment": settings.TRADING_ENV.value,
         "mode": settings.TRADING_MODE.value,
-        "status": "HALTED" if halted else "ENABLED",
+        "status": status_value,
         "execution_enabled": True,
+        "can_submit": can_submit,
         "host": "https://api.binance.com",
         "halted": halted,
         "halt_reason": reason,
+        "last_reconciliation_age_seconds": age_seconds,
         "unresolved_orders": len(store.unresolved_orders()),
-        "available_actions": ["ACCOUNT", "RECONCILE", "LIMIT_ORDER", "CANCEL_ORDER", "EMERGENCY_STOP"],
+        "available_actions": ["ACCOUNT", "RECONCILE", "CANCEL_ORDER", "EMERGENCY_STOP"] + (["LIMIT_ORDER"] if can_submit else []),
     }
 
 
