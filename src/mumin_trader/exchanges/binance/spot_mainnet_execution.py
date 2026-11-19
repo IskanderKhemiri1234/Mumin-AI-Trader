@@ -824,6 +824,41 @@ class BinanceSpotMainnetExecution:
             local_ids = {str(order["client_order_id"]) for order in local_unresolved}
             local_ids.update(self.oco.store.child_client_order_ids())
 
+            # OPOCO order lists are a separate durable state machine. Recover every
+            # possibly-submitted list before accepting a fresh reconciliation snapshot.
+            for local_list in self.opoco.store.list_opoco_unresolved():
+                list_client_id = str(local_list["list_client_order_id"])
+                symbol = str(local_list["symbol"])
+                try:
+                    observed_list = await self.opoco.get_order_list(
+                        symbol=symbol,
+                        list_client_order_id=list_client_id,
+                    )
+                except SpotExecutionError as exc:
+                    self.opoco.store.update(
+                        list_client_id,
+                        state="UNKNOWN",
+                        error=f"Restart reconciliation failed: {str(exc)[:300]}",
+                    )
+                    self.store.halt("OPOCO_RECONCILIATION_UNAVAILABLE")
+                    discrepancies.append(f"OPOCO_RECONCILIATION_UNAVAILABLE:{list_client_id}")
+                    continue
+                if observed_list is None:
+                    self.opoco.store.update(
+                        list_client_id,
+                        state="UNKNOWN",
+                        error="Order list is absent from Binance during restart reconciliation.",
+                    )
+                    self.store.halt("OPOCO_RECONCILIATION_UNAVAILABLE")
+                    discrepancies.append(f"OPOCO_ORDER_LIST_NOT_FOUND:{list_client_id}")
+                    continue
+                recovered_state = self.opoco._state(observed_list)
+                if recovered_state == "UNKNOWN":
+                    self.store.halt("OPOCO_RECONCILIATION_UNAVAILABLE")
+                    discrepancies.append(f"OPOCO_ORDER_LIST_UNKNOWN:{list_client_id}")
+                elif recovered_state == "PARTIAL_FILL_REVIEW":
+                    discrepancies.append(f"OPOCO_PARTIAL_FILL_REVIEW:{list_client_id}")
+
             for local in local_unresolved:
                 client_id = str(local["client_order_id"])
                 observed = await self._query_by_client_id(str(local["symbol"]), client_id)
