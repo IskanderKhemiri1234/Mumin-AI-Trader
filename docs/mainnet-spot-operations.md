@@ -36,10 +36,12 @@ Default configuration:
 - `MAINNET_AUTONOMOUS_EXECUTION_ENABLED=false`
 - `MAINNET_AUTONOMOUS_CONFIRMATION=` (empty)
 - `MAINNET_AUTONOMOUS_BOOT_RESUME_ENABLED=false`
-- `MAINNET_SIGNAL_INTERVAL_SECONDS=60`
+- `MAINNET_SIGNAL_SYMBOLS=BTCUSDT`
+- `MAINNET_SIGNAL_INTERVAL=15m` (entry/indicator timeframe; the 5m frame remains a fast-trend confirmation)
+- `MAINNET_SIGNAL_INTERVAL_SECONDS=60` (poll cadence, not candle timeframe)
 - `MAINNET_SIGNAL_DATABASE_URL=sqlite:///./data/mumin_mainnet_signals.db`
 
-In Shadow mode, no private Mainnet executor is constructed and no orders are sent. Signals, per-candle decisions and audit events are stored in the separate signal ledger. Autonomous mode is a distinct opt-in path: it requires the separate flag, exact confirmation phrase, all Mainnet execution gates, server-only Mainnet credentials, fresh reconciliation before each cycle, and the protected OPOCO entry workflow. It allows no more than one approved entry per cycle. Do not enable it until a sustained Shadow evaluation and independent review have passed.
+In Shadow mode, no private Mainnet executor is constructed and no orders are sent. Signals, per-candle decisions and audit events are stored in the separate signal ledger. Autonomous mode is a distinct opt-in path: it requires the separate flag, exact confirmation phrase, all Mainnet execution gates, server-only Mainnet credentials, fresh reconciliation before each cycle, and the protected OPOCO entry workflow. It allows no more than one approved entry per cycle and durably claims each symbol/candle before the exchange request, preventing a restart or repeated poll from resubmitting the same signal. Quantity is capped by both `MAX_TRADE_ALLOCATION_USD` and the configured per-trade risk ceiling. With the current defaults, 70 USDT capital and a 0.50% risk ceiling imply 0.35 USDT maximum risk, while the separate 5 USDT trade-allocation cap makes the actual 0.50% stop risk smaller. Do not enable it until a sustained Shadow evaluation and independent review have passed.
 
 The Termux runit service `mumin-mainnet-signal-worker` runs the dedicated supervisor. The supervisor uses a process lock, bounded restart backoff, persistent desired RUNNING/STOPPED state and supervisor/worker heartbeats. It is registered in the Termux:Boot startup script. Authenticated controls are available at:
 
