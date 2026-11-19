@@ -467,44 +467,55 @@ class MainnetSignalWorker:
 
         if self.autonomous and approved:
             ranked = sorted(approved, key=lambda item: (-int(item.strategy_score), item.symbol))
-            candidate = self._select_entry_candidate(approved)
-            assert candidate is not None
+            selected = self._select_entry_candidate(approved)
+            assert selected is not None
             if len(ranked) > 1:
                 self.ledger.audit(
                     "MULTI_SIGNAL_PRIORITY_SELECTION", self.actor,
                     {
-                        "selected_symbol": candidate.symbol,
-                        "selected_score": candidate.strategy_score,
+                        "selected_symbol": selected.symbol,
+                        "selected_score": selected.strategy_score,
                         "eligible_symbols": [item.symbol for item in ranked],
-                        "policy": "highest_score_one_entry_per_scan_cycle",
+                        "policy": "highest_score_first_one_entry_per_scan_cycle",
                     },
                 )
-            try:
-                orders = int(await self._submit_protected(candidate, buckets[candidate.symbol]))
-            except SpotOrderOutcomeUnknown as exc:
-                self.ledger.finish_submission(
-                    candidate.symbol, buckets[candidate.symbol], "OUTCOME_UNKNOWN", str(exc),
-                )
-                self.ledger.audit(
-                    "PROTECTED_ENTRY_OUTCOME_UNKNOWN", self.actor,
-                    {"symbol": candidate.symbol, "reason": str(exc)[:500]},
-                )
-            except SpotExecutionError as exc:
-                self.ledger.finish_submission(
-                    candidate.symbol, buckets[candidate.symbol], "SUBMISSION_REJECTED", str(exc),
-                )
-                self.ledger.audit(
-                    "PROTECTED_ENTRY_REJECTED", self.actor,
-                    {"symbol": candidate.symbol, "error_type": type(exc).__name__, "reason": str(exc)[:500]},
-                )
-            except Exception as exc:
-                self.ledger.finish_submission(
-                    candidate.symbol, buckets[candidate.symbol], "OUTCOME_UNKNOWN", str(exc),
-                )
-                self.ledger.audit(
-                    "PROTECTED_ENTRY_OUTCOME_UNKNOWN", self.actor,
-                    {"symbol": candidate.symbol, "error_type": type(exc).__name__, "reason": str(exc)[:500]},
-                )
+            for candidate in ranked:
+                try:
+                    submitted = await self._submit_protected(candidate, buckets[candidate.symbol])
+                    if submitted:
+                        orders = 1
+                        break
+                    self.ledger.audit(
+                        "SIGNAL_ALREADY_CLAIMED_SKIP", self.actor,
+                        {"symbol": candidate.symbol, "candle_bucket": buckets[candidate.symbol]},
+                    )
+                except SpotOrderOutcomeUnknown as exc:
+                    self.ledger.finish_submission(
+                        candidate.symbol, buckets[candidate.symbol], "OUTCOME_UNKNOWN", str(exc),
+                    )
+                    self.ledger.audit(
+                        "PROTECTED_ENTRY_OUTCOME_UNKNOWN", self.actor,
+                        {"symbol": candidate.symbol, "reason": str(exc)[:500]},
+                    )
+                    break
+                except SpotExecutionError as exc:
+                    self.ledger.finish_submission(
+                        candidate.symbol, buckets[candidate.symbol], "SUBMISSION_REJECTED", str(exc),
+                    )
+                    self.ledger.audit(
+                        "PROTECTED_ENTRY_REJECTED", self.actor,
+                        {"symbol": candidate.symbol, "error_type": type(exc).__name__, "reason": str(exc)[:500]},
+                    )
+                    break
+                except Exception as exc:
+                    self.ledger.finish_submission(
+                        candidate.symbol, buckets[candidate.symbol], "OUTCOME_UNKNOWN", str(exc),
+                    )
+                    self.ledger.audit(
+                        "PROTECTED_ENTRY_OUTCOME_UNKNOWN", self.actor,
+                        {"symbol": candidate.symbol, "error_type": type(exc).__name__, "reason": str(exc)[:500]},
+                    )
+                    break
         self.ledger.audit(
             "SCAN_CYCLE_COMPLETED", self.actor,
             {"candidates": len(candidates), "approved": len(approved), "new_records": recorded,
