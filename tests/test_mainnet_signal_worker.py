@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -50,6 +51,29 @@ def test_mainnet_signal_ledger_persists_and_deduplicates_candle_bucket(tmp_path)
         assert db.execute("SELECT COUNT(*) FROM mainnet_signal_events").fetchone()[0] == 1
 
 
+def test_signal_submission_is_claimed_once_per_symbol_and_candle(tmp_path) -> None:
+    ledger = MainnetSignalLedger(tmp_path / "one-attempt.sqlite3")
+    candidate = SimpleNamespace(
+        symbol="BTCUSDT", signal="BUY_CANDIDATE", strategy_score=90,
+        last_price="50000", stop_loss_price="49750", take_profit_price="50625",
+        filter_reasons=(),
+    )
+    bucket = "2026-11-19T10:00:00+00:00"
+    assert ledger.record_candidate(candidate, bucket, "SHADOW_PROPOSAL")
+    assert ledger.claim_submission("BTCUSDT", bucket, "mfirst-order-id")
+    assert not ledger.claim_submission("BTCUSDT", bucket, "msecond-order-id")
+    ledger.attach_order("BTCUSDT", bucket, "mfirst-order-id", "submitted")
+    with ledger._connect() as db:
+        row = db.execute(
+            "SELECT disposition,order_list_client_id FROM mainnet_signal_events WHERE symbol='BTCUSDT' AND candle_bucket=?",
+            (bucket,),
+        ).fetchone()
+    assert row["disposition"] == "ORDER_SUBMITTED"
+    assert row["order_list_client_id"] == "mfirst-order-id"
+    assert not ledger.record_candidate(candidate, bucket, "SHADOW_PROPOSAL")
+
+
+
 @pytest.mark.asyncio
 async def test_mainnet_signal_worker_defaults_to_public_data_shadow_only(tmp_path) -> None:
     worker = MainnetSignalWorker(
@@ -60,6 +84,10 @@ async def test_mainnet_signal_worker_defaults_to_public_data_shadow_only(tmp_pat
     try:
         assert worker.execution is None
         assert worker.order_store is None
+        assert worker.scanner.allowed_symbols == {"BTCUSDT"}
+        assert worker.scanner.interval == "15m"
+        assert worker._bucket(datetime(2026, 11, 19, 10, 14, tzinfo=timezone.utc)) == "2026-11-19T10:00:00+00:00"
+        assert worker._bucket(datetime(2026, 11, 19, 10, 15, tzinfo=timezone.utc)) == "2026-11-19T10:15:00+00:00"
         assert str(worker._market_http.base_url) == "https://api.binance.com"
         assert "X-MBX-APIKEY" not in worker._market_http.headers
     finally:
