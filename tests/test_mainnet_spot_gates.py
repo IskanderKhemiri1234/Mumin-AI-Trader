@@ -118,8 +118,8 @@ async def test_mainnet_preflight_is_pinned_and_only_calls_non_executing_order_te
     assert MAINNET_REST_BASE_URL == "https://api.binance.com"
     assert all(request.url.host == "api.binance.com" for request in requests)
     assert [request.url.path for request in requests] == [
-        "/api/v3/time",
         "/api/v3/exchangeInfo",
+        "/api/v3/time",
         "/api/v3/time",
         "/api/v3/order/test",
     ]
