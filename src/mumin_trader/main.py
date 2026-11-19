@@ -21,6 +21,12 @@ from mumin_trader.exchanges.binance.account_readonly import (
     BinanceReadOnlyAccountError,
     read_binance_spot_account,
 )
+from mumin_trader.exchanges.binance.order_store import SQLiteOrderStore
+from mumin_trader.exchanges.binance.spot_mainnet_execution import (
+    BinanceSpotMainnetExecution,
+    SpotExecutionError,
+    SpotOrderOutcomeUnknown,
+)
 from mumin_trader.execution.command_plane import (
     CommandRejected,
     get_command,
@@ -40,6 +46,23 @@ DEFAULT_PAPER_DB = PROJECT_ROOT / "data" / "mumin_public_paper.db"
 
 
 _market_stream = MarketStreamService()
+_mainnet_executor: BinanceSpotMainnetExecution | None = None
+_mainnet_store: SQLiteOrderStore | None = None
+
+
+def _get_mainnet_service() -> tuple[BinanceSpotMainnetExecution, SQLiteOrderStore]:
+    global _mainnet_executor, _mainnet_store
+    settings = get_settings()
+    if not settings.MAINNET_SPOT_EXECUTION_ENABLED:
+        raise HTTPException(status_code=423, detail="Mainnet Spot execution is locked by server configuration.")
+    if _mainnet_executor is None or _mainnet_store is None:
+        _mainnet_store = SQLiteOrderStore(settings.MAINNET_ORDER_DATABASE_URL)
+        try:
+            _mainnet_executor = BinanceSpotMainnetExecution(settings, _mainnet_store)
+        except Exception:
+            _mainnet_store = None
+            raise
+    return _mainnet_executor, _mainnet_store
 
 
 @asynccontextmanager
@@ -47,6 +70,8 @@ async def app_lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        if _mainnet_executor is not None:
+            await _mainnet_executor.close()
         await _market_stream.close()
 
 
@@ -81,6 +106,20 @@ class PaperOrderCommand(BaseModel):
 
 
 class EmergencyStopRequest(BaseModel):
+    confirmed: bool = False
+
+
+class MainnetLimitOrderCommand(BaseModel):
+    side: Literal["BUY", "SELL"]
+    symbol: str
+    quantity: str
+    price: str
+    client_order_id: str
+    confirmed: bool = False
+
+
+class MainnetCancelOrderRequest(BaseModel):
+    symbol: str
     confirmed: bool = False
 
 
@@ -463,6 +502,180 @@ async def binance_readonly_account(
         return await read_binance_spot_account(api_key, api_secret)
     except BinanceReadOnlyAccountError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from None
+
+
+
+@app.get("/api/mainnet/status")
+async def mainnet_status(
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    settings = get_settings()
+    if not settings.MAINNET_SPOT_EXECUTION_ENABLED:
+        return {
+            "environment": settings.TRADING_ENV.value,
+            "mode": settings.TRADING_MODE.value,
+            "status": "LOCKED",
+            "execution_enabled": False,
+            "host": "https://api.binance.com",
+            "database": "separate_mainnet_spot_ledger",
+            "available_actions": [],
+        }
+    _, store = _get_mainnet_service()
+    halted, reason = store.is_halted()
+    return {
+        "environment": settings.TRADING_ENV.value,
+        "mode": settings.TRADING_MODE.value,
+        "status": "HALTED" if halted else "ENABLED",
+        "execution_enabled": True,
+        "host": "https://api.binance.com",
+        "halted": halted,
+        "halt_reason": reason,
+        "unresolved_orders": len(store.unresolved_orders()),
+        "available_actions": ["ACCOUNT", "RECONCILE", "LIMIT_ORDER", "CANCEL_ORDER", "EMERGENCY_STOP"],
+    }
+
+
+@app.get("/api/mainnet/account")
+async def mainnet_account(
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    executor, _ = _get_mainnet_service()
+    try:
+        account = await executor._account()
+        return {
+            "account_type": account.get("accountType"),
+            "can_trade": account.get("canTrade"),
+            "balances": account.get("balances", []),
+            "update_time": account.get("updateTime"),
+            "host": "https://api.binance.com",
+        }
+    except Exception:
+        raise HTTPException(status_code=502, detail="Binance Mainnet account query failed.") from None
+
+
+@app.post("/api/mainnet/reconcile")
+async def mainnet_reconcile(
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    executor, _ = _get_mainnet_service()
+    try:
+        return await executor.reconcile()
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="Mainnet reconciliation failed; the execution ledger has been halted pending manual review.",
+        ) from None
+
+
+@app.get("/api/mainnet/orders")
+async def mainnet_orders(
+    limit: int = 50,
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    _, store = _get_mainnet_service()
+    database = sqlite3.connect(store.database_path, timeout=5)
+    database.row_factory = sqlite3.Row
+    try:
+        rows = database.execute(
+            "SELECT client_order_id,symbol,side,quantity,price,state,exchange_order_id,executed_quantity,cumulative_quote_quantity,last_error,created_at,updated_at FROM spot_order_intents ORDER BY created_at DESC LIMIT ?",
+            (max(1, min(limit, 200)),),
+        ).fetchall()
+        return {"orders": [dict(row) for row in rows]}
+    finally:
+        database.close()
+
+
+@app.get("/api/mainnet/trades")
+async def mainnet_trades(
+    limit: int = 100,
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    executor, store = _get_mainnet_service()
+    try:
+        await executor.sync_trade_history()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Mainnet trade history could not be reconciled.") from None
+    database = sqlite3.connect(store.database_path, timeout=5)
+    database.row_factory = sqlite3.Row
+    try:
+        rows = database.execute(
+            "SELECT symbol,trade_id,order_id,price,quantity,quote_quantity,commission,commission_asset,commission_quote_value,is_buyer,trade_time_ms FROM spot_trade_fills ORDER BY trade_time_ms DESC LIMIT ?",
+            (max(1, min(limit, 500)),),
+        ).fetchall()
+        return {"trades": [dict(row) for row in rows]}
+    finally:
+        database.close()
+
+
+@app.get("/api/mainnet/pnl")
+async def mainnet_pnl(
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    _, store = _get_mainnet_service()
+    return store.realized_pnl_report(get_settings().QUOTE_ASSET)
+
+
+@app.post("/api/mainnet/orders")
+async def submit_mainnet_limit_order(
+    request: MainnetLimitOrderCommand,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    if not request.confirmed:
+        raise HTTPException(status_code=428, detail="Explicit order confirmation is required.")
+    if not idempotency_key or idempotency_key != request.client_order_id:
+        raise HTTPException(status_code=400, detail="Idempotency-Key must match client_order_id.")
+    executor, _ = _get_mainnet_service()
+    try:
+        result = await executor.submit_limit_order(
+            symbol=request.symbol,
+            side=request.side,
+            quantity=request.quantity,
+            price=request.price,
+            client_order_id=request.client_order_id,
+        )
+        return {"order": result, "execution": "BINANCE_SPOT_MAINNET"}
+    except SpotOrderOutcomeUnknown as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except SpotExecutionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@app.delete("/api/mainnet/orders/{client_order_id}")
+async def cancel_mainnet_order(
+    client_order_id: str,
+    request: MainnetCancelOrderRequest,
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    if not request.confirmed:
+        raise HTTPException(status_code=428, detail="Explicit cancellation confirmation is required.")
+    executor, _ = _get_mainnet_service()
+    try:
+        return await executor.cancel_order(symbol=request.symbol, client_order_id=client_order_id)
+    except SpotOrderOutcomeUnknown as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except SpotExecutionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@app.post("/api/mainnet/emergency-stop")
+async def mainnet_emergency_stop(
+    request: EmergencyStopRequest,
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    if not request.confirmed:
+        raise HTTPException(status_code=428, detail="Explicit emergency-stop confirmation is required.")
+    executor, _ = _get_mainnet_service()
+    return await executor.emergency_stop()
 
 
 @app.get("/health")
