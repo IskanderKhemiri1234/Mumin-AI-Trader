@@ -104,7 +104,7 @@ sv restart mumin-paper-engine
 - The existing Paper engine remains isolated and does not submit Binance orders.
 - The separate Mainnet signal worker reads real Binance public Spot market data and applies the MarketScanner strategy to closed candles. It writes signals and audit events to `data/mumin_mainnet_signals.db`.
 - Mainnet signal worker defaults to `SHADOW_ONLY`; it does not create a private Mainnet executor or submit orders unless `MAINNET_AUTONOMOUS_EXECUTION_ENABLED=true`, the separate exact confirmation phrase is configured, and all independent Mainnet execution gates and credentials are valid. Keep these disabled during Shadow validation.
-- The Mainnet supervisor persists desired RUNNING/STOPPED state in its own SQLite ledger, uses a process lock and bounded restart backoff, and is registered with Termux:Boot. This improves restart recovery but Android cannot guarantee 24/7 uptime.
+- The Mainnet supervisor persists desired RUNNING/STOPPED state in its own SQLite ledger, uses a process lock and bounded restart backoff, and is registered with Termux:Boot. Shadow mode resumes after reboot. If autonomous Mainnet mode is ever explicitly configured, the supervisor forces it to STOPPED after a process/phone restart unless `MAINNET_AUTONOMOUS_BOOT_RESUME_ENABLED=true`; the dashboard must otherwise be used to start it again. Android cannot guarantee 24/7 uptime.
 - Do not set autonomous execution until strategy shadow results, full mocked lifecycle tests, account permissions and independent review are complete.
 - A ChatGPT-like LLM requires a separately selected model provider and possibly paid API usage; this installer does not invent or enable one.
 
