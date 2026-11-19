@@ -886,7 +886,13 @@ async def control_mainnet_signal_worker(
     )
     ledger = MainnetSignalLedger(database)
     ledger.set_desired_state(request.desired_state, "dashboard_authenticated_user")
-    return {"status": "accepted", "desired_state": ledger.desired_state(), "execution_authorized": False}
+    autonomous = os.getenv("MAINNET_AUTONOMOUS_EXECUTION_ENABLED", "").lower() in {"1", "true", "yes", "on"}
+    return {
+        "status": "accepted",
+        "desired_state": ledger.desired_state(),
+        "mode": "AUTONOMOUS_PROTECTED_OPOCO" if autonomous else "SHADOW_ONLY",
+        "autonomous_mode_configured": autonomous,
+    }
 
 
 @app.get("/api/mainnet/approvals")
