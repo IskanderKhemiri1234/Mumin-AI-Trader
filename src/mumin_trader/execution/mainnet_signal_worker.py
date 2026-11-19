@@ -171,8 +171,8 @@ class MainnetSignalLedger:
                        mainnet_signal_events.signal<>excluded.signal
                        OR mainnet_signal_events.score<>excluded.score
                        OR mainnet_signal_events.entry_price<>excluded.entry_price
-                       OR mainnet_signal_events.stop_loss_price<>excluded.stop_loss_price
-                       OR mainnet_signal_events.take_profit_price<>excluded.take_profit_price
+                       OR mainnet_signal_events.stop_loss_price IS NOT excluded.stop_loss_price
+                       OR mainnet_signal_events.take_profit_price IS NOT excluded.take_profit_price
                        OR mainnet_signal_events.filter_reasons_json<>excluded.filter_reasons_json
                        OR mainnet_signal_events.disposition<>excluded.disposition
                      )""",
