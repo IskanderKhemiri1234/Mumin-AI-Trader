@@ -17,6 +17,10 @@ from config.config import get_settings
 from mumin_trader.exchanges.binance.market_stream_service import MarketStreamService, WATCH_SYMBOLS
 from mumin_trader.execution.paper_reconciliation import reconcile_paper_ledger
 from mumin_trader.operations_chat import router as operations_chat_router
+from mumin_trader.exchanges.binance.account_readonly import (
+    BinanceReadOnlyAccountError,
+    read_binance_spot_account,
+)
 from mumin_trader.execution.command_plane import (
     CommandRejected,
     get_command,
@@ -441,6 +445,24 @@ def _read_dashboard_snapshot() -> dict[str, Any]:
         }
     finally:
         connection.close()
+
+
+@app.get("/api/binance/account/read-only")
+async def binance_readonly_account(
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    api_key = os.getenv("BINANCE_ACCOUNT_READONLY_API_KEY", "")
+    api_secret = os.getenv("BINANCE_ACCOUNT_READONLY_API_SECRET", "")
+    if not api_key or not api_secret:
+        raise HTTPException(
+            status_code=409,
+            detail="Binance read-only account credentials are not configured on the S21 server.",
+        )
+    try:
+        return await read_binance_spot_account(api_key, api_secret)
+    except BinanceReadOnlyAccountError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from None
 
 
 @app.get("/health")
