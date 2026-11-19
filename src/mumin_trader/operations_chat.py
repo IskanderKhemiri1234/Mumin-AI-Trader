@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -379,6 +380,80 @@ def read_mainnet_operations_snapshot() -> dict[str, Any]:
         connection.close()
 
 
+def parse_mainnet_order_proposal(message: str, mainnet: dict[str, Any]) -> dict[str, Any] | None:
+    settings = get_settings()
+    if not settings.MAINNET_SPOT_EXECUTION_ENABLED:
+        return None
+    if mainnet.get("status") != "READY" or mainnet.get("halted"):
+        return None
+    parts = message.strip().split()
+    if len(parts) < 3:
+        return None
+    action = parts[0].lstrip("/").upper()
+    symbol = parts[1].upper()
+    if symbol not in settings.watchlist_symbols:
+        return None
+    values: dict[str, str] = {}
+    for part in parts[2:]:
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        values[key.strip().lower()] = value.strip()
+    required = {"qty", "price"}
+    if not required.issubset(values):
+        return None
+    try:
+        quantity = Decimal(values["qty"])
+        price = Decimal(values["price"])
+        if not quantity.is_finite() or not price.is_finite() or quantity <= ZERO or price <= ZERO:
+            return None
+        notional = quantity * price
+        if notional < settings.MIN_TRADE_ALLOCATION_USD or notional > settings.MAX_TRADE_ALLOCATION_USD:
+            return None
+        client_id = "mumin-" + uuid.uuid4().hex[:24]
+        if action in {"BUY", "شراء"}:
+            if not {"tp", "stop", "stop_limit"}.issubset(values):
+                return None
+            take_profit = Decimal(values["tp"])
+            stop = Decimal(values["stop"])
+            stop_limit = Decimal(values["stop_limit"])
+            if not all(value.is_finite() and value > ZERO for value in (take_profit, stop, stop_limit)):
+                return None
+            stop_percent = (price - stop) / price * Decimal("100")
+            target_percent = (take_profit - price) / price * Decimal("100")
+            if abs(stop_percent - Decimal("0.50")) > Decimal("0.02"):
+                return None
+            if abs(target_percent - Decimal("1.25")) > Decimal("0.02"):
+                return None
+            if not stop_limit < stop < price < take_profit:
+                return None
+            return {
+                "type": "protected_buy",
+                "symbol": symbol,
+                "quantity": str(quantity),
+                "working_price": str(price),
+                "take_profit_price": str(take_profit),
+                "stop_price": str(stop),
+                "stop_limit_price": str(stop_limit),
+                "list_client_order_id": client_id,
+                "working_client_order_id": client_id + "-w",
+                "pending_above_client_order_id": client_id + "-tp",
+                "pending_below_client_order_id": client_id + "-sl",
+            }
+        if action == "SELL" or action == "بيع":
+            return {
+                "type": "sell_limit",
+                "side": "SELL",
+                "symbol": symbol,
+                "quantity": str(quantity),
+                "price": str(price),
+                "client_order_id": client_id,
+            }
+    except (InvalidOperation, ValueError):
+        return None
+    return None
+
+
 def _reply(intent: str, language: str, snapshot: dict[str, Any]) -> str:
     ar = language == "ar"
     if intent == "mainnet":
@@ -504,6 +579,39 @@ async def operations_chat(
     intent = classify_intent(message)
     snapshot = read_operations_snapshot(database)
     snapshot["mainnet"] = read_mainnet_operations_snapshot()
+    if intent == "mainnet_order":
+        proposal = parse_mainnet_order_proposal(message, snapshot["mainnet"])
+        if proposal:
+            answer = (
+                "تم تجهيز أمر دون إرساله. راجع الرمز والكمية والسعر ومخارج الحماية ثم اضغط تأكيد التنفيذ مرة واحدة."
+                if language == "ar"
+                else "Order prepared but not submitted. Review symbol, quantity, price and protective exits, then explicitly confirm once."
+            )
+            return {
+                "language": language,
+                "intent": intent,
+                "answer": answer,
+                "read_only": True,
+                "requires_confirmation": True,
+                "proposal": proposal,
+                "external_services_used": False,
+                "snapshot": snapshot,
+            }
+        answer = (
+            "لم أجهز أمراً. تأكد أن Mainnet جاهز وغير موقوف، وأن الصيغة والكمية والسعر ضمن الحدود. BUY يحتاج tp وstop وstop_limit وفق سياسة 0.50% و1.25%."
+            if language == "ar"
+            else "No order was prepared. Ensure Mainnet is READY and not halted, and the syntax and allocation are within limits. BUY requires tp, stop and stop_limit matching the 0.50%/1.25% policy."
+        )
+        return {
+            "language": language,
+            "intent": intent,
+            "answer": answer,
+            "read_only": True,
+            "requires_confirmation": False,
+            "proposal": None,
+            "external_services_used": False,
+            "snapshot": snapshot,
+        }
     return {
         "language": language,
         "intent": intent,
