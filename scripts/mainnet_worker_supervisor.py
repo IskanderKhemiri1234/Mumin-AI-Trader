@@ -55,14 +55,7 @@ class MainnetWorkerSupervisor:
         existing_path = environment.get("PYTHONPATH", "")
         source_path = str(PROJECT_ROOT / "src")
         environment["PYTHONPATH"] = source_path + (os.pathsep + existing_path if existing_path else "")
-        command = [
-            sys.executable,
-            "-m",
-            "mumin_trader.execution.mainnet_signal_worker",
-            "--interval-seconds",
-            str(self.interval_seconds),
-        ]
-        # The module's CLI accepts no arguments; interval is configured through the environment.
+        # The worker reads its interval from the inherited environment.
         environment["MAINNET_SIGNAL_INTERVAL_SECONDS"] = str(self.interval_seconds)
         command = [sys.executable, "-m", "mumin_trader.execution.mainnet_signal_worker"]
         self.child = subprocess.Popen(command, cwd=PROJECT_ROOT, env=environment)
