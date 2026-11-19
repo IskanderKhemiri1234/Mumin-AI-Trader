@@ -284,6 +284,7 @@ jobs:
             --output "$BASELINE_APK"
           "$BUILD_TOOLS/apksigner" verify --verbose "$BASELINE_APK"
           "$BUILD_TOOLS/aapt" dump badging "$BASELINE_APK" | grep -q "package: name='com.mumin.aitrader'"
+          "$BUILD_TOOLS/aapt" dump badging "$BASELINE_APK" | grep -q "versionCode='10' versionName='1.4.5'"
           BASELINE_CERT_SHA256="$("$BUILD_TOOLS/apksigner" verify --print-certs "$BASELINE_APK" | awk -F': ' '/Signer #1 certificate SHA-256 digest/ {print tolower($2); exit}')"
           KEY_CERT_SHA256="$(keytool -exportcert -keystore "$ANDROID_KEYSTORE_PATH" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" | sha256sum | awk '{print tolower($1)}')"
           APK_CERT_SHA256="$("$BUILD_TOOLS/apksigner" verify --print-certs "$APK" | awk -F': ' '/Signer #1 certificate SHA-256 digest/ {print tolower($2); exit}')"
