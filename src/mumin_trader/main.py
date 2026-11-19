@@ -32,6 +32,7 @@ from mumin_trader.execution.mainnet_approval_audit import (
     begin_mainnet_approval,
     finish_mainnet_approval,
     list_mainnet_approval_events,
+    list_mainnet_approvals,
 )
 from mumin_trader.execution.command_plane import (
     CommandRejected,
@@ -814,6 +815,15 @@ async def submit_mainnet_protected_entry(
             get_settings(), request.approval_id, "REJECTED", error=str(exc),
         )
         raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@app.get("/api/mainnet/approvals")
+async def mainnet_approvals(
+    limit: int = 50,
+    x_require_dashboard_password: str | None = Header(default=None, alias="X-Dashboard-Password"),
+) -> dict[str, Any]:
+    _require_dashboard_password(x_require_dashboard_password)
+    return {"approvals": list_mainnet_approvals(get_settings(), limit)}
 
 
 @app.get("/api/mainnet/approvals/{approval_id}/events")
