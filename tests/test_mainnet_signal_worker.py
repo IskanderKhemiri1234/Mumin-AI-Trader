@@ -58,7 +58,7 @@ async def test_mainnet_signal_worker_defaults_to_public_data_shadow_only(tmp_pat
     try:
         assert worker.execution is None
         assert worker.order_store is None
-        assert str(worker._market_http.base_url) == "https://api.binance.com/"
+        assert str(worker._market_http.base_url) == "https://api.binance.com"
         assert "X-MBX-APIKEY" not in worker._market_http.headers
     finally:
         await worker.market.close()
