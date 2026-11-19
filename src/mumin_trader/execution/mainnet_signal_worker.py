@@ -6,6 +6,8 @@ import os
 import signal
 import sqlite3
 import uuid
+
+import httpx
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
@@ -152,8 +154,6 @@ class MainnetSignalWorker:
         ledger_path: Path | None = None,
         autonomous: bool | None = None,
     ) -> None:
-        if settings.TRADING_ENV.value != "MAINNET" or not settings.MAINNET_SPOT_EXECUTION_ENABLED:
-            raise RuntimeError("Mainnet signal worker requires the separately gated Mainnet Spot environment.")
         if interval_seconds < 15:
             raise ValueError("Mainnet signal scan interval cannot be less than 15 seconds.")
         self.settings = settings
@@ -164,8 +164,11 @@ class MainnetSignalWorker:
             _enabled(os.getenv("MAINNET_AUTONOMOUS_EXECUTION_ENABLED"))
             if autonomous is None else autonomous
         )
-        if self.autonomous and os.getenv("MAINNET_AUTONOMOUS_CONFIRMATION", "") != AUTONOMOUS_CONFIRMATION:
-            raise RuntimeError("Autonomous Mainnet execution requires its separate exact confirmation phrase.")
+        if self.autonomous:
+            if settings.TRADING_ENV.value != "MAINNET" or not settings.MAINNET_SPOT_EXECUTION_ENABLED:
+                raise RuntimeError("Autonomous mode requires the separately gated Mainnet Spot environment.")
+            if os.getenv("MAINNET_AUTONOMOUS_CONFIRMATION", "") != AUTONOMOUS_CONFIRMATION:
+                raise RuntimeError("Autonomous Mainnet execution requires its separate exact confirmation phrase.")
         self.actor = f"mainnet-signal-worker-{os.getpid()}"
         self.scanner = MarketScanner(
             allowed_symbols=set(settings.watchlist_symbols).intersection(CORE_SYMBOLS),
@@ -177,10 +180,20 @@ class MainnetSignalWorker:
             max_symbols=8,
             min_expected_move_bps=Decimal("35"),
         )
-        self.market = BinanceSpotRESTClient(settings)
-        database_path = _sqlite_path(settings.MAINNET_ORDER_DATABASE_URL)
-        self.order_store = SQLiteOrderStore(str(database_path))
-        self.execution = BinanceSpotMainnetExecution(settings, self.order_store)
+        # Strategy scanning uses the fixed Binance public Mainnet host, with no API key.
+        # This remains safe in SHADOW mode even while all private execution gates are closed.
+        self._market_http = httpx.AsyncClient(
+            base_url="https://api.binance.com",
+            timeout=httpx.Timeout(10.0),
+            headers={"Accept": "application/json"},
+        )
+        self.market = BinanceSpotRESTClient(settings, client=self._market_http)
+        self.order_store: SQLiteOrderStore | None = None
+        self.execution: BinanceSpotMainnetExecution | None = None
+        if self.autonomous:
+            database_path = _sqlite_path(settings.MAINNET_ORDER_DATABASE_URL)
+            self.order_store = SQLiteOrderStore(str(database_path))
+            self.execution = BinanceSpotMainnetExecution(settings, self.order_store)
         self.stop_requested = False
 
     def request_stop(self, _signum: int, _frame: object) -> None:
@@ -204,6 +217,8 @@ class MainnetSignalWorker:
         return (value / tick).to_integral_value(rounding=ROUND_DOWN) * tick
 
     async def _submit_protected(self, candidate: Any, bucket: str) -> None:
+        if self.execution is None:
+            raise RuntimeError("Execution adapter is unavailable in SHADOW mode.")
         symbol = candidate.symbol
         metadata = await self.execution._exchange_symbol(symbol)
         filters = {
@@ -257,14 +272,17 @@ class MainnetSignalWorker:
         )
 
     async def run_once(self) -> dict[str, Any]:
-        reconciliation = await self.execution.reconcile()
-        halted, halt_reason = self.order_store.is_halted()
-        if halted:
-            self.ledger.audit(
-                "SCAN_BLOCKED_BY_MAINNET_HALT", self.actor,
-                {"reason": halt_reason, "discrepancies": reconciliation.get("discrepancies", [])[:10]},
-            )
-            return {"status": "HALTED", "reason": halt_reason, "signals": 0, "orders": 0}
+        if self.autonomous:
+            if self.execution is None or self.order_store is None:
+                raise RuntimeError("Autonomous execution adapter was not initialized.")
+            reconciliation = await self.execution.reconcile()
+            halted, halt_reason = self.order_store.is_halted()
+            if halted:
+                self.ledger.audit(
+                    "SCAN_BLOCKED_BY_MAINNET_HALT", self.actor,
+                    {"reason": halt_reason, "discrepancies": reconciliation.get("discrepancies", [])[:10]},
+                )
+                return {"status": "HALTED", "reason": halt_reason, "signals": 0, "orders": 0}
 
         candidates = await self.scanner.scan(self.market)
         bucket = self._bucket(datetime.now(timezone.utc))
@@ -339,7 +357,9 @@ class MainnetSignalWorker:
         finally:
             self.ledger.audit("MAINNET_SIGNAL_WORKER_STOPPED", self.actor, {"pid": os.getpid()})
             await self.market.close()
-            await self.execution.close()
+            await self._market_http.aclose()
+            if self.execution is not None:
+                await self.execution.close()
 
 
 async def _main() -> None:
