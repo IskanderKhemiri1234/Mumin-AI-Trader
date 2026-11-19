@@ -278,12 +278,20 @@ jobs:
           BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
           "$BUILD_TOOLS/apksigner" verify --verbose "$APK"
           "$BUILD_TOOLS/aapt" dump badging "$APK" | grep -q "package: name='com.mumin.aitrader'"
+          BASELINE_APK="$RUNNER_TEMP/Mumin-AI-Trader-v1.4.5.apk"
+          curl --fail --location --retry 3 --retry-delay 2 \\
+            "https://github.com/IskanderKhemiri1234/Mumin-AI-Trader/releases/download/v1.4.5/Mumin-AI-Trader.apk" \\
+            --output "$BASELINE_APK"
+          "$BUILD_TOOLS/apksigner" verify --verbose "$BASELINE_APK"
+          "$BUILD_TOOLS/aapt" dump badging "$BASELINE_APK" | grep -q "package: name='com.mumin.aitrader'"
+          BASELINE_CERT_SHA256="$("$BUILD_TOOLS/apksigner" verify --print-certs "$BASELINE_APK" | awk -F': ' '/Signer #1 certificate SHA-256 digest/ {print tolower($2); exit}')"
           KEY_CERT_SHA256="$(keytool -exportcert -keystore "$ANDROID_KEYSTORE_PATH" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" | sha256sum | awk '{print tolower($1)}')"
           APK_CERT_SHA256="$("$BUILD_TOOLS/apksigner" verify --print-certs "$APK" | awk -F': ' '/Signer #1 certificate SHA-256 digest/ {print tolower($2); exit}')"
+          test -n "$BASELINE_CERT_SHA256"
           test -n "$KEY_CERT_SHA256"
           test -n "$APK_CERT_SHA256"
-          if [ "$KEY_CERT_SHA256" != "$APK_CERT_SHA256" ]; then
-            printf "APK signing certificate does not match the pinned original keystore certificate.\\n" >&2
+          if [ "$BASELINE_CERT_SHA256" != "$KEY_CERT_SHA256" ] || [ "$KEY_CERT_SHA256" != "$APK_CERT_SHA256" ]; then
+            printf "Release signer differs from the v1.4.5 baseline or configured keystore.\\n" >&2
             exit 1
           fi
           mkdir -p dist
