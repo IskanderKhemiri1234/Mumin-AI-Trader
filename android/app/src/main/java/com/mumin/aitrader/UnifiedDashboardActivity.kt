@@ -219,27 +219,6 @@ class UnifiedDashboardActivity : Activity() {
     private fun getSavedServerUrl(): String =
         getPreferences(MODE_PRIVATE).getString(SERVER_KEY, "").orEmpty()
 
-    private fun loadLocalDemo() {
-        remoteHost = null
-        remotePort = 443
-        remoteScheme = null
-        webView.visibility = View.VISIBLE
-        connectionStatus.text = "العرض التجريبي المحلي · بيانات اصطناعية فقط · لا اتصال بخادم أو Binance."
-        runCatching {
-            assets.open("dashboard/index.html").bufferedReader(Charsets.UTF_8).use { it.readText() }
-        }.onSuccess { html ->
-            webView.loadDataWithBaseURL(
-                "https://appassets.androidplatform.net/assets/dashboard/index.html",
-                html,
-                "text/html",
-                "UTF-8",
-                null
-            )
-        }.onFailure {
-            connectionStatus.text = "تعذر تحميل لوحة العرض المحلية المضمّنة."
-        }
-    }
-
     private fun verifyServerHealthThenLoad(baseUrl: String) {
         webView.visibility = View.INVISIBLE
         connectionStatus.text = "جارٍ التحقق من صحة خادم S21 وبيئة Paper قبل فتح اللوحة…"
