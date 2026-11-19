@@ -255,15 +255,28 @@ class SQLiteOCOOrderStore:
     def child_client_order_ids(self) -> set[str]:
         with self._connect() as db:
             rows = db.execute(
-                """SELECT working_client_order_id,above_client_order_id,below_client_order_id
+                """SELECT working_client_order_id,above_client_order_id,below_client_order_id,request_json
                    FROM spot_oco_order_lists"""
             ).fetchall()
-        return {
+        result = {
             str(value)
             for row in rows
             for value in (row["working_client_order_id"], row["above_client_order_id"], row["below_client_order_id"])
             if value
         }
+        for row in rows:
+            try:
+                request = json.loads(row["request_json"])
+            except (TypeError, ValueError) as exc:
+                raise SpotExecutionError("Stored OCO/OPOCO request record is corrupted.") from exc
+            for key in (
+                "workingClientOrderId", "pendingAboveClientOrderId", "pendingBelowClientOrderId",
+                "aboveClientOrderId", "belowClientOrderId",
+            ):
+                value = request.get(key)
+                if value:
+                    result.add(str(value))
+        return result
 
 
 class BinanceSpotMainnetOCO:
