@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
 
 from config.config import Settings
+from mumin_trader.exchanges.binance.spot_mainnet_execution import SpotExecutionError
 from mumin_trader.execution.mainnet_signal_worker import (
     MainnetSignalLedger,
     MainnetSignalWorker,
@@ -84,12 +86,12 @@ async def test_mainnet_worker_refuses_strategy_exit_levels_outside_execution_pol
     worker.execution = object()
     candidate = SimpleNamespace(
         symbol="BTCUSDT",
-        last_price=__import__("decimal").Decimal("50000"),
-        stop_loss_price=__import__("decimal").Decimal("49750"),
-        take_profit_price=__import__("decimal").Decimal("51000"),
+        last_price=Decimal("50000"),
+        stop_loss_price=Decimal("49750"),
+        take_profit_price=Decimal("51000"),
     )
     try:
-        with pytest.raises(Exception, match="do not match the protected Mainnet risk policy"):
+        with pytest.raises(SpotExecutionError, match="do not match the protected Mainnet risk policy"):
             await worker._submit_protected(candidate, "2026-11-19T10:00:00+00:00")
     finally:
         await worker.market.close()
