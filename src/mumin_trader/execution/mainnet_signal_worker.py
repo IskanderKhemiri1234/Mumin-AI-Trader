@@ -269,19 +269,14 @@ class MainnetSignalWorker:
     def request_stop(self, _signum: int, _frame: object) -> None:
         self.stop_requested = True
 
-    def _bucket(self, now: datetime) -> str:
-        interval = self.scanner.interval
-        if interval.endswith("m"):
-            minutes = int(interval[:-1])
-        elif interval.endswith("h"):
-            minutes = int(interval[:-1]) * 60
-        else:
-            raise ValueError("Unsupported Mainnet signal candle interval.")
-        if minutes <= 0 or 1440 % minutes != 0:
-            raise ValueError("Mainnet signal interval must divide a UTC day.")
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        slot = ((now.hour * 60 + now.minute) // minutes) * minutes
-        return (start + timedelta(minutes=slot)).isoformat()
+    @staticmethod
+    def _bucket(signal_candle_open_time_ms: int) -> str:
+        if signal_candle_open_time_ms <= 0:
+            raise ValueError("Mainnet signal is missing the last closed candle timestamp.")
+        return datetime.fromtimestamp(
+            signal_candle_open_time_ms / 1000,
+            tz=timezone.utc,
+        ).isoformat()
 
     @staticmethod
     def _floor_step(value: Decimal, step: Decimal) -> Decimal:
