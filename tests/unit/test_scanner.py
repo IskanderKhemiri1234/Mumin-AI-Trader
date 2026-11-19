@@ -59,3 +59,18 @@ def test_rank_prefers_approved_and_then_net_edge():
     )
     ranked = scanner.rank([low_edge, rejected, high_edge])
     assert [item.symbol for item in ranked] == ["ETHUSDT", "BTCUSDT", "BNBUSDT"]
+
+
+def test_closed_ohlcv_retains_timestamp_of_last_closed_candle():
+    candles = [
+        [1000, "10", "12", "9", "11", "3", 1999, "33", 1, "0", "0", "0"],
+        [2000, "11", "13", "10", "12", "4", 2999, "48", 1, "0", "0", "0"],
+        [3000, "12", "99", "1", "90", "100", 3999, "9000", 1, "0", "0", "0"],
+    ]
+    parsed = _closed_ohlcv(candles)
+    assert parsed.last_closed_open_time_ms == 2000
+
+
+def test_scanner_accepts_the_15m_entry_timeframe():
+    scanner = MarketScanner(allowed_symbols={"BTCUSDT"}, interval="15m")
+    assert scanner.interval == "15m"
