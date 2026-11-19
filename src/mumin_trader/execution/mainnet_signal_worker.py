@@ -20,6 +20,7 @@ from mumin_trader.exchanges.binance.rest_client import BinanceSpotRESTClient
 from mumin_trader.exchanges.binance.spot_mainnet_execution import (
     BinanceSpotMainnetExecution,
     SpotExecutionError,
+    SpotOrderOutcomeUnknown,
 )
 from mumin_trader.market_scanner.scanner import MarketScanner
 
