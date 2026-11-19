@@ -7,7 +7,6 @@ from config.config import Settings, TradingEnvironment, TradingMode
 from mumin_trader.exchanges.binance.mainnet_order_preflight import (
     BinanceSpotMainnetOrderPreflight,
     MAINNET_REST_BASE_URL,
-    MainnetPreflightError,
 )
 from mumin_trader.exchanges.binance.spot_mainnet_execution import (
     BinanceSpotMainnetExecution,
