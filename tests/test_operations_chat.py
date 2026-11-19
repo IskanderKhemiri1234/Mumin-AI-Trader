@@ -7,8 +7,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from config.config import MAINNET_CONFIRMATION_PHRASE, Settings
+from mumin_trader import operations_chat
 from mumin_trader.operations_chat import (
     classify_intent,
+    parse_mainnet_order_proposal,
     read_operations_snapshot,
 )
 
@@ -135,3 +138,35 @@ def test_chat_api_requires_shared_dashboard_password(monkeypatch: pytest.MonkeyP
     mainnet_asset = client.get("/mainnet-operations.js")
     assert mainnet_asset.status_code == 200
     assert "/api/mainnet/entries/protected" in mainnet_asset.text
+
+
+def test_chat_prepares_but_does_not_submit_protected_mainnet_orders(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = Settings(
+        _env_file=None,
+        TRADING_ENV="MAINNET",
+        TRADING_MODE="LIVE",
+        ALLOW_MAINNET=True,
+        LIVE_TRADING_ENABLED=True,
+        MAINNET_ORDER_PREFLIGHT_ENABLED=True,
+        MAINNET_SPOT_EXECUTION_ENABLED=True,
+        MAINNET_CONFIRMATION=MAINNET_CONFIRMATION_PHRASE,
+        MAINNET_LEGAL_ELIGIBILITY_CONFIRMED=True,
+        BINANCE_MAINNET_API_KEY="server-key",
+        BINANCE_MAINNET_API_SECRET="server-secret",
+    )
+    monkeypatch.setattr(operations_chat, "get_settings", lambda: settings)
+    snapshot = {"status": "READY", "halted": False}
+
+    command = "BUY BTCUSDT qty=0.0001 price=50000 tp=50625 stop=49750 stop_limit=49740"
+    assert classify_intent(command) == "mainnet_order"
+    proposal = parse_mainnet_order_proposal(command, snapshot)
+    assert proposal is not None
+    assert proposal["type"] == "protected_buy"
+    assert proposal["symbol"] == "BTCUSDT"
+    assert proposal["quantity"] == "0.0001"
+    assert len(proposal["list_client_order_id"]) <= 36
+    assert proposal["stop_price"] == "49750"
+
+    invalid_risk = "BUY BTCUSDT qty=0.0001 price=50000 tp=51000 stop=49750 stop_limit=49740"
+    assert parse_mainnet_order_proposal(invalid_risk, snapshot) is None
+    assert parse_mainnet_order_proposal(command, {"status": "HALTED", "halted": True}) is None
