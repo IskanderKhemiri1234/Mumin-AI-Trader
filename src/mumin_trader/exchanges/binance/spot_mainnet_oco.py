@@ -230,6 +230,28 @@ class SQLiteOCOOrderStore:
             ).fetchone()
             return dict(row) if row else None
 
+    def list_opoco_unresolved(self) -> list[dict[str, Any]]:
+        unresolved_states = {
+            "SUBMITTING", "UNKNOWN", "EXECUTING", "WORKING",
+            "PROTECTION_ARMED", "PARTIAL_FILL_REVIEW", "CANCEL_PENDING", "ALL_DONE",
+        }
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM spot_oco_order_lists ORDER BY updated_at"
+            ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            if item["state"] not in unresolved_states:
+                continue
+            try:
+                request = json.loads(item["request_json"])
+            except (TypeError, ValueError):
+                continue
+            if "workingClientOrderId" in request:
+                result.append(item)
+        return result
+
     def child_client_order_ids(self) -> set[str]:
         with self._connect() as db:
             rows = db.execute(
