@@ -258,14 +258,14 @@ class MainnetSignalWorker:
             if os.getenv("MAINNET_AUTONOMOUS_CONFIRMATION", "") != AUTONOMOUS_CONFIRMATION:
                 raise RuntimeError("Autonomous Mainnet execution requires its separate exact confirmation phrase.")
         self.actor = f"mainnet-signal-worker-{os.getpid()}"
-        requested_symbols = {
-            item.strip().upper()
-            for item in os.getenv("MAINNET_SIGNAL_SYMBOLS", "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,AVAXUSDT,LINKUSDT").split(",")
-            if item.strip()
-        }
-        allowed_symbols = requested_symbols.intersection(settings.watchlist_symbols).intersection(CORE_SYMBOLS)
-        if not allowed_symbols:
-            raise ValueError("Mainnet signal symbols must be in the configured Spot watchlist.")
+        allowed_symbols = set(settings.watchlist_symbols).intersection(CORE_SYMBOLS)
+        required_symbols = set(CORE_SYMBOLS)
+        if allowed_symbols != required_symbols:
+            missing = sorted(required_symbols - allowed_symbols)
+            raise ValueError(
+                "Mainnet signal worker requires the complete eight-symbol Spot watchlist; "
+                f"missing: {','.join(missing)}."
+            )
         entry_interval = os.getenv("MAINNET_SIGNAL_INTERVAL", "15m").strip().lower()
         self.scanner = MarketScanner(
             allowed_symbols=allowed_symbols,
