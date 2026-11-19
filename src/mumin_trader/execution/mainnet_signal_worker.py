@@ -305,6 +305,12 @@ class MainnetSignalWorker:
         raise ValueError("Unsupported Mainnet signal candle interval.")
 
     @staticmethod
+    def _select_entry_candidate(candidates: list[Any]) -> Any | None:
+        if not candidates:
+            return None
+        return min(candidates, key=lambda item: (-int(item.strategy_score), item.symbol))
+
+    @staticmethod
     def _bucket(signal_candle_open_time_ms: int) -> str:
         if signal_candle_open_time_ms <= 0:
             raise ValueError("Mainnet signal is missing the last closed candle timestamp.")
@@ -461,7 +467,8 @@ class MainnetSignalWorker:
 
         if self.autonomous and approved:
             ranked = sorted(approved, key=lambda item: (-int(item.strategy_score), item.symbol))
-            candidate = ranked[0]
+            candidate = self._select_entry_candidate(approved)
+            assert candidate is not None
             if len(ranked) > 1:
                 self.ledger.audit(
                     "MULTI_SIGNAL_PRIORITY_SELECTION", self.actor,
