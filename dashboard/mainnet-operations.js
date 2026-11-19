@@ -66,9 +66,9 @@ function openPage(){document.querySelectorAll(".page").forEach(x=>x.classList.to
 navButton.addEventListener("click",openPage);
 async function load(){if(busy)return;busy=true;$("mainnetRefresh").disabled=true;try{
  const status=await api("/api/mainnet/status");enabled=!!status.execution_enabled;
- $("mainnetState").textContent=status.status||"UNKNOWN";$("mainnetState").className="mainnet-status "+(enabled&&!status.halted?"ok":"bad");
+ $("mainnetState").textContent=status.status||"UNKNOWN";$("mainnetState").className="mainnet-status "+(enabled&&status.can_submit?"ok":"bad");
  $("mainnetStatusDetails").innerHTML=kv("Environment",status.environment||"—")+kv("Mode",status.mode||"—")+kv("Host",status.host||"—")+kv("Unresolved orders",status.unresolved_orders??"—")+kv("Halt reason",status.halt_reason||"—");
- $("mainnetSubmit").disabled=!enabled||!!status.halted;
+ $("mainnetSubmit").disabled=!enabled||!status.can_submit;
  if(!enabled){$("mainnetAccountDetails").innerHTML=kv("الحالة","مقفول من إعدادات الخادم");$("mainnetPnlDetails").innerHTML=kv("التداول الحقيقي","غير مفعّل");$("mainnetBalances").innerHTML="—";$("mainnetOrders").innerHTML="—";$("mainnetTrades").innerHTML="—";setMessage("Mainnet مقفول حالياً. لا يمكن إرسال أي أمر.");return}
  const [account,pnl,orders,trades]=await Promise.all([api("/api/mainnet/account"),api("/api/mainnet/pnl"),api("/api/mainnet/orders?limit=20"),api("/api/mainnet/trades?limit=20")]);
  $("mainnetAccountDetails").innerHTML=kv("Account type",account.account_type)+kv("Spot trading permission",String(account.can_trade));
