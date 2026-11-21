@@ -31,8 +31,8 @@ class PublicMarketSnapshot:
     ask_depth_qty: Decimal
     macro_hourly_closes: tuple[Decimal, ...]
     macro_hourly_close_times_ms: tuple[int, ...]
-    ema_hourly_closes: tuple[Decimal, ...]
-    ema_hourly_close_times_ms: tuple[int, ...]
+    ema_hourly_closes: tuple[Decimal, ...] = ()
+    ema_hourly_close_times_ms: tuple[int, ...] = ()
     source: str = "BINANCE_PUBLIC_MARKET_DATA"
 
 
