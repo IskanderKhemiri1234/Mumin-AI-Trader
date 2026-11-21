@@ -1,0 +1,1957 @@
+{
+  "account": {
+    "cash_usdt": "68.67917643098413820000",
+    "closed_round_trips": 49,
+    "initial_cash_usdt": "70.00",
+    "reconstructed_fees_usdt": "0.48658849",
+    "reconstructed_realized_pnl_usdt": "-1.32082356901586180000",
+    "recorded_fees_usdt": "0.48658849",
+    "recorded_realized_pnl_usdt": "-1.32082356901586180000",
+    "unmatched_open_lots": {}
+  },
+  "accounting_status": "PASS",
+  "issues": [],
+  "limitations": [
+    "Entry reason is joined from the decision record at the BUY fill tick.",
+    "Legacy schema does not persist the exact exit trigger (stop, target, or SELL signal); exit signal context is not asserted as the trigger.",
+    "Fee values are quote-denominated simulated fees; no real exchange commission asset or maker/taker classification exists in this Paper ledger.",
+    "This is a retrospective audit of simulated fills, not a backtest or live execution result."
+  ],
+  "mode": "PAPER_ONLY",
+  "per_symbol": {
+    "ADAUSDT": {
+      "buy_fills": 1,
+      "buy_notional_usdt": "4.90455820411972440000",
+      "closed_round_trip_entry_fees_usdt": "0.00490456",
+      "closed_round_trip_exit_fees_usdt": "0.00489622",
+      "closed_trades": 1,
+      "entry_reason_counts": {
+        "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=0.15380000:sma20=0.15348000:slope=0.00004500": 1
+      },
+      "exit_signal_context_counts": {
+        "HOLD": 1
+      },
+      "exit_trigger_reason_note": "Exact exit trigger is read from exit_reason; NULL on legacy fills is reported as unknown.",
+      "fill_buy_fees_usdt": "0.00490456",
+      "fill_sell_fees_usdt": "0.00489622",
+      "fill_total_fees_usdt": "0.00980078",
+      "gross_pnl_usdt": "-0.00834086726496640000",
+      "losses": 1,
+      "net_pnl_usdt": "-0.01814164726496640000",
+      "profit_factor_net": "0E+20",
+      "sell_fills": 1,
+      "sell_notional_usdt": "4.89621733685475800000",
+      "win_rate_percent": "0",
+      "wins": 0
+    },
+    "AVAXUSDT": {
+      "buy_fills": 1,
+      "buy_notional_usdt": "4.90159396154775600000",
+      "closed_round_trip_entry_fees_usdt": "0.00490159",
+      "closed_round_trip_exit_fees_usdt": "0.00489963",
+      "closed_trades": 1,
+      "entry_reason_counts": {
+        "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=7.00500000:sma20=7.04830000:slope=0.00060000": 1
+      },
+      "exit_signal_context_counts": {
+        "HOLD": 1
+      },
+      "exit_trigger_reason_note": "Exact exit trigger is read from exit_reason; NULL on legacy fills is reported as unknown.",
+      "fill_buy_fees_usdt": "0.00490159",
+      "fill_sell_fees_usdt": "0.00489963",
+      "fill_total_fees_usdt": "0.00980122",
+      "gross_pnl_usdt": "-0.00196024553551200000",
+      "losses": 1,
+      "net_pnl_usdt": "-0.01176146553551200000",
+      "profit_factor_net": "0E+20",
+      "sell_fills": 1,
+      "sell_notional_usdt": "4.89963371601224400000",
+      "win_rate_percent": "0",
+      "wins": 0
+    },
+    "BNBUSDT": {
+      "buy_fills": 8,
+      "buy_notional_usdt": "39.78366514119984000000",
+      "closed_round_trip_entry_fees_usdt": "0.03978365",
+      "closed_round_trip_exit_fees_usdt": "0.03971706",
+      "closed_trades": 8,
+      "entry_reason_counts": {
+        "DECISION_NOT_RECORDED": 6,
+        "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=591.77000000:sma20=592.47750000:slope=0.16550000": 1,
+        "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=592.09000000:sma20=592.31200000:slope=0.14850000": 1
+      },
+      "exit_signal_context_counts": {
+        "DECISION_NOT_RECORDED": 6,
+        "HOLD": 2
+      },
+      "exit_trigger_reason_note": "Exact exit trigger is read from exit_reason; NULL on legacy fills is reported as unknown.",
+      "fill_buy_fees_usdt": "0.03978365",
+      "fill_sell_fees_usdt": "0.03971706",
+      "fill_total_fees_usdt": "0.07950071",
+      "gross_pnl_usdt": "-0.06659701282604000000",
+      "losses": 7,
+      "net_pnl_usdt": "-0.14609772282604000000",
+      "profit_factor_net": "0.08916582327091700037087994288",
+      "sell_fills": 8,
+      "sell_notional_usdt": "39.71706812837380000000",
+      "win_rate_percent": "12.500",
+      "wins": 1
+    },
+    "BTCUSDT": {
+      "buy_fills": 18,
+      "buy_notional_usdt": "89.64643601376234000000",
+      "closed_round_trip_entry_fees_usdt": "0.08964643",
+      "closed_round_trip_exit_fees_usdt": "0.08924773",
+      "closed_trades": 18,
+      "entry_reason_counts": {
+        "DECISION_NOT_RECORDED": 15,
+        "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=63788.74000000:sma20=63185.08400000:slope=41.25300000": 1,
+        "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=64767.27000000:sma20=64630.19850000:slope=-48.96550000": 1,
+        "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=65030.00000000:sma20=64978.69650000:slope=26.25300000": 1
+      },
+      "exit_signal_context_counts": {
+        "DECISION_NOT_RECORDED": 15,
+        "HOLD": 3
+      },
+      "exit_trigger_reason_note": "Exact exit trigger is read from exit_reason; NULL on legacy fills is reported as unknown.",
+      "fill_buy_fees_usdt": "0.08964643",
+      "fill_sell_fees_usdt": "0.08924773",
+      "fill_total_fees_usdt": "0.17889416",
+      "gross_pnl_usdt": "-0.39871206117594000000",
+      "losses": 17,
+      "net_pnl_usdt": "-0.57760622117594000000",
+      "profit_factor_net": "0.02284917636256880244617577331",
+      "sell_fills": 18,
+      "sell_notional_usdt": "89.24772395258640000000",
+      "win_rate_percent": "5.555555555555555555555555556",
+      "wins": 1
+    },
+    "ETHUSDT": {
+      "buy_fills": 16,
+      "buy_notional_usdt": "79.83507178219212000000",
+      "closed_round_trip_entry_fees_usdt": "0.07983506",
+      "closed_round_trip_exit_fees_usdt": "0.07962341",
+      "closed_trades": 16,
+      "entry_reason_counts": {
+        "DECISION_NOT_RECORDED": 15,
+        "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=1815.16000000:sma20=1811.12650000:slope=4.27000000": 1
+      },
+      "exit_signal_context_counts": {
+        "DECISION_NOT_RECORDED": 15,
+        "HOLD": 1
+      },
+      "exit_trigger_reason_note": "Exact exit trigger is read from exit_reason; NULL on legacy fills is reported as unknown.",
+      "fill_buy_fees_usdt": "0.07983506",
+      "fill_sell_fees_usdt": "0.07962341",
+      "fill_total_fees_usdt": "0.15945847",
+      "gross_pnl_usdt": "-0.21167491203914000000",
+      "losses": 13,
+      "net_pnl_usdt": "-0.37113338203914000000",
+      "profit_factor_net": "0.1801702903336312711296668222",
+      "sell_fills": 16,
+      "sell_notional_usdt": "79.62339687015298000000",
+      "win_rate_percent": "18.7500",
+      "wins": 3
+    },
+    "SOLUSDT": {
+      "buy_fills": 3,
+      "buy_notional_usdt": "14.80559028835248000000",
+      "closed_round_trip_entry_fees_usdt": "0.01480559",
+      "closed_round_trip_exit_fees_usdt": "0.01473126",
+      "closed_trades": 3,
+      "entry_reason_counts": {
+        "DECISION_NOT_RECORDED": 1,
+        "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=72.32000000:sma20=71.78250000:slope=0.07900000": 1,
+        "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=74.52000000:sma20=74.13850000:slope=0.05200000": 1
+      },
+      "exit_signal_context_counts": {
+        "HOLD": 3
+      },
+      "exit_trigger_reason_note": "Exact exit trigger is read from exit_reason; NULL on legacy fills is reported as unknown.",
+      "fill_buy_fees_usdt": "0.01480559",
+      "fill_sell_fees_usdt": "0.01473126",
+      "fill_total_fees_usdt": "0.02953685",
+      "gross_pnl_usdt": "-0.07433268484136000000",
+      "losses": 3,
+      "net_pnl_usdt": "-0.10386953484136000000",
+      "profit_factor_net": "0E+20",
+      "sell_fills": 3,
+      "sell_notional_usdt": "14.73125760351112000000",
+      "win_rate_percent": "0",
+      "wins": 0
+    },
+    "XRPUSDT": {
+      "buy_fills": 2,
+      "buy_notional_usdt": "9.83445873722875620000",
+      "closed_round_trip_entry_fees_usdt": "0.00983446",
+      "closed_round_trip_exit_fees_usdt": "0.00976184",
+      "closed_trades": 2,
+      "entry_reason_counts": {
+        "DECISION_NOT_RECORDED": 1,
+        "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=0.95830000:sma20=0.96201500:slope=0.00007500": 1
+      },
+      "exit_signal_context_counts": {
+        "HOLD": 2
+      },
+      "exit_trigger_reason_note": "Exact exit trigger is read from exit_reason; NULL on legacy fills is reported as unknown.",
+      "fill_buy_fees_usdt": "0.00983446",
+      "fill_sell_fees_usdt": "0.00976184",
+      "fill_total_fees_usdt": "0.01959630",
+      "gross_pnl_usdt": "-0.07261729533290340000",
+      "losses": 2,
+      "net_pnl_usdt": "-0.09221359533290340000",
+      "profit_factor_net": "0E+20",
+      "sell_fills": 2,
+      "sell_notional_usdt": "9.76184144189585280000",
+      "win_rate_percent": "0",
+      "wins": 0
+    }
+  },
+  "reconciliation": {
+    "checks": {
+      "all_open_positions_have_marks": true,
+      "cash_matches_fills": true,
+      "equity_identity_matches": true,
+      "fees_match_fills": true,
+      "fills_match_fifo": true,
+      "open_positions_match_fifo": true,
+      "realized_pnl_matches_fifo": true
+    },
+    "equity_from_pnl_identity": "68.67917643098413820000000000",
+    "expected_cash_from_fills": "68.67917643098413820000",
+    "fees_from_fills": "0.48658849",
+    "fifo_realized_pnl": "-1.320823569015861800000000000",
+    "initial_cash": "70.00",
+    "issues": [],
+    "market_data": {},
+    "open_cost_basis_including_entry_fees": "0",
+    "open_market_value": "0",
+    "reconciled_equity": "68.67917643098413820000",
+    "recorded_cash": "68.67917643098413820000",
+    "recorded_fees_paid": "0.48658849",
+    "recorded_realized_pnl": "-1.32082356901586180000",
+    "sell_fifo_matches": [
+      {
+        "fifo_net_pnl": "-0.01561273288672000000000000000",
+        "fill_id": "3",
+        "matched_quantity": "0.00007208",
+        "quantity": "0.00007208",
+        "stored_net_pnl": "-0.01561273288672000000",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "fifo_net_pnl": "0.01430219030710000000000000000",
+        "fill_id": "5",
+        "matched_quantity": "0.00785653",
+        "quantity": "0.00785653",
+        "stored_net_pnl": "0.01430219030710000000",
+        "symbol": "BNBUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.06059174846842000000000000000",
+        "fill_id": "6",
+        "matched_quantity": "0.00255189",
+        "quantity": "0.00255189",
+        "stored_net_pnl": "-0.06059174846842000000",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.008277615365280000000000000000",
+        "fill_id": "9",
+        "matched_quantity": "0.00007252",
+        "quantity": "0.00007252",
+        "stored_net_pnl": "-0.00827761536528000000",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "fifo_net_pnl": "0.004270277167920000000000000001",
+        "fill_id": "10",
+        "matched_quantity": "0.00257522",
+        "quantity": "0.00257522",
+        "stored_net_pnl": "0.00427027716792000000",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.02736513540900000000000000000",
+        "fill_id": "13",
+        "matched_quantity": "0.00258790",
+        "quantity": "0.00258790",
+        "stored_net_pnl": "-0.02736513540900000000",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.03336200325364000000000000000",
+        "fill_id": "14",
+        "matched_quantity": "0.00007303",
+        "quantity": "0.00007303",
+        "stored_net_pnl": "-0.03336200325364000000",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.04504718430680000000000000000",
+        "fill_id": "17",
+        "matched_quantity": "0.00007301",
+        "quantity": "0.00007301",
+        "stored_net_pnl": "-0.04504718430680000000",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.03719619760318000000000000000",
+        "fill_id": "18",
+        "matched_quantity": "0.00258881",
+        "quantity": "0.00258881",
+        "stored_net_pnl": "-0.03719619760318000000",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.01762516344294000000000000000",
+        "fill_id": "21",
+        "matched_quantity": "0.00007311",
+        "quantity": "0.00007311",
+        "stored_net_pnl": "-0.01762516344294000000",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.01263210997390000000000000000",
+        "fill_id": "22",
+        "matched_quantity": "0.00258911",
+        "quantity": "0.00258911",
+        "stored_net_pnl": "-0.01263210997390000000",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.09568157823836000000000000000",
+        "fill_id": "25",
+        "matched_quantity": "0.00007302",
+        "quantity": "0.00007302",
+        "stored_net_pnl": "-0.09568157823836000000",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.1138708723163200000000000000",
+        "fill_id": "26",
+        "matched_quantity": "0.00258509",
+        "quantity": "0.00258509",
+        "stored_net_pnl": "-0.11387087231632000000",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.02030587541050000000000000000",
+        "fill_id": "28",
+        "matched_quantity": "0.00262785",
+        "quantity": "0.00262785",
+        "stored_net_pnl": "-0.02030587541050000000",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.02947526026400000000000000000",
+        "fill_id": "31",
+        "matched_quantity": "0.00261744",
+        "quantity": "0.00261744",
+        "stored_net_pnl": "-0.02947526026400000000",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.02730828572700000000000000000",
+        "fill_id": "33",
+        "matched_quantity": "0.00007415",
+        "quantity": "0.00007415",
+        "stored_net_pnl": "-0.02730828572700000000",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.01657189808218000000000000000",
+        "fill_id": "34",
+        "matched_quantity": "0.00262389",
+        "quantity": "0.00262389",
+        "stored_net_pnl": "-0.01657189808218000000",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.02514280174464000000000000000",
+        "fill_id": "37",
+        "matched_quantity": "0.00007404",
+        "quantity": "0.00007404",
+        "stored_net_pnl": "-0.02514280174464000000",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.03078765017964000000000000000",
+        "fill_id": "38",
+        "matched_quantity": "0.00260729",
+        "quantity": "0.00260729",
+        "stored_net_pnl": "-0.03078765017964000000",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.01397546672882000000000000000",
+        "fill_id": "41",
+        "matched_quantity": "0.00007427",
+        "quantity": "0.00007427",
+        "stored_net_pnl": "-0.01397546672882000000",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.01585784874408000000000000000",
+        "fill_id": "42",
+        "matched_quantity": "0.00807686",
+        "quantity": "0.00807686",
+        "stored_net_pnl": "-0.01585784874408000000",
+        "symbol": "BNBUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.03403404908904000000000000000",
+        "fill_id": "45",
+        "matched_quantity": "0.00007582",
+        "quantity": "0.00007582",
+        "stored_net_pnl": "-0.03403404908904000000",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.04422130811108000000000000000",
+        "fill_id": "46",
+        "matched_quantity": "0.00270986",
+        "quantity": "0.00270986",
+        "stored_net_pnl": "-0.04422130811108000000",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.03765999705612000000000000000",
+        "fill_id": "48",
+        "matched_quantity": "0.00845567",
+        "quantity": "0.00845567",
+        "stored_net_pnl": "-0.03765999705612000000",
+        "symbol": "BNBUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.1315331534250000000000000000",
+        "fill_id": "51",
+        "matched_quantity": "0.00007750",
+        "quantity": "0.00007750",
+        "stored_net_pnl": "-0.13153315342500000000",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.04050927607424000000000000000",
+        "fill_id": "52",
+        "matched_quantity": "0.00865392",
+        "quantity": "0.00865392",
+        "stored_net_pnl": "-0.04050927607424000000",
+        "symbol": "BNBUSDT"
+      },
+      {
+        "fifo_net_pnl": "0.05471845577560000000000000000",
+        "fill_id": "55",
+        "matched_quantity": "0.00277343",
+        "quantity": "0.00277343",
+        "stored_net_pnl": "0.05471845577560000000",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.02738432091680000000000000000",
+        "fill_id": "57",
+        "matched_quantity": "0.00837892",
+        "quantity": "0.00837892",
+        "stored_net_pnl": "-0.02738432091680000000",
+        "symbol": "BNBUSDT"
+      },
+      {
+        "fifo_net_pnl": "0.01350643738562000000000000000",
+        "fill_id": "59",
+        "matched_quantity": "0.00007739",
+        "quantity": "0.00007739",
+        "stored_net_pnl": "0.01350643738562000000",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.02669399913132000000000000000",
+        "fill_id": "60",
+        "matched_quantity": "0.00275254",
+        "quantity": "0.00275254",
+        "stored_net_pnl": "-0.02669399913132000000",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.04855968039292000000000000000",
+        "fill_id": "63",
+        "matched_quantity": "0.00007581",
+        "quantity": "0.00007581",
+        "stored_net_pnl": "-0.04855968039292000000",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.03080773078388000000000000000",
+        "fill_id": "64",
+        "matched_quantity": "0.00272323",
+        "quantity": "0.00272323",
+        "stored_net_pnl": "-0.03080773078388000000",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.003910139704560000000000000000",
+        "fill_id": "67",
+        "matched_quantity": "0.00007628",
+        "quantity": "0.00007628",
+        "stored_net_pnl": "-0.00391013970456000000",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.001034522453100000000000000000",
+        "fill_id": "68",
+        "matched_quantity": "0.00836965",
+        "quantity": "0.00836965",
+        "stored_net_pnl": "-0.00103452245310000000",
+        "symbol": "BNBUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.01829597367872000000000000000",
+        "fill_id": "71",
+        "matched_quantity": "0.00007616",
+        "quantity": "0.00007616",
+        "stored_net_pnl": "-0.01829597367872000000",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.002175911511040000000000000000",
+        "fill_id": "73",
+        "matched_quantity": "0.00272818",
+        "quantity": "0.00272818",
+        "stored_net_pnl": "-0.00217591151104000000",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.07968996411704000000000000000",
+        "fill_id": "75",
+        "matched_quantity": "0.06916906",
+        "quantity": "0.06916906",
+        "stored_net_pnl": "-0.07968996411704000000",
+        "symbol": "SOLUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.07275460072250000000000000000",
+        "fill_id": "76",
+        "matched_quantity": "5.08417850",
+        "quantity": "5.08417850",
+        "stored_net_pnl": "-0.07275460072250000000",
+        "symbol": "XRPUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.03034551540872000000000000000",
+        "fill_id": "78",
+        "matched_quantity": "0.00007566",
+        "quantity": "0.00007566",
+        "stored_net_pnl": "-0.03034551540872000000",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "fifo_net_pnl": "0.02257358226180000000000000000",
+        "fill_id": "80",
+        "matched_quantity": "0.00270415",
+        "quantity": "0.00270415",
+        "stored_net_pnl": "0.02257358226180000000",
+        "symbol": "ETHUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.03208228133080000000000000000",
+        "fill_id": "82",
+        "matched_quantity": "0.00007551",
+        "quantity": "0.00007551",
+        "stored_net_pnl": "-0.03208228133080000000",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.01945899461040340000000000000",
+        "fill_id": "84",
+        "matched_quantity": "5.12526403",
+        "quantity": "5.12526403",
+        "stored_net_pnl": "-0.01945899461040340000",
+        "symbol": "XRPUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.01109946120176000000000000000",
+        "fill_id": "86",
+        "matched_quantity": "0.06783352",
+        "quantity": "0.06783352",
+        "stored_net_pnl": "-0.01109946120176000000",
+        "symbol": "SOLUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.01227175729456000000000000000",
+        "fill_id": "88",
+        "matched_quantity": "0.00828806",
+        "quantity": "0.00828806",
+        "stored_net_pnl": "-0.01227175729456000000",
+        "symbol": "BNBUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.02568219059424000000000000000",
+        "fill_id": "90",
+        "matched_quantity": "0.00828924",
+        "quantity": "0.00828924",
+        "stored_net_pnl": "-0.02568219059424000000",
+        "symbol": "BNBUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.01814164726496640000000000000",
+        "fill_id": "92",
+        "matched_quantity": "31.90356206",
+        "quantity": "31.90356206",
+        "stored_net_pnl": "-0.01814164726496640000",
+        "symbol": "ADAUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.01031903383760000000000000000",
+        "fill_id": "94",
+        "matched_quantity": "0.00007688",
+        "quantity": "0.00007688",
+        "stored_net_pnl": "-0.01031903383760000000",
+        "symbol": "BTCUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.01308010952256000000000000000",
+        "fill_id": "96",
+        "matched_quantity": "0.06589872",
+        "quantity": "0.06589872",
+        "stored_net_pnl": "-0.01308010952256000000",
+        "symbol": "SOLUSDT"
+      },
+      {
+        "fifo_net_pnl": "-0.01176146553551200000000000000",
+        "fill_id": "98",
+        "matched_quantity": "0.69948813",
+        "quantity": "0.69948813",
+        "stored_net_pnl": "-0.01176146553551200000",
+        "symbol": "AVAXUSDT"
+      }
+    ],
+    "status": "PASS",
+    "unrealized_pnl_including_entry_fees": "0"
+  },
+  "round_trips": [
+    {
+      "entry_fees_usdt": "0.00499444",
+      "entry_lots": [
+        {
+          "buy_fill_id": 2,
+          "buy_price": "69290.265282000000",
+          "buy_tick": 6,
+          "buy_time": "2026-11-13T10:26:06.492924+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00007208"
+        }
+      ],
+      "exit_fees_usdt": "0.00498881",
+      "exit_fill_price": "69212.164798000000",
+      "exit_notional_usdt": "4.98881283863984000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.00562948288672000000",
+      "matched_quantity": "0.00007208",
+      "net_pnl_usdt": "-0.01561273288672000000",
+      "recorded_net_pnl_usdt": "-0.01561273288672000000",
+      "sell_fill_id": 3,
+      "sell_tick": 9,
+      "sell_time": "2026-11-13T13:12:39.722006+00:00",
+      "symbol": "BTCUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499500",
+      "entry_lots": [
+        {
+          "buy_fill_id": 1,
+          "buy_price": "635.777130000000",
+          "buy_tick": 5,
+          "buy_time": "2026-11-13T09:27:16.880853+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00785653"
+        }
+      ],
+      "exit_fees_usdt": "0.00501932",
+      "exit_fill_price": "638.872200000000",
+      "exit_notional_usdt": "5.01931860546600000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "0.02431651030710000000",
+      "matched_quantity": "0.00785653",
+      "net_pnl_usdt": "0.01430219030710000000",
+      "recorded_net_pnl_usdt": "0.01430219030710000000",
+      "sell_fill_id": 5,
+      "sell_tick": 12,
+      "sell_time": "2026-11-13T14:37:38.994754+00:00",
+      "symbol": "BNBUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499500",
+      "entry_lots": [
+        {
+          "buy_fill_id": 4,
+          "buy_price": "1957.371396000000",
+          "buy_tick": 9,
+          "buy_time": "2026-11-13T13:12:39.722006+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00255189"
+        }
+      ],
+      "exit_fees_usdt": "0.00494434",
+      "exit_fill_price": "1937.522418000000",
+      "exit_notional_usdt": "4.94434408327002000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.05065240846842000000",
+      "matched_quantity": "0.00255189",
+      "net_pnl_usdt": "-0.06059174846842000000",
+      "recorded_net_pnl_usdt": "-0.06059174846842000000",
+      "sell_fill_id": 6,
+      "sell_tick": 13,
+      "sell_time": "2026-11-13T15:10:37.758966+00:00",
+      "symbol": "ETHUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499464",
+      "entry_lots": [
+        {
+          "buy_fill_id": 7,
+          "buy_price": "68872.591764000000",
+          "buy_tick": 18,
+          "buy_time": "2026-11-13T18:15:04.135151+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00007252"
+        }
+      ],
+      "exit_fees_usdt": "0.00499635",
+      "exit_fill_price": "68896.218000000000",
+      "exit_notional_usdt": "4.99635372936000000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "0.00171337463472000000",
+      "matched_quantity": "0.00007252",
+      "net_pnl_usdt": "-0.00827761536528000000",
+      "recorded_net_pnl_usdt": "-0.00827761536528000000",
+      "sell_fill_id": 9,
+      "sell_tick": 25,
+      "sell_time": "2026-11-13T20:29:18.466713+00:00",
+      "symbol": "BTCUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499499",
+      "entry_lots": [
+        {
+          "buy_fill_id": 8,
+          "buy_price": "1939.637850000000",
+          "buy_tick": 18,
+          "buy_time": "2026-11-13T18:15:04.135151+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00257522"
+        }
+      ],
+      "exit_fees_usdt": "0.00500927",
+      "exit_fill_price": "1945.180886000000",
+      "exit_notional_usdt": "5.00926872124492000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "0.01427453716792000000",
+      "matched_quantity": "0.00257522",
+      "net_pnl_usdt": "0.00427027716792000000",
+      "recorded_net_pnl_usdt": "0.00427027716792000000",
+      "sell_fill_id": 10,
+      "sell_tick": 26,
+      "sell_time": "2026-11-13T20:40:11.092970+00:00",
+      "symbol": "ETHUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499500",
+      "entry_lots": [
+        {
+          "buy_fill_id": 12,
+          "buy_price": "1930.135950000000",
+          "buy_tick": 43,
+          "buy_time": "2026-11-13T21:52:46.192729+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00258790"
+        }
+      ],
+      "exit_fees_usdt": "0.00497761",
+      "exit_fill_price": "1923.415240000000",
+      "exit_notional_usdt": "4.97760629959600000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.01739252540900000000",
+      "matched_quantity": "0.00258790",
+      "net_pnl_usdt": "-0.02736513540900000000",
+      "recorded_net_pnl_usdt": "-0.02736513540900000000",
+      "sell_fill_id": 13,
+      "sell_tick": 44,
+      "sell_time": "2026-11-13T22:11:14.596842+00:00",
+      "symbol": "ETHUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499435",
+      "entry_lots": [
+        {
+          "buy_fill_id": 11,
+          "buy_price": "68387.684802000000",
+          "buy_tick": 43,
+          "buy_time": "2026-11-13T21:52:46.192729+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00007303"
+        }
+      ],
+      "exit_fees_usdt": "0.00497096",
+      "exit_fill_price": "68067.313814000000",
+      "exit_notional_usdt": "4.97095592783642000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.02339669325364000000",
+      "matched_quantity": "0.00007303",
+      "net_pnl_usdt": "-0.03336200325364000000",
+      "recorded_net_pnl_usdt": "-0.03336200325364000000",
+      "sell_fill_id": 14,
+      "sell_tick": 45,
+      "sell_time": "2026-11-13T22:16:01.685341+00:00",
+      "symbol": "BTCUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499440",
+      "entry_lots": [
+        {
+          "buy_fill_id": 15,
+          "buy_price": "68407.078680000000",
+          "buy_tick": 47,
+          "buy_time": "2026-11-13T22:50:31.627919+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00007301"
+        }
+      ],
+      "exit_fees_usdt": "0.00495931",
+      "exit_fill_price": "67926.412000000000",
+      "exit_notional_usdt": "4.95930734012000000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.03509347430680000000",
+      "matched_quantity": "0.00007301",
+      "net_pnl_usdt": "-0.04504718430680000000",
+      "recorded_net_pnl_usdt": "-0.04504718430680000000",
+      "sell_fill_id": 17,
+      "sell_tick": 48,
+      "sell_time": "2026-11-13T23:25:36.666178+00:00",
+      "symbol": "BTCUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499499",
+      "entry_lots": [
+        {
+          "buy_fill_id": 16,
+          "buy_price": "1929.455814000000",
+          "buy_tick": 47,
+          "buy_time": "2026-11-13T22:50:31.627919+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00258881"
+        }
+      ],
+      "exit_fees_usdt": "0.00496776",
+      "exit_fill_price": "1918.936136000000",
+      "exit_notional_usdt": "4.96776105823816000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.02723344760318000000",
+      "matched_quantity": "0.00258881",
+      "net_pnl_usdt": "-0.03719619760318000000",
+      "recorded_net_pnl_usdt": "-0.03719619760318000000",
+      "sell_fill_id": 18,
+      "sell_tick": 48,
+      "sell_time": "2026-11-13T23:25:36.666178+00:00",
+      "symbol": "ETHUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499441",
+      "entry_lots": [
+        {
+          "buy_fill_id": 19,
+          "buy_price": "68313.670002000000",
+          "buy_tick": 49,
+          "buy_time": "2026-11-13T23:58:09.624366+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00007311"
+        }
+      ],
+      "exit_fees_usdt": "0.00498677",
+      "exit_fill_price": "68209.115448000000",
+      "exit_notional_usdt": "4.98676843040328000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.00764398344294000000",
+      "matched_quantity": "0.00007311",
+      "net_pnl_usdt": "-0.01762516344294000000",
+      "recorded_net_pnl_usdt": "-0.01762516344294000000",
+      "sell_fill_id": 21,
+      "sell_tick": 50,
+      "sell_time": "2026-11-14T00:39:52.288766+00:00",
+      "symbol": "BTCUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499500",
+      "entry_lots": [
+        {
+          "buy_fill_id": 20,
+          "buy_price": "1929.235770000000",
+          "buy_tick": 49,
+          "buy_time": "2026-11-13T23:58:09.624366+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00258911"
+        }
+      ],
+      "exit_fees_usdt": "0.00499236",
+      "exit_fill_price": "1928.214280000000",
+      "exit_notional_usdt": "4.99235887449080000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.00264474997390000000",
+      "matched_quantity": "0.00258911",
+      "net_pnl_usdt": "-0.01263210997390000000",
+      "recorded_net_pnl_usdt": "-0.01263210997390000000",
+      "sell_fill_id": 22,
+      "sell_tick": 50,
+      "sell_time": "2026-11-14T00:39:52.288766+00:00",
+      "symbol": "ETHUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499479",
+      "entry_lots": [
+        {
+          "buy_fill_id": 23,
+          "buy_price": "68403.017868000000",
+          "buy_tick": 51,
+          "buy_time": "2026-11-14T01:44:47.063259+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00007302"
+        }
+      ],
+      "exit_fees_usdt": "0.00490901",
+      "exit_fill_price": "67228.301650000000",
+      "exit_notional_usdt": "4.90901058648300000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.08577777823836000000",
+      "matched_quantity": "0.00007302",
+      "net_pnl_usdt": "-0.09568157823836000000",
+      "recorded_net_pnl_usdt": "-0.09568157823836000000",
+      "sell_fill_id": 25,
+      "sell_tick": 52,
+      "sell_time": "2026-11-14T02:29:09.601815+00:00",
+      "symbol": "BTCUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499500",
+      "entry_lots": [
+        {
+          "buy_fill_id": 24,
+          "buy_price": "1932.236370000000",
+          "buy_tick": 51,
+          "buy_time": "2026-11-14T01:44:47.063259+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00258509"
+        }
+      ],
+      "exit_fees_usdt": "0.00489102",
+      "exit_fill_price": "1892.011522000000",
+      "exit_notional_usdt": "4.89102006540698000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.10398485231632000000",
+      "matched_quantity": "0.00258509",
+      "net_pnl_usdt": "-0.11387087231632000000",
+      "recorded_net_pnl_usdt": "-0.11387087231632000000",
+      "sell_fill_id": 26,
+      "sell_tick": 52,
+      "sell_time": "2026-11-14T02:29:09.601815+00:00",
+      "symbol": "ETHUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499499",
+      "entry_lots": [
+        {
+          "buy_fill_id": 27,
+          "buy_price": "1900.790082000000",
+          "buy_tick": 55,
+          "buy_time": "2026-11-14T04:55:23.064992+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00262785"
+        }
+      ],
+      "exit_fees_usdt": "0.00498467",
+      "exit_fill_price": "1896.860552000000",
+      "exit_notional_usdt": "4.98466500157320000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.01032621541050000000",
+      "matched_quantity": "0.00262785",
+      "net_pnl_usdt": "-0.02030587541050000000",
+      "recorded_net_pnl_usdt": "-0.02030587541050000000",
+      "sell_fill_id": 28,
+      "sell_tick": 56,
+      "sell_time": "2026-11-14T05:37:10.848464+00:00",
+      "symbol": "ETHUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499500",
+      "entry_lots": [
+        {
+          "buy_fill_id": 30,
+          "buy_price": "1908.351594000000",
+          "buy_tick": 57,
+          "buy_time": "2026-11-14T06:26:54.773397+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00261744"
+        }
+      ],
+      "exit_fees_usdt": "0.00497549",
+      "exit_fill_price": "1900.899744000000",
+      "exit_notional_usdt": "4.97549102593536000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.01950477026400000000",
+      "matched_quantity": "0.00261744",
+      "net_pnl_usdt": "-0.02947526026400000000",
+      "recorded_net_pnl_usdt": "-0.02947526026400000000",
+      "sell_fill_id": 31,
+      "sell_tick": 58,
+      "sell_time": "2026-11-14T07:32:53.526733+00:00",
+      "symbol": "ETHUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499477",
+      "entry_lots": [
+        {
+          "buy_fill_id": 29,
+          "buy_price": "67360.369380000000",
+          "buy_tick": 57,
+          "buy_time": "2026-11-14T06:26:54.773397+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00007415"
+        }
+      ],
+      "exit_fees_usdt": "0.00497744",
+      "exit_fill_price": "67126.572000000000",
+      "exit_notional_usdt": "4.97743531380000000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.01733607572700000000",
+      "matched_quantity": "0.00007415",
+      "net_pnl_usdt": "-0.02730828572700000000",
+      "recorded_net_pnl_usdt": "-0.02730828572700000000",
+      "sell_fill_id": 33,
+      "sell_tick": 60,
+      "sell_time": "2026-11-14T09:09:47.776722+00:00",
+      "symbol": "BTCUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499500",
+      "entry_lots": [
+        {
+          "buy_fill_id": 32,
+          "buy_price": "1903.660656000000",
+          "buy_tick": 59,
+          "buy_time": "2026-11-14T08:22:13.442453+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00262389"
+        }
+      ],
+      "exit_fees_usdt": "0.00498841",
+      "exit_fill_price": "1901.149694000000",
+      "exit_notional_usdt": "4.98840767058966000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.00658848808218000000",
+      "matched_quantity": "0.00262389",
+      "net_pnl_usdt": "-0.01657189808218000000",
+      "recorded_net_pnl_usdt": "-0.01657189808218000000",
+      "sell_fill_id": 34,
+      "sell_tick": 60,
+      "sell_time": "2026-11-14T09:09:47.776722+00:00",
+      "symbol": "ETHUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499492",
+      "entry_lots": [
+        {
+          "buy_fill_id": 35,
+          "buy_price": "67462.489800000000",
+          "buy_tick": 61,
+          "buy_time": "2026-11-14T09:50:28.455164+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00007404"
+        }
+      ],
+      "exit_fees_usdt": "0.00497975",
+      "exit_fill_price": "67257.625784000000",
+      "exit_notional_usdt": "4.97975461304736000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.01516813174464000000",
+      "matched_quantity": "0.00007404",
+      "net_pnl_usdt": "-0.02514280174464000000",
+      "recorded_net_pnl_usdt": "-0.02514280174464000000",
+      "sell_fill_id": 37,
+      "sell_tick": 62,
+      "sell_time": "2026-11-14T10:25:45.649723+00:00",
+      "symbol": "BTCUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499500",
+      "entry_lots": [
+        {
+          "buy_fill_id": 36,
+          "buy_price": "1915.783080000000",
+          "buy_tick": 61,
+          "buy_time": "2026-11-14T09:50:28.455164+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00260729"
+        }
+      ],
+      "exit_fees_usdt": "0.00497418",
+      "exit_fill_price": "1907.798364000000",
+      "exit_notional_usdt": "4.97418359647356000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.02081847017964000000",
+      "matched_quantity": "0.00260729",
+      "net_pnl_usdt": "-0.03078765017964000000",
+      "recorded_net_pnl_usdt": "-0.03078765017964000000",
+      "sell_fill_id": 38,
+      "sell_tick": 62,
+      "sell_time": "2026-11-14T10:25:45.649723+00:00",
+      "symbol": "ETHUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499483",
+      "entry_lots": [
+        {
+          "buy_fill_id": 40,
+          "buy_price": "67252.277766000000",
+          "buy_tick": 63,
+          "buy_time": "2026-11-14T11:05:58.551586+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00007427"
+        }
+      ],
+      "exit_fees_usdt": "0.00499084",
+      "exit_fill_price": "67198.557600000000",
+      "exit_notional_usdt": "4.99083687295200000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.00398979672882000000",
+      "matched_quantity": "0.00007427",
+      "net_pnl_usdt": "-0.01397546672882000000",
+      "recorded_net_pnl_usdt": "-0.01397546672882000000",
+      "sell_fill_id": 41,
+      "sell_tick": 64,
+      "sell_time": "2026-11-14T11:40:18.576966+00:00",
+      "symbol": "BTCUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499500",
+      "entry_lots": [
+        {
+          "buy_fill_id": 39,
+          "buy_price": "618.433662000000",
+          "buy_tick": 62,
+          "buy_time": "2026-11-14T10:25:45.649723+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00807686"
+        }
+      ],
+      "exit_fees_usdt": "0.00498913",
+      "exit_fill_price": "617.706434000000",
+      "exit_notional_usdt": "4.98912838851724000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.00587371874408000000",
+      "matched_quantity": "0.00807686",
+      "net_pnl_usdt": "-0.01585784874408000000",
+      "recorded_net_pnl_usdt": "-0.01585784874408000000",
+      "sell_fill_id": 42,
+      "sell_tick": 64,
+      "sell_time": "2026-11-14T11:40:18.576966+00:00",
+      "symbol": "BNBUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499466",
+      "entry_lots": [
+        {
+          "buy_fill_id": 44,
+          "buy_price": "65875.182402000000",
+          "buy_tick": 74,
+          "buy_time": "2026-11-14T17:58:42.843840+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00007582"
+        }
+      ],
+      "exit_fees_usdt": "0.00497059",
+      "exit_fill_price": "65557.735830000000",
+      "exit_notional_usdt": "4.97058753063060000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.02406879908904000000",
+      "matched_quantity": "0.00007582",
+      "net_pnl_usdt": "-0.03403404908904000000",
+      "recorded_net_pnl_usdt": "-0.03403404908904000000",
+      "sell_fill_id": 45,
+      "sell_tick": 76,
+      "sell_time": "2026-11-14T19:16:36.672514+00:00",
+      "symbol": "BTCUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499500",
+      "entry_lots": [
+        {
+          "buy_fill_id": 43,
+          "buy_price": "1843.268580000000",
+          "buy_tick": 73,
+          "buy_time": "2026-11-14T17:26:49.577271+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00270986"
+        }
+      ],
+      "exit_fees_usdt": "0.00496073",
+      "exit_fill_price": "1830.623802000000",
+      "exit_notional_usdt": "4.96073421608772000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.03426557811108000000",
+      "matched_quantity": "0.00270986",
+      "net_pnl_usdt": "-0.04422130811108000000",
+      "recorded_net_pnl_usdt": "-0.04422130811108000000",
+      "sell_fill_id": 46,
+      "sell_tick": 76,
+      "sell_time": "2026-11-14T19:16:36.672514+00:00",
+      "symbol": "ETHUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499500",
+      "entry_lots": [
+        {
+          "buy_fill_id": 47,
+          "buy_price": "590.728122000000",
+          "buy_tick": 77,
+          "buy_time": "2026-11-14T19:55:02.206914+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00845567"
+        }
+      ],
+      "exit_fees_usdt": "0.00496730",
+      "exit_fill_price": "587.452486000000",
+      "exit_notional_usdt": "4.96730436229562000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.02769769705612000000",
+      "matched_quantity": "0.00845567",
+      "net_pnl_usdt": "-0.03765999705612000000",
+      "recorded_net_pnl_usdt": "-0.03765999705612000000",
+      "sell_fill_id": 48,
+      "sell_tick": 78,
+      "sell_time": "2026-11-14T20:23:41.810503+00:00",
+      "symbol": "BNBUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499474",
+      "entry_lots": [
+        {
+          "buy_fill_id": 50,
+          "buy_price": "64448.267076000000",
+          "buy_tick": 85,
+          "buy_time": "2026-11-15T00:15:14.131361+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00007750"
+        }
+      ],
+      "exit_fees_usdt": "0.00487308",
+      "exit_fill_price": "62878.391806000000",
+      "exit_notional_usdt": "4.87307536496500000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.12166533342500000000",
+      "matched_quantity": "0.00007750",
+      "net_pnl_usdt": "-0.13153315342500000000",
+      "recorded_net_pnl_usdt": "-0.13153315342500000000",
+      "sell_fill_id": 51,
+      "sell_tick": 86,
+      "sell_time": "2026-11-15T01:20:35.850455+00:00",
+      "symbol": "BTCUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499500",
+      "entry_lots": [
+        {
+          "buy_fill_id": 49,
+          "buy_price": "577.195416000000",
+          "buy_tick": 84,
+          "buy_time": "2026-11-14T23:43:19.536992+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00865392"
+        }
+      ],
+      "exit_fees_usdt": "0.00496445",
+      "exit_fill_price": "573.665244000000",
+      "exit_notional_usdt": "4.96445312835648000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.03054982607424000000",
+      "matched_quantity": "0.00865392",
+      "net_pnl_usdt": "-0.04050927607424000000",
+      "recorded_net_pnl_usdt": "-0.04050927607424000000",
+      "sell_fill_id": 52,
+      "sell_tick": 86,
+      "sell_time": "2026-11-15T01:20:35.850455+00:00",
+      "symbol": "BNBUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499500",
+      "entry_lots": [
+        {
+          "buy_fill_id": 54,
+          "buy_price": "1801.020132000000",
+          "buy_tick": 88,
+          "buy_time": "2026-11-15T02:18:30.679785+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00277343"
+        }
+      ],
+      "exit_fees_usdt": "0.00505978",
+      "exit_fill_price": "1824.375052000000",
+      "exit_notional_usdt": "5.05977650046836000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "0.06477323577560000000",
+      "matched_quantity": "0.00277343",
+      "net_pnl_usdt": "0.05471845577560000000",
+      "recorded_net_pnl_usdt": "0.05471845577560000000",
+      "sell_fill_id": 55,
+      "sell_tick": 89,
+      "sell_time": "2026-11-15T03:05:00.541573+00:00",
+      "symbol": "ETHUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499500",
+      "entry_lots": [
+        {
+          "buy_fill_id": 56,
+          "buy_price": "596.139204000000",
+          "buy_tick": 89,
+          "buy_time": "2026-11-15T03:05:00.541573+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00837892"
+        }
+      ],
+      "exit_fees_usdt": "0.00497759",
+      "exit_fill_price": "594.061164000000",
+      "exit_notional_usdt": "4.97759096826288000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.01741173091680000000",
+      "matched_quantity": "0.00837892",
+      "net_pnl_usdt": "-0.02738432091680000000",
+      "recorded_net_pnl_usdt": "-0.02738432091680000000",
+      "sell_fill_id": 57,
+      "sell_tick": 90,
+      "sell_time": "2026-11-15T03:52:28.049706+00:00",
+      "symbol": "BNBUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499491",
+      "entry_lots": [
+        {
+          "buy_fill_id": 53,
+          "buy_price": "64542.115842000000",
+          "buy_tick": 88,
+          "buy_time": "2026-11-15T02:18:30.679785+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00007739"
+        }
+      ],
+      "exit_fees_usdt": "0.00501843",
+      "exit_fill_price": "64846.028200000000",
+      "exit_notional_usdt": "5.01843412239800000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "0.02351977738562000000",
+      "matched_quantity": "0.00007739",
+      "net_pnl_usdt": "0.01350643738562000000",
+      "recorded_net_pnl_usdt": "0.01350643738562000000",
+      "sell_fill_id": 59,
+      "sell_tick": 92,
+      "sell_time": "2026-11-15T05:30:35.468478+00:00",
+      "symbol": "BTCUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499499",
+      "entry_lots": [
+        {
+          "buy_fill_id": 58,
+          "buy_price": "1814.682864000000",
+          "buy_tick": 91,
+          "buy_time": "2026-11-15T04:39:40.777346+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00275254"
+        }
+      ],
+      "exit_fees_usdt": "0.00497827",
+      "exit_fill_price": "1808.608206000000",
+      "exit_notional_usdt": "4.97826643134324000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.01672073913132000000",
+      "matched_quantity": "0.00275254",
+      "net_pnl_usdt": "-0.02669399913132000000",
+      "recorded_net_pnl_usdt": "-0.02669399913132000000",
+      "sell_fill_id": 60,
+      "sell_tick": 92,
+      "sell_time": "2026-11-15T05:30:35.468478+00:00",
+      "symbol": "ETHUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499448",
+      "entry_lots": [
+        {
+          "buy_fill_id": 61,
+          "buy_price": "65881.523670000000",
+          "buy_tick": 96,
+          "buy_time": "2026-11-15T09:09:54.486797+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00007581"
+        }
+      ],
+      "exit_fees_usdt": "0.00495587",
+      "exit_fill_price": "65372.232938000000",
+      "exit_notional_usdt": "4.95586897902978000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.03860933039292000000",
+      "matched_quantity": "0.00007581",
+      "net_pnl_usdt": "-0.04855968039292000000",
+      "recorded_net_pnl_usdt": "-0.04855968039292000000",
+      "sell_fill_id": 63,
+      "sell_tick": 97,
+      "sell_time": "2026-11-15T09:51:22.795753+00:00",
+      "symbol": "BTCUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499499",
+      "entry_lots": [
+        {
+          "buy_fill_id": 62,
+          "buy_price": "1834.216770000000",
+          "buy_tick": 96,
+          "buy_time": "2026-11-15T09:09:54.486797+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00272323"
+        }
+      ],
+      "exit_fees_usdt": "0.00497416",
+      "exit_fill_price": "1826.564614000000",
+      "exit_notional_usdt": "4.97415555378322000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.02083858078388000000",
+      "matched_quantity": "0.00272323",
+      "net_pnl_usdt": "-0.03080773078388000000",
+      "recorded_net_pnl_usdt": "-0.03080773078388000000",
+      "sell_fill_id": 64,
+      "sell_tick": 97,
+      "sell_time": "2026-11-15T09:51:22.795753+00:00",
+      "symbol": "ETHUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499490",
+      "entry_lots": [
+        {
+          "buy_fill_id": 66,
+          "buy_price": "65481.103602000000",
+          "buy_tick": 98,
+          "buy_time": "2026-11-15T10:28:05.592848+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00007628"
+        }
+      ],
+      "exit_fees_usdt": "0.00500098",
+      "exit_fill_price": "65560.885200000000",
+      "exit_notional_usdt": "5.00098432305600000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "0.00608574029544000000",
+      "matched_quantity": "0.00007628",
+      "net_pnl_usdt": "-0.00391013970456000000",
+      "recorded_net_pnl_usdt": "-0.00391013970456000000",
+      "sell_fill_id": 67,
+      "sell_tick": 99,
+      "sell_time": "2026-11-15T10:45:13.575054+00:00",
+      "symbol": "BTCUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499500",
+      "entry_lots": [
+        {
+          "buy_fill_id": 65,
+          "buy_price": "596.799336000000",
+          "buy_tick": 97,
+          "buy_time": "2026-11-15T09:51:22.795753+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00836965"
+        }
+      ],
+      "exit_fees_usdt": "0.00500397",
+      "exit_fill_price": "597.870402000000",
+      "exit_notional_usdt": "5.00396601009930000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "0.00896444754690000000",
+      "matched_quantity": "0.00836965",
+      "net_pnl_usdt": "-0.00103452245310000000",
+      "recorded_net_pnl_usdt": "-0.00103452245310000000",
+      "sell_fill_id": 68,
+      "sell_tick": 99,
+      "sell_time": "2026-11-15T10:45:13.575054+00:00",
+      "symbol": "BNBUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499488",
+      "entry_lots": [
+        {
+          "buy_fill_id": 69,
+          "buy_price": "65584.074192000000",
+          "buy_tick": 100,
+          "buy_time": "2026-11-15T10:46:15.635250+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00007616"
+        }
+      ],
+      "exit_fees_usdt": "0.00498657",
+      "exit_fill_price": "65474.902400000000",
+      "exit_notional_usdt": "4.98656856678400000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.00831452367872000000",
+      "matched_quantity": "0.00007616",
+      "net_pnl_usdt": "-0.01829597367872000000",
+      "recorded_net_pnl_usdt": "-0.01829597367872000000",
+      "sell_fill_id": 71,
+      "sell_tick": 102,
+      "sell_time": "2026-11-15T11:08:44.789209+00:00",
+      "symbol": "BTCUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499499",
+      "entry_lots": [
+        {
+          "buy_fill_id": 70,
+          "buy_price": "1830.886104000000",
+          "buy_tick": 100,
+          "buy_time": "2026-11-15T10:46:15.635250+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.00272818"
+        }
+      ],
+      "exit_fees_usdt": "0.00500281",
+      "exit_fill_price": "1833.753176000000",
+      "exit_notional_usdt": "5.00280873969968000000",
+      "exit_signal_context": "DECISION_NOT_RECORDED",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "0.00782188848896000000",
+      "matched_quantity": "0.00272818",
+      "net_pnl_usdt": "-0.00217591151104000000",
+      "recorded_net_pnl_usdt": "-0.00217591151104000000",
+      "sell_fill_id": 73,
+      "sell_tick": 109,
+      "sell_time": "2026-11-15T11:43:49.616724+00:00",
+      "symbol": "ETHUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00499500",
+      "entry_lots": [
+        {
+          "buy_fill_id": 72,
+          "buy_price": "72.214440000000",
+          "buy_tick": 102,
+          "buy_time": "2026-11-15T11:08:44.789209+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "0.06916906"
+        }
+      ],
+      "exit_fees_usdt": "0.00492524",
+      "exit_fill_price": "71.205756000000",
+      "exit_notional_usdt": "4.92523520910936000000",
+      "exit_signal_context": "HOLD",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.06976972411704000000",
+      "matched_quantity": "0.06916906",
+      "net_pnl_usdt": "-0.07968996411704000000",
+      "recorded_net_pnl_usdt": "-0.07968996411704000000",
+      "sell_fill_id": 75,
+      "sell_tick": 130,
+      "sell_time": "2026-11-15T14:43:36.394220+00:00",
+      "symbol": "SOLUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00492501",
+      "entry_lots": [
+        {
+          "buy_fill_id": 74,
+          "buy_price": "0.968693700000",
+          "buy_tick": 109,
+          "buy_time": "2026-11-15T11:43:49.616724+00:00",
+          "entry_reason": "DECISION_NOT_RECORDED",
+          "matched_quantity": "5.08417850"
+        }
+      ],
+      "exit_fees_usdt": "0.00486204",
+      "exit_fill_price": "0.956308700000",
+      "exit_notional_usdt": "4.86204413190295000000",
+      "exit_signal_context": "HOLD",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.06296755072250000000",
+      "matched_quantity": "5.08417850",
+      "net_pnl_usdt": "-0.07275460072250000000",
+      "recorded_net_pnl_usdt": "-0.07275460072250000000",
+      "sell_fill_id": 76,
+      "sell_tick": 130,
+      "sell_time": "2026-11-15T14:43:36.394220+00:00",
+      "symbol": "XRPUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00491170",
+      "entry_lots": [
+        {
+          "buy_fill_id": 77,
+          "buy_price": "64918.011006000000",
+          "buy_tick": 139,
+          "buy_time": "2026-11-15T16:30:50.927460+00:00",
+          "entry_reason": "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=64767.27000000:sma20=64630.19850000:slope=-48.96550000",
+          "matched_quantity": "0.00007566"
+        }
+      ],
+      "exit_fees_usdt": "0.00489115",
+      "exit_fill_price": "64646.498114000000",
+      "exit_notional_usdt": "4.89115404730524000000",
+      "exit_signal_context": "HOLD",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.02054266540872000000",
+      "matched_quantity": "0.00007566",
+      "net_pnl_usdt": "-0.03034551540872000000",
+      "recorded_net_pnl_usdt": "-0.03034551540872000000",
+      "sell_fill_id": 78,
+      "sell_tick": 140,
+      "sell_time": "2026-11-15T16:31:51.809957+00:00",
+      "symbol": "BTCUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00491012",
+      "entry_lots": [
+        {
+          "buy_fill_id": 79,
+          "buy_price": "1815.773082000000",
+          "buy_tick": 165,
+          "buy_time": "2026-11-15T21:25:23.340480+00:00",
+          "entry_reason": "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=1815.16000000:sma20=1811.12650000:slope=4.27000000",
+          "matched_quantity": "0.00270415"
+        }
+      ],
+      "exit_fees_usdt": "0.00494255",
+      "exit_fill_price": "1827.764374000000",
+      "exit_notional_usdt": "4.94254903195210000000",
+      "exit_signal_context": "HOLD",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "0.03242625226180000000",
+      "matched_quantity": "0.00270415",
+      "net_pnl_usdt": "0.02257358226180000000",
+      "recorded_net_pnl_usdt": "0.02257358226180000000",
+      "sell_fill_id": 80,
+      "sell_tick": 169,
+      "sell_time": "2026-11-15T22:28:17.444757+00:00",
+      "symbol": "ETHUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00491157",
+      "entry_lots": [
+        {
+          "buy_fill_id": 81,
+          "buy_price": "65045.266452000000",
+          "buy_tick": 179,
+          "buy_time": "2026-11-16T00:33:10.851215+00:00",
+          "entry_reason": "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=65030.00000000:sma20=64978.69650000:slope=26.25300000",
+          "matched_quantity": "0.00007551"
+        }
+      ],
+      "exit_fees_usdt": "0.00488929",
+      "exit_fill_price": "64750.187372000000",
+      "exit_notional_usdt": "4.88928664845972000000",
+      "exit_signal_context": "HOLD",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.02228142133080000000",
+      "matched_quantity": "0.00007551",
+      "net_pnl_usdt": "-0.03208228133080000000",
+      "recorded_net_pnl_usdt": "-0.03208228133080000000",
+      "sell_fill_id": 82,
+      "sell_tick": 181,
+      "sell_time": "2026-11-16T01:58:11.556536+00:00",
+      "symbol": "BTCUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00490945",
+      "entry_lots": [
+        {
+          "buy_fill_id": 83,
+          "buy_price": "0.957891540000",
+          "buy_tick": 190,
+          "buy_time": "2026-11-16T05:10:13.121796+00:00",
+          "entry_reason": "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=0.95830000:sma20=0.96201500:slope=0.00007500",
+          "matched_quantity": "5.12526403"
+        }
+      ],
+      "exit_fees_usdt": "0.00489980",
+      "exit_fill_price": "0.956008760000",
+      "exit_notional_usdt": "4.89979730999290280000",
+      "exit_signal_context": "HOLD",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.00964974461040340000",
+      "matched_quantity": "5.12526403",
+      "net_pnl_usdt": "-0.01945899461040340000",
+      "recorded_net_pnl_usdt": "-0.01945899461040340000",
+      "sell_fill_id": 84,
+      "sell_tick": 191,
+      "sell_time": "2026-11-16T05:11:14.155875+00:00",
+      "symbol": "XRPUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00490806",
+      "entry_lots": [
+        {
+          "buy_fill_id": 85,
+          "buy_price": "72.354468000000",
+          "buy_tick": 263,
+          "buy_time": "2026-11-17T08:39:57.376631+00:00",
+          "entry_reason": "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=72.32000000:sma20=71.78250000:slope=0.07900000",
+          "matched_quantity": "0.06783352"
+        }
+      ],
+      "exit_fees_usdt": "0.00490677",
+      "exit_fill_price": "72.335530000000",
+      "exit_notional_usdt": "4.90677362096560000000",
+      "exit_signal_context": "HOLD",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.00128463120176000000",
+      "matched_quantity": "0.06783352",
+      "net_pnl_usdt": "-0.01109946120176000000",
+      "recorded_net_pnl_usdt": "-0.01109946120176000000",
+      "sell_fill_id": 86,
+      "sell_tick": 264,
+      "sell_time": "2026-11-17T08:40:58.408059+00:00",
+      "symbol": "SOLUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00490726",
+      "entry_lots": [
+        {
+          "buy_fill_id": 87,
+          "buy_price": "592.088394000000",
+          "buy_tick": 288,
+          "buy_time": "2026-11-17T13:48:50.721797+00:00",
+          "entry_reason": "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=592.09000000:sma20=592.31200000:slope=0.14850000",
+          "matched_quantity": "0.00828806"
+        }
+      ],
+      "exit_fees_usdt": "0.00490480",
+      "exit_fill_price": "591.791618000000",
+      "exit_notional_usdt": "4.90480443748108000000",
+      "exit_signal_context": "HOLD",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.00245969729456000000",
+      "matched_quantity": "0.00828806",
+      "net_pnl_usdt": "-0.01227175729456000000",
+      "recorded_net_pnl_usdt": "-0.01227175729456000000",
+      "sell_fill_id": 88,
+      "sell_tick": 292,
+      "sell_time": "2026-11-17T14:27:10.168928+00:00",
+      "symbol": "BNBUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00490639",
+      "entry_lots": [
+        {
+          "buy_fill_id": 89,
+          "buy_price": "591.898356000000",
+          "buy_tick": 295,
+          "buy_time": "2026-11-17T14:58:01.637146+00:00",
+          "entry_reason": "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=591.77000000:sma20=592.47750000:slope=0.16550000",
+          "matched_quantity": "0.00828924"
+        }
+      ],
+      "exit_fees_usdt": "0.00489050",
+      "exit_fill_price": "589.981980000000",
+      "exit_notional_usdt": "4.89050222789520000000",
+      "exit_signal_context": "HOLD",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.01588530059424000000",
+      "matched_quantity": "0.00828924",
+      "net_pnl_usdt": "-0.02568219059424000000",
+      "recorded_net_pnl_usdt": "-0.02568219059424000000",
+      "sell_fill_id": 90,
+      "sell_tick": 298,
+      "sell_time": "2026-11-17T15:17:56.909725+00:00",
+      "symbol": "BNBUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00490456",
+      "entry_lots": [
+        {
+          "buy_fill_id": 91,
+          "buy_price": "0.153730740000",
+          "buy_tick": 355,
+          "buy_time": "2026-11-17T22:00:40.045153+00:00",
+          "entry_reason": "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=0.15380000:sma20=0.15348000:slope=0.00004500",
+          "matched_quantity": "31.90356206"
+        }
+      ],
+      "exit_fees_usdt": "0.00489622",
+      "exit_fill_price": "0.153469300000",
+      "exit_notional_usdt": "4.89621733685475800000",
+      "exit_signal_context": "HOLD",
+      "exit_trigger_reason": "UNKNOWN_LEGACY_RECORD",
+      "gross_pnl_usdt": "-0.00834086726496640000",
+      "matched_quantity": "31.90356206",
+      "net_pnl_usdt": "-0.01814164726496640000",
+      "recorded_net_pnl_usdt": "-0.01814164726496640000",
+      "sell_fill_id": 92,
+      "sell_tick": 356,
+      "sell_time": "2026-11-17T22:01:40.712724+00:00",
+      "symbol": "ADAUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00490304",
+      "entry_lots": [
+        {
+          "buy_fill_id": 93,
+          "buy_price": "63775.262502000000",
+          "buy_tick": 526,
+          "buy_time": "2026-11-19T12:20:29.975604+00:00",
+          "entry_reason": "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=63788.74000000:sma20=63185.08400000:slope=41.25300000",
+          "matched_quantity": "0.00007688"
+        }
+      ],
+      "exit_fees_usdt": "0.00490253",
+      "exit_fill_price": "63768.583732000000",
+      "exit_notional_usdt": "4.90252871731616000000",
+      "exit_signal_context": "HOLD",
+      "exit_trigger_reason": "STOP_LOSS",
+      "gross_pnl_usdt": "-0.00051346383760000000",
+      "matched_quantity": "0.00007688",
+      "net_pnl_usdt": "-0.01031903383760000000",
+      "recorded_net_pnl_usdt": "-0.01031903383760000000",
+      "sell_fill_id": 94,
+      "sell_tick": 527,
+      "sell_time": "2026-11-19T12:21:30.698931+00:00",
+      "symbol": "BTCUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00490253",
+      "entry_lots": [
+        {
+          "buy_fill_id": 95,
+          "buy_price": "74.394876000000",
+          "buy_tick": 536,
+          "buy_time": "2026-11-19T15:32:43.896575+00:00",
+          "entry_reason": "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=74.52000000:sma20=74.13850000:slope=0.05200000",
+          "matched_quantity": "0.06589872"
+        }
+      ],
+      "exit_fees_usdt": "0.00489925",
+      "exit_fill_price": "74.345128000000",
+      "exit_notional_usdt": "4.89924877343616000000",
+      "exit_signal_context": "HOLD",
+      "exit_trigger_reason": "STOP_LOSS",
+      "gross_pnl_usdt": "-0.00327832952256000000",
+      "matched_quantity": "0.06589872",
+      "net_pnl_usdt": "-0.01308010952256000000",
+      "recorded_net_pnl_usdt": "-0.01308010952256000000",
+      "sell_fill_id": 96,
+      "sell_tick": 537,
+      "sell_time": "2026-11-19T15:33:44.642293+00:00",
+      "symbol": "SOLUSDT",
+      "unmatched_quantity": "0E-8"
+    },
+    {
+      "entry_fees_usdt": "0.00490159",
+      "entry_lots": [
+        {
+          "buy_fill_id": 97,
+          "buy_price": "7.007401200000",
+          "buy_tick": 539,
+          "buy_time": "2026-11-19T16:33:37.608689+00:00",
+          "entry_reason": "STRICT_3_OF_3_BUY_CONSENSUS_PASSED|MACRO_TREND_PASS_PRICE_NOT_BELOW_FALLING_SMA20:price=7.00500000:sma20=7.04830000:slope=0.00060000",
+          "matched_quantity": "0.69948813"
+        }
+      ],
+      "exit_fees_usdt": "0.00489963",
+      "exit_fill_price": "7.004598800000",
+      "exit_notional_usdt": "4.89963371601224400000",
+      "exit_signal_context": "HOLD",
+      "exit_trigger_reason": "STOP_LOSS",
+      "gross_pnl_usdt": "-0.00196024553551200000",
+      "matched_quantity": "0.69948813",
+      "net_pnl_usdt": "-0.01176146553551200000",
+      "recorded_net_pnl_usdt": "-0.01176146553551200000",
+      "sell_fill_id": 98,
+      "sell_tick": 540,
+      "sell_time": "2026-11-19T16:34:38.523557+00:00",
+      "symbol": "AVAXUSDT",
+      "unmatched_quantity": "0E-8"
+    }
+  ],
+  "schema_version": 1,
+  "source": "persisted Binance public-market-data Paper ledger"
+}
