@@ -39,6 +39,28 @@ def test_crossover_rejects_invalid_prices():
         calculate_ema([Decimal("10"), Decimal("0"), Decimal("11")], period=2)
 
 
+def test_golden_cross_emits_buy_only_on_crossing_candle():
+    result = evaluate_ema_crossover(
+        [Decimal("100")] * 30 + [Decimal("200")],
+        fast_period=5,
+        slow_period=12,
+    )
+    assert result.signal == "BUY"
+    assert result.fast_previous <= result.slow_previous
+    assert result.fast_current > result.slow_current
+
+
+def test_death_cross_emits_sell_only_on_crossing_candle():
+    result = evaluate_ema_crossover(
+        [Decimal("100")] * 30 + [Decimal("50")],
+        fast_period=5,
+        slow_period=12,
+    )
+    assert result.signal == "SELL"
+    assert result.fast_previous >= result.slow_previous
+    assert result.fast_current < result.slow_current
+
+
 def test_flat_series_has_no_crossover():
     result = evaluate_ema_crossover(
         [Decimal("100")] * 80,
