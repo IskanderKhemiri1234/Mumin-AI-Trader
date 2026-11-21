@@ -16,6 +16,7 @@ from mumin_trader.execution.paper_reconciliation import reconcile_paper_ledger
 from mumin_trader.execution.process_lock import paper_process_lock
 from mumin_trader.strategy_swarm import PaperSwarm, compound_allocation, compoundable_equity
 from mumin_trader.strategy_micro_alpha import PaperMicroAlphaSwarm
+from mumin_trader.ai_engine.ema_crossover import evaluate_ema_crossover
 from mumin_trader.exchanges.binance.public_market_data import (
     ALLOWED_SYMBOLS,
     PublicMarketData,
@@ -39,6 +40,11 @@ STOP_LOSS_PERCENT = Decimal(os.getenv("SIMULATED_STOP_LOSS_PERCENT", "0.50"))
 TAKE_PROFIT_PERCENT = Decimal(os.getenv("SIMULATED_TAKE_PROFIT_PERCENT", "1.25"))
 MAX_SPREAD_BPS = Decimal(os.getenv("MAX_SPREAD_BPS", "8.00"))
 MAX_DAILY_LOSS_PERCENT = Decimal(os.getenv("MAX_DAILY_LOSS_PERCENT", "2.00"))
+PAPER_SIGNAL_STRATEGY = os.getenv("PAPER_SIGNAL_STRATEGY", "legacy").strip().lower()
+if PAPER_SIGNAL_STRATEGY not in {"legacy", "ema_crossover"}:
+    raise RuntimeError("PAPER_SIGNAL_STRATEGY must be legacy or ema_crossover.")
+EMA_FAST_PERIOD = 20
+EMA_SLOW_PERIOD = 50
 MAX_DRAWDOWN_PERCENT = Decimal(os.getenv("MAX_DRAWDOWN_PERCENT", "5.00"))
 
 # These are explicit product-level safety limits for the 70 USDT Paper account.
@@ -97,7 +103,13 @@ class PaperLedgerIntegrityError(RuntimeError):
 class ContinuousPaperBot:
     """Multi-symbol SQLite Paper engine. It never submits exchange orders."""
 
-    def __init__(self, database: str, initial_cash: Decimal = INITIAL_CASH):
+    def __init__(
+        self, database: str, initial_cash: Decimal = INITIAL_CASH,
+        strategy_mode: str = PAPER_SIGNAL_STRATEGY,
+    ):
+        if strategy_mode not in {"legacy", "ema_crossover"}:
+            raise ValueError("strategy_mode must be legacy or ema_crossover.")
+        self.strategy_mode = strategy_mode
         self.database = database
         self.initial_cash = Decimal(initial_cash)
         if database != ":memory:":
@@ -246,6 +258,17 @@ class ContinuousPaperBot:
                 );
                 CREATE INDEX IF NOT EXISTS idx_agent_decisions_symbol_tick
                     ON bot_agent_decisions(symbol, tick);
+                CREATE TABLE IF NOT EXISTS bot_ema_candles (
+                    symbol TEXT NOT NULL,
+                    candle_close_time_ms INTEGER NOT NULL,
+                    close_price TEXT NOT NULL,
+                    PRIMARY KEY(symbol, candle_close_time_ms)
+                );
+                CREATE TABLE IF NOT EXISTS bot_ema_signal_state (
+                    symbol TEXT PRIMARY KEY,
+                    last_candle_close_time_ms INTEGER NOT NULL,
+                    last_signal TEXT NOT NULL
+                );
             """)
             position_columns = {row[1] for row in db.execute("PRAGMA table_info(bot_positions)")}
             for name, default in (("stop_loss_pct", "0.50"), ("take_profit_pct", "1.25")):
@@ -451,7 +474,7 @@ class ContinuousPaperBot:
         quotes: dict[str, tuple[Decimal, Decimal]] | None = None,
         candle_close_times: dict[str, int] | None = None,
         received_at_ms: int | None = None,
-        market_features: dict[str, dict[str, Decimal]] | None = None,
+        market_features: dict[str, dict[str, Any]] | None = None,
         allow_new_entries: bool = True,
         event_time: datetime | None = None,
     ) -> TickResult:
@@ -537,6 +560,22 @@ class ContinuousPaperBot:
                      macro_hourly_close_times_json),
                 )
 
+            if self.strategy_mode == "ema_crossover" and source == PUBLIC_SOURCE:
+                for ema_symbol, feature in market_features.items():
+                    ema_closes = feature.get("ema_hourly_closes", ())
+                    ema_times = feature.get("ema_hourly_close_times_ms", ())
+                    if len(ema_closes) != len(ema_times):
+                        raise ValueError(f"EMA candle closes/timestamps mismatch for {ema_symbol}.")
+                    for close_time, close_price in zip(ema_times, ema_closes):
+                        close_value = Decimal(close_price)
+                        if not close_value.is_finite() or close_value <= 0:
+                            raise ValueError(f"Invalid EMA close for {ema_symbol}.")
+                        db.execute(
+                            """INSERT INTO bot_ema_candles(symbol,candle_close_time_ms,close_price)
+                               VALUES (?,?,?) ON CONFLICT(symbol,candle_close_time_ms)
+                               DO UPDATE SET close_price=excluded.close_price""",
+                            (ema_symbol, int(close_time), str(close_value)),
+                        )
             latest_prices = self._latest_prices(db, source)
             latest_prices.update(normalized)
             if account["trading_day"] != now.date().isoformat():
@@ -599,7 +638,52 @@ class ContinuousPaperBot:
                 bid, ask = quotes.get(symbol, (price, price))
                 dynamic_stop, dynamic_target = STOP_LOSS_PERCENT, TAKE_PROFIT_PERCENT
                 agent_details = None
-                if source == PUBLIC_SOURCE:
+                if self.strategy_mode == "ema_crossover":
+                    spread_midpoint = (bid + ask) / Decimal("2")
+                    spread_bps = (
+                        (ask - bid) / spread_midpoint * Decimal("10000")
+                        if spread_midpoint > 0 else Decimal("Infinity")
+                    )
+                    liquidity_ok = (
+                        bid > 0 and ask >= bid and spread_bps <= MAX_SPREAD_BPS
+                    )
+                    signal_name = "HOLD"
+                    if source == PUBLIC_SOURCE and liquidity_ok:
+                        latest_ema_candle = db.execute(
+                            "SELECT MAX(candle_close_time_ms) FROM bot_ema_candles WHERE symbol=?",
+                            (symbol,),
+                        ).fetchone()[0]
+                        previous_state = db.execute(
+                            "SELECT last_candle_close_time_ms FROM bot_ema_signal_state WHERE symbol=?",
+                            (symbol,),
+                        ).fetchone()
+                        if latest_ema_candle is not None and (
+                            previous_state is None
+                            or int(previous_state[0]) != int(latest_ema_candle)
+                        ):
+                            ema_rows = db.execute(
+                                """SELECT close_price FROM bot_ema_candles WHERE symbol=?
+                                   ORDER BY candle_close_time_ms DESC LIMIT ?""",
+                                (symbol, EMA_SLOW_PERIOD + 1),
+                            ).fetchall()
+                            ema_closes = [Decimal(row[0]) for row in reversed(ema_rows)]
+                            if len(ema_closes) >= EMA_SLOW_PERIOD + 1:
+                                signal_name = evaluate_ema_crossover(
+                                    ema_closes,
+                                    fast_period=EMA_FAST_PERIOD,
+                                    slow_period=EMA_SLOW_PERIOD,
+                                ).signal
+                            db.execute(
+                                """INSERT INTO bot_ema_signal_state
+                                   (symbol,last_candle_close_time_ms,last_signal) VALUES (?,?,?)
+                                   ON CONFLICT(symbol) DO UPDATE SET
+                                   last_candle_close_time_ms=excluded.last_candle_close_time_ms,
+                                   last_signal=excluded.last_signal""",
+                                (symbol, int(latest_ema_candle), signal_name),
+                            )
+                    momentum_vote = "EMA_CROSSOVER"
+                    dynamic_stop, dynamic_target = STOP_LOSS_PERCENT, TAKE_PROFIT_PERCENT
+                elif source == PUBLIC_SOURCE:
                     agent_details = self.micro_alpha.evaluate_detailed(
                         closes=[Decimal(row["price"]) for row in ordered_history],
                         highs=[Decimal(row["candle_high"]) for row in ordered_history],
@@ -963,6 +1047,8 @@ async def _run_bot_unlocked(
                         "ask_depth_qty": item.ask_depth_qty,
                         "macro_hourly_closes": item.macro_hourly_closes,
                         "macro_hourly_close_times_ms": item.macro_hourly_close_times_ms,
+                        "ema_hourly_closes": item.ema_hourly_closes,
+                        "ema_hourly_close_times_ms": item.ema_hourly_close_times_ms,
                     }
                     for symbol, item in snapshots.items()
                 }
