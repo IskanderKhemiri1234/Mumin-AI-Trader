@@ -31,6 +31,8 @@ class PublicMarketSnapshot:
     ask_depth_qty: Decimal
     macro_hourly_closes: tuple[Decimal, ...]
     macro_hourly_close_times_ms: tuple[int, ...]
+    ema_hourly_closes: tuple[Decimal, ...]
+    ema_hourly_close_times_ms: tuple[int, ...]
     source: str = "BINANCE_PUBLIC_MARKET_DATA"
 
 
@@ -62,7 +64,7 @@ class PublicMarketData:
         book, candles, hourly_candles, depth, server = await asyncio.gather(
             self._get("/api/v3/ticker/bookTicker", {"symbol": symbol}),
             self._get("/api/v3/klines", {"symbol": symbol, "interval": "1m", "limit": 30}),
-            self._get("/api/v3/klines", {"symbol": symbol, "interval": "1h", "limit": 22}),
+            self._get("/api/v3/klines", {"symbol": symbol, "interval": "1h", "limit": 52}),
             self._get("/api/v3/depth", {"symbol": symbol, "limit": 20}),
             self._get("/api/v3/time", {}),
         )
@@ -89,8 +91,8 @@ class PublicMarketData:
             row for row in hourly_candles
             if len(row) > 6 and int(row[6]) < received_at_ms
         ]
-        if len(closed_hourly) < 21:
-            raise ValueError(f"Insufficient fully closed hourly candles for macro trend: {symbol}")
+        if len(closed_hourly) < 51:
+            raise ValueError(f"Insufficient fully closed hourly candles for EMA and macro trend: {symbol}")
         latest_hourly_close_ms = int(closed_hourly[-1][6])
         if received_at_ms - latest_hourly_close_ms > 7_200_000:
             raise ValueError(f"Hourly macro-trend data is stale for {symbol}")
@@ -118,6 +120,8 @@ class PublicMarketData:
             ask_depth_qty=ask_depth_qty,
             macro_hourly_closes=macro_hourly_closes,
             macro_hourly_close_times_ms=tuple(int(row[6]) for row in closed_hourly[-21:]),
+            ema_hourly_closes=tuple(Decimal(str(row[4])) for row in closed_hourly[-51:]),
+            ema_hourly_close_times_ms=tuple(int(row[6]) for row in closed_hourly[-51:]),
         )
 
     async def _snapshot_with_retry(
